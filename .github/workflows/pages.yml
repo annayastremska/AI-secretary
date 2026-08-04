@@ -5,9 +5,10 @@
 # the audience the repo already has. No separate auth, no second access model.
 #
 # One-time enablement per stamped repo (a practitioner, never an agent):
-#   gh api -X POST  "repos/$ORG/$REPO/pages" -f build_type=workflow
-#   gh api -X PATCH "repos/$ORG/$REPO/pages" -f visibility=private
-# (UI path: Settings → Pages → Source: GitHub Actions → Visibility: Private.)
+#   gh api -X POST "repos/$ORG/$REPO/pages" -f build_type=workflow
+#   gh api -X PUT  "repos/$ORG/$REPO/pages" -F public=false
+# (UI path: Settings → Pages → Source: GitHub Actions → Visibility: Private.
+# The API reports privacy as public=false; visibility may read null.)
 #
 # The deploy job FAILS CLOSED unless visibility is already "private" — a flip to
 # public can never ride in on a routine docs deploy.
@@ -60,10 +61,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          vis=$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq .visibility 2>/dev/null) || {
+          cfg=$(gh api "repos/${GITHUB_REPOSITORY}/pages" 2>/dev/null) || {
             echo "::error::Pages is not enabled on this repo — run the two one-time commands in this workflow's header (practitioner task)"; exit 1; }
-          if [ "$vis" != "private" ]; then
-            echo "::error::Pages visibility is '$vis', not 'private' — refusing to publish. Fix: gh api -X PATCH repos/${GITHUB_REPOSITORY}/pages -f visibility=private"; exit 1
+          pub=$(jq -r '.public' <<<"$cfg"); vis=$(jq -r '.visibility // empty' <<<"$cfg")
+          if [ "$pub" = "false" ] || [ "$vis" = "private" ]; then
+            echo "Pages access is repo-gated (public=$pub, visibility=${vis:-null}) — deploying"
+          else
+            echo "::error::Pages is NOT private (public=$pub, visibility=${vis:-null}) — refusing to publish. Fix: gh api -X PUT repos/${GITHUB_REPOSITORY}/pages -F public=false"; exit 1
           fi
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
