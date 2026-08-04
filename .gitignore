@@ -1,0 +1,18 @@
+# secrets & local env — never in the repo
+.env
+.env.*
+*.pem
+*.key
+
+# junk
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+venv/
+dist/
+build/
+
+# NOTE: agent-sessions/**/*.jsonl is intentionally NOT ignored — exported session
+# logs are part of the course contract. Scrub secrets before committing them.

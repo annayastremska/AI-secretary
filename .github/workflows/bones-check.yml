@@ -1,0 +1,31 @@
+# bones-check: is the skeleton intact, are session logs paired with summaries,
+# is anything credential-shaped about to land in history? (gate G3)
+name: bones-check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # full history so the PR-range credential scan can actually run —
+          # without it the history scan silently degrades to "tree only"
+          fetch-depth: 0
+      - name: Check the bones
+        run: bash .github/scripts/bones-check.sh
+
+  # the gate audits itself: the council's game-day negative tests, permanent.
+  # Every bypass the red team found must KEEP failing — forever.
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: bones-check selftest
+        run: bash .github/scripts/bones-check.test.sh
