@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────
+# ГОЛОВНЕ: реальні документи замовника в git не потрапляють.
+# Це правило проєкту, не зручність. Не послаблювати без Дениса.
+# ─────────────────────────────────────────────────────────────
+
+# Реальні документи — тільки локально, ніколи в git
+data-private/
+data-real/
+*.real
+*.real.*
+
+# Скани й фото документів. Синтетичні зразки — виняток нижче
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+*.heic
+*.docx
+*.doc
+*.xlsx
+*.xls
+
+# Виняток: синтетика і схеми, які свідомо тримаємо в репо
+!eval/synthetic/**
+!docs/**/*.png
+!docs/**/*.svg
+
+# Дампи бази — можуть містити витягнуті реальні дані.
+# Схема (DDL) у git потрібна, тому *.sql цілком не блокуємо
+dumps/
+*.dump
+backup*.sql
+*_dump.sql
+*.sqlite
+*.sqlite3
+*.db
+
+# Секрети
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Моделі й ваги — важке, в git не тягнемо
+*.gguf
+*.safetensors
+*.bin
+models/
+
+# Службове
+.DS_Store
+.idea/
+.vscode/
+*.log
