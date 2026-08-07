@@ -1,0 +1,12 @@
+# Jekyll config for the repo-gated Pages site (.github/workflows/pages.yml).
+# Excluded paths never reach the site: the site is for the handbook and reports,
+# not a mirror of the working tree — src/ and agent-sessions/ stay repo-only.
+title: Team docs
+theme: jekyll-theme-primer
+exclude:
+  - src
+  - agent-sessions
+  - node_modules
+  - vendor
+  - Gemfile
+  - Gemfile.lock

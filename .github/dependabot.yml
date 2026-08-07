@@ -1,0 +1,14 @@
+# Dependabot keeps the workflow actions current — stamped team repos inherit this
+# file from the template. Its PRs pass through the same gates as everything else
+# (bones-check must stay green; a human merges).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]

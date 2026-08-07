@@ -1,0 +1,74 @@
+# Repo-gated docs site: renders this repo's markdown (README, docs/, reports/) as a
+# PRIVATE GitHub Pages site — the natural home for the final deliverable's user
+# handbook. On Enterprise, "Pages Visibility: Private" means only people with read
+# access to this repo can open the site — your team and the practitioners, exactly
+# the audience the repo already has. No separate auth, no second access model.
+#
+# One-time enablement per stamped repo (a practitioner, never an agent):
+#   gh api -X POST "repos/$ORG/$REPO/pages" -f build_type=workflow
+#   gh api -X PUT  "repos/$ORG/$REPO/pages" -F public=false
+# (UI path: Settings → Pages → Source: GitHub Actions → Visibility: Private.
+# The API reports privacy as public=false; visibility may read null.)
+#
+# The deploy job FAILS CLOSED unless visibility is already "private" — a flip to
+# public can never ride in on a routine docs deploy.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "reports/**"
+      - "README.md"
+      - "_config.yml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # templates carry the file; only stamped repos run it
+    if: ${{ !endsWith(github.repository, '-template') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read # configure-pages and jekyll-build-pages read the site config
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1.0.13
+        with:
+          source: ./
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: refuse to deploy unless Pages is private (repo-gated)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cfg=$(gh api "repos/${GITHUB_REPOSITORY}/pages" 2>/dev/null) || {
+            echo "::error::Pages is not enabled on this repo — run the two one-time commands in this workflow's header (practitioner task)"; exit 1; }
+          pub=$(jq -r '.public' <<<"$cfg"); vis=$(jq -r '.visibility // empty' <<<"$cfg")
+          if [ "$pub" = "false" ] || [ "$vis" = "private" ]; then
+            echo "Pages access is repo-gated (public=$pub, visibility=${vis:-null}) — deploying"
+          else
+            echo "::error::Pages is NOT private (public=$pub, visibility=${vis:-null}) — refusing to publish. Fix: gh api -X PUT repos/${GITHUB_REPOSITORY}/pages -F public=false"; exit 1
+          fi
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

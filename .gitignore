@@ -1,7 +1,25 @@
+# secrets & local env — never in the repo
+.env
+.env.*
+*.pem
+*.key
+
+# junk
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
+.venv/
+venv/
+dist/
+build/
+
+# NOTE: agent-sessions/**/*.jsonl is intentionally NOT ignored — exported session
+# logs are part of the course contract. Scrub secrets before committing them.
+
 # ─────────────────────────────────────────────────────────────
 # ГОЛОВНЕ: реальні документи замовника в git не потрапляють.
 # Це правило проєкту, не зручність. Не послаблювати без Дениса.
-# ─────────────────────────────────────────────────────────────
 
 # Реальні документи — тільки локально, ніколи в git
 data-private/
@@ -38,19 +56,12 @@ backup*.sql
 *.db
 
 # Секрети
-.env
-.env.*
 !.env.example
-*.pem
-*.key
 credentials.json
 service-account*.json
 
 # Python
-__pycache__/
 *.py[cod]
-.venv/
-venv/
 .pytest_cache/
 .ipynb_checkpoints/
 
@@ -61,7 +72,6 @@ venv/
 models/
 
 # Службове
-.DS_Store
 .idea/
 .vscode/
 *.log
