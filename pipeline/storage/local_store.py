@@ -1,8 +1,8 @@
-"""Локальне файлове сховище -- робочий режим для ноутбука.
+"""Локальне файлове сховище результатів.
 
-Схема ключів навмисно така сама, як планується в MinIO
-(`documents/<domain>/<id>.md`), тому вміст каталогу data/output можна буде
-перелити в бакет як є, без перейменувань.
+Ключі мають вигляд `documents/<domain>/<id>.md` -- пласка, передбачувана
+схема, яку легко перелити в будь-яке зовнішнє сховище пізніше (це вже поза
+межами цієї частини роботи).
 
 Індекс хешів -- окремий append-only JSONL (`index/processed.jsonl`): не
 база, але достатньо, щоб повторне завантаження того самого документа
@@ -11,16 +11,17 @@
 import json
 import os
 
-from pipeline.storage.base import DocumentStore
-
 INDEX_REL_PATH = os.path.join("index", "processed.jsonl")
 
 
-class LocalDocumentStore(DocumentStore):
+class LocalDocumentStore:
     def __init__(self, root: str):
         self.root = root
         self.index_path = os.path.join(root, INDEX_REL_PATH)
         self._index = None
+
+    def key_for(self, domain: str, document_id: str) -> str:
+        return f"documents/{domain or 'unresolved'}/{document_id}.md"
 
     def _load_index(self) -> dict:
         if self._index is None:
@@ -40,6 +41,9 @@ class LocalDocumentStore(DocumentStore):
         return self._index
 
     def find_by_hash(self, file_hash: str):
+        """Ключ уже обробленого документа з таким самим ВМІСТОМ, або None.
+        Дедуплікація за хешем, а не за назвою файлу: те саме фото,
+        завантажене двічі під різними іменами, не має дати два факти."""
         return self._load_index().get(file_hash)
 
     def save(self, key: str, content: str, file_hash: str = None) -> str:

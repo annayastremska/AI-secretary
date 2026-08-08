@@ -1,7 +1,7 @@
 # ЗРАЗОК конфігу. Скопіюйте в config.yaml і правте під свою машину:
 #     cp config.example.yaml config.yaml
-# Сам config.yaml у .gitignore -- саме там з'являться DSN Postgres і ключі
-# MinIO, і вони не повинні потрапити в репозиторій.
+# Сам config.yaml у .gitignore: це налаштування конкретної машини
+# (шляхи, наявність моделі), не частина коду.
 #
 # Значення за замовчуванням -- у pipeline/config.py; тут лише те, що
 # відрізняється для конкретної машини. Шляхи -- відносні до кореня репо.
@@ -38,12 +38,9 @@ ocr:
   llama_server_path: null
 
 storage:
-  backend: local               # local | minio
+  # Локальні файли -- єдиний бекенд. Зовнішнє сховище й БД -- поза межами
+  # цієї частини роботи.
   local_root: data/output
-
-database:
-  backend: none                # none | postgres
-  dsn: null                    # напр. postgresql://user:pass@localhost:5432/ai_secretary
 
 review:
   sample_rate: 20              # 1 з 20 підтверджених документів -> ручна перевірка (5%)

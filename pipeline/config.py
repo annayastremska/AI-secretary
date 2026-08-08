@@ -1,6 +1,6 @@
 """Конфіг локального запуску. Один YAML-файл замість констант, розкиданих
-по клітинках ноутбука -- щоб перехід "ноут -> сервер клієнта" і "локальні
-файли -> MinIO/Postgres" був зміною конфігу, не переписуванням коду.
+по клітинках ноутбука -- щоб перенесення на іншу машину було зміною конфігу,
+а не переписуванням коду.
 """
 import os
 from copy import deepcopy
@@ -51,19 +51,9 @@ DEFAULTS = {
         "llama_server_path": None,
     },
     "storage": {
-        "backend": "local",   # local | minio
+        # Локальні файли -- єдиний бекенд. Зовнішнє сховище й БД -- поза
+        # межами цієї частини роботи.
         "local_root": "data/output",
-        "minio": {
-            "endpoint": None,
-            "bucket": "documents",
-            "access_key": None,
-            "secret_key": None,
-            "secure": False,
-        },
-    },
-    "database": {
-        "backend": "none",    # none | postgres
-        "dsn": None,
     },
     "review": {
         # 1 з N підтверджених документів -> на ручну перевірку (20 = 5%,

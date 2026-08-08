@@ -36,10 +36,6 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
-    if args.dry_run:
-        cfg["storage"]["backend"] = "none"
-        cfg["database"]["backend"] = "none"
-
     target = args.input or cfg["paths"]["input_dir"]
     if not os.path.exists(target):
         print(f"Немає такого шляху: {target}", file=sys.stderr)
@@ -49,7 +45,6 @@ def main(argv=None):
     res = build_resources(cfg, force_no_llm=args.no_llm)
     if args.dry_run:
         res["store"] = None
-        res["db"] = None
     for warning in res["warnings"]:
         print(f"[увага] {warning}", file=sys.stderr)
 

@@ -25,6 +25,4 @@ huggingface_hub>=0.23
 llama-cpp-python>=0.3.0
 
 # --- Не входить сюди, ставиться окремо: див. requirements-optional.txt ---
-# surya-ocr          -- фото/скани (тягне torch, ~1.5 ГБ додаткових ваг)
-# minio              -- storage.backend: minio замість локальних файлів
-# psycopg[binary]    -- database.backend: postgres
+# surya-ocr  -- фото й скановані PDF (тягне torch, ~1.5 ГБ додаткових ваг)

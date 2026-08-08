@@ -10,7 +10,7 @@
    екстракції чужою схемою; вихід існує завжди;
 5. екстракція (детермінований прохід + LLM-групи для прогалин);
 6. збірка запису + провенанс + 5%-вибірка на аудит;
-7. збереження (локально/MinIO) + опційний запис у Postgres.
+7. збереження результату в локальне сховище (data/output).
 """
 import datetime
 import glob
@@ -67,7 +67,6 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
         "llm": None,
         "ocr": None,
         "store": None,
-        "db": None,
         "warnings": [],
     }
 
@@ -116,19 +115,7 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
         except Exception as exc:
             res["warnings"].append(f"OCR недоступний ({type(exc).__name__}: {exc}) -- зображення не обробляться")
 
-    storage_cfg = cfg["storage"]
-    if storage_cfg.get("backend") == "minio":
-        from pipeline.storage.minio_store import MinioDocumentStore
-        m = storage_cfg["minio"]
-        res["store"] = MinioDocumentStore(m["endpoint"], m["bucket"], m["access_key"],
-                                          m["secret_key"], m.get("secure", False))
-    else:
-        res["store"] = LocalDocumentStore(storage_cfg["local_root"])
-
-    if cfg["database"].get("backend") == "postgres" and cfg["database"].get("dsn"):
-        from pipeline.storage.postgres_writer import PostgresWriter
-        res["db"] = PostgresWriter(cfg["database"]["dsn"])
-
+    res["store"] = LocalDocumentStore(cfg["storage"]["local_root"])
     return res
 
 
@@ -182,7 +169,7 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None) -> dict:
     except Exception as exc:
         meta = dict(base_meta, status="unresolved", domain=None, template=None,
                     reason=f"не вдалося прочитати документ: {type(exc).__name__}: {exc}")
-        _persist(meta, None, "", res, cfg)
+        _persist(meta, "", res)
         return meta
 
     # Порожній/нечитабельний скан -- окремий випадок, а не "усі поля відсутні":
@@ -190,7 +177,7 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None) -> dict:
     if not text or len(text.strip()) < 20:
         meta = dict(base_meta, status="unresolved", domain=None, template=None,
                     reason="текст не розпізнано (порожній або нечитабельний документ)")
-        _persist(meta, None, text, res, cfg)
+        _persist(meta, text, res)
         return meta
 
     llm = res.get("llm")
@@ -210,7 +197,7 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None) -> dict:
         meta = dict(base_meta, status="unresolved", domain=ident.get("domain"), template=None,
                     reason=ident.get("reason") or "шаблон не визначено",
                     identification={"scores": ident.get("scores"), "source": None})
-        _persist(meta, None, text, res, cfg)
+        _persist(meta, text, res)
         return meta
 
     schema = ident["schema"]
@@ -254,11 +241,11 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None) -> dict:
         not_implemented_fields=record["not_implemented_fields"],
         warnings=warnings,
     )
-    _persist(meta, record, text, res, cfg)
+    _persist(meta, text, res)
     return meta
 
 
-def _persist(meta: dict, record, text: str, res: dict, cfg: dict) -> None:
+def _persist(meta: dict, text: str, res: dict) -> None:
     store = res.get("store")
     if store is None:
         return
@@ -269,15 +256,6 @@ def _persist(meta: dict, record, text: str, res: dict, cfg: dict) -> None:
     folder = "unresolved" if meta.get("status") == "unresolved" else (meta.get("domain") or "unresolved")
     key = store.key_for(folder, meta["id"])
     meta["storage_key"] = store.save(key, _to_markdown(meta, text), file_hash=meta["file_hash"])
-    db = res.get("db")
-    if db is not None and record is not None:
-        try:
-            meta["db"] = db.write(meta, record, key)
-        except Exception as exc:
-            # Недоступна БД не має знищувати вже збережений документ: файл
-            # у сховищі лишається, а запис у БД можна повторити пізніше.
-            meta.setdefault("warnings", []).append(
-                f"запис у Postgres не вдався ({type(exc).__name__}: {exc})")
 
 
 def scan_target(target: str):

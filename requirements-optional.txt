@@ -7,10 +7,3 @@
 # Всередині запускає llama.cpp-сервер: на Windows зручніше вказати готовий
 # бінарник у config.yaml -> ocr.llama_server_path, ніж збирати з джерел.
 surya-ocr
-
-# --- Сховище й БД замість локальних файлів ---
-# УВАГА: обидві реалізації (pipeline/storage/minio_store.py,
-# postgres_writer.py) НЕ перевірені на живих сервісах -- ставтесь як до
-# чернетки до першого реального прогону.
-minio
-psycopg[binary]
