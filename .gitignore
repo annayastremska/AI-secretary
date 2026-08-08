@@ -1,0 +1,31 @@
+# model weights and caches never live inside the repo
+models/
+*.gguf
+.cache/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# jupyter
+.ipynb_checkpoints/
+
+# os
+.DS_Store
+Thumbs.db
+
+# --- локальний стан пайплайна, не частина коду ---
+
+# Папка-приймач: робочі файли конкретної машини. Сам каталог лишається
+# (через .gitkeep), щоб `python run_pipeline.py` працював на свіжому клоні.
+data/inbox/*
+!data/inbox/.gitkeep
+
+# Результат прогонів (документи + індекс хешів) -- генерується заново.
+data/output/
+
+# Локальний конфіг: тут з'являться DSN Postgres і ключі MinIO, тому в репо
+# лежить лише config.example.yaml. Скопіюйте його в config.yaml.
+config.yaml

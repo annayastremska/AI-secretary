@@ -1,0 +1,180 @@
+# Схема шаблону "Відпускний квиток" (Додаток 30 до Інструкції з діловодства
+# у ЗСУ, підпункт 2.8.9). Regex-паттерни й типи нормалізації тут керують
+# екстракцією напряму (генеричний двигун у pipeline/extraction) — не
+# продубльовані окремо в коді.
+template: leave_ticket
+domain: leave
+fact_type: leave   # -> dictionaries/fact_type_registry.yaml (validity_model: ranged)
+
+# Як упізнати саме цей бланк -- щоб схему вибирав пайплайн, а не людина
+# вручну (див. pipeline/identification.py). Фрази взяті з реального тексту
+# шаблону data/samples/leave/відпускний_шаблон.docx.
+identification:
+  description: "Відпускний квиток (Додаток 30 до Інструкції з діловодства у ЗСУ)"
+  title: ["відпускний квиток"]                  # вага 5
+  anchors:                                      # вага 2 кожен
+    - "додаток 30"
+    - "вид відпустки та найменування населеного пункту"
+    - "після закінчення строку відпустки"
+    - "дата повернення"
+    - "військові перевізні документи за №"
+  min_score: 5
+
+fields:
+  # --- rank + ПІБ: спеціальний режим (не простий regex) ---
+  # Токенізація рядка перед підписом-лейблом: найдовший префікс токенів, що
+  # є відомим званням у довіднику, визначає межу; решта -- прізвище/ім'я/по
+  # батькові за регістром. Той самий режим підходить і для deployment_certificate
+  # (там та сама структура "звання ПІБ" перед тим самим лейблом).
+  - name: rank
+    type: category
+    category: military_rank
+    extraction: rank_and_name_tokenized
+    label_before: "військове звання, прізвище, ім"
+    db_target: person
+
+  - name: surname
+    type: text
+    extraction: rank_and_name_tokenized   # той самий виклик, інша частина результату
+    normalization: nominative_case
+    db_target: person
+
+  - name: given_name
+    type: text
+    extraction: rank_and_name_tokenized
+    normalization: nominative_case
+    db_target: person
+
+  - name: patronymic
+    type: text
+    extraction: rank_and_name_tokenized
+    normalization: nominative_case
+    db_target: person
+
+  # ВИПРАВЛЕНО (звірено з data/samples/leave/відпускний_шаблон.docx): "вид
+  # відпустки" і "населений пункт" на реальному бланку -- ОДНЕ вільнотекстове
+  # значення під одним спільним лейблом ("вид відпустки та найменування
+  # населеного пункту, до якого звільнено військовослужбовця"), надруковане
+  # одразу після слова "звільнений" в тому самому блоці/комірці. Старі окремі
+  # regex-и (`leave_type` за фразою "звільнений у частину", якої в бланку
+  # немає; `destination_location` тим же способом) ніколи не матчились.
+  # Об'єднано за рішенням користувача -- категоріальне зіставлення з
+  # dictionaries/leave_type.yaml для цього поля більше не виконується
+  # автоматично (значення вільнотекстове, комбіноване).
+  - name: leave_type_and_destination
+    type: text
+    extraction: block_before_label
+    label_before: "вид відпустки та найменування населеного пункту"
+    strip_prefix: "звільнений"
+    db_target: fact_value
+
+  - name: leave_year
+    type: number
+    extraction: derived_from
+    derived_from: leave_type_and_destination
+    derive: extract_year_suffix   # "за (\d{4}) рік", якщо є в тексті
+    db_target: additional_info
+
+  - name: duration_days
+    type: number
+    extraction: regex
+    regex_variants:
+      - pattern: 'терміном\s+(?:на\s+)+(?P<value>\d+)\s*\([^)]*\)\s*(?:діб|календарних днів|днів)'
+    db_target: additional_info
+
+  - name: leave_start_date
+    type: date
+    extraction: regex
+    normalization: iso_date
+    regex_variants:
+      # варіант 1: спільний рік наприкінці діапазону (фото2)
+      - pattern: 'з\s+(?P<day>\d{1,2})\s+(?P<month>[а-яіїє]+|\d{1,2})\s+по\s+\d{1,2}\s+[а-яіїє]+\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
+      # варіант 2: окремий рік на кожну дату (старіший бланк, приклад 1)
+      - pattern: 'з\s*[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2}|[а-яіїє]+)\s+20(?P<year>\d{2})\s*(?:р\.?|рок\w*)'
+    db_target: fact_date_start
+
+  - name: leave_end_date_planned
+    type: date
+    extraction: regex
+    normalization: iso_date
+    regex_variants:
+      - pattern: 'по\s+(?P<day>\d{1,2})\s+(?P<month>[а-яіїє]+|\d{1,2})\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
+      - pattern: 'по\s*[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2}|[а-яіїє]+)\s+20(?P<year>\d{2})\s*(?:р\.?|рок\w*)'
+    db_target: fact_date_end
+
+  - name: actual_return_date
+    type: date
+    extraction: block_before_label
+    label_before: "дата повернення"
+    normalization: iso_date
+    note: "Заповнюється після повернення, окремо від leave_end_date_planned. Може бути порожнім на момент видачі документа."
+    db_target: additional_info
+
+  # ВІДКЛАДЕНО: "№" у бланку зустрічається лише як "Додаток 30" (номер самого
+  # ТИПУ бланка в Інструкції з діловодства -- константа, однакова на кожному
+  # відпускному квитку) -- жодного реального регіструйного номера конкретного
+  # документа в текстовому шарі docx/OCR не знайдено. Regex "перший рядок з
+  # №" тихо повертав би "30" для кожного документа -- гірше, ніж чесне
+  # no_value. Якщо реальний номер є лише в кутовому штампі (зображення),
+  # це поле екстракції з тексту не підлягає.
+  - name: document_number
+    type: text
+    priority: deferred
+    note: "Регіструйний номер, якщо є, -- ймовірно лише в кутовому штампі (зображення), не в текстовому шарі."
+    db_target: additional_info
+
+  - name: document_date
+    type: date
+    extraction: regex
+    normalization: iso_date
+    regex_variants:
+      - pattern: '[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>[а-яіїє]+)\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
+      - pattern: '[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2})\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
+    db_target: additional_info
+
+  - name: travel_document_number
+    type: text
+    extraction: regex
+    normalization: null_if_not_issued   # сентинел "не видавались" -> null, підтверджено-порожнє
+    not_issued_sentinel: "не видавались"
+    regex_variants:
+      - pattern: 'документи за №\s*(?P<value>.+?)\n'
+    db_target: additional_info
+
+  # --- Реєстр об'єктів, не довідник значень ---
+  # ПРИБРАНО: issuing_unit шукав буквально "ВІЙСЬКОВА ЧАСТИНА" -- у бланку це
+  # не текст, а опис місця для кутового штампа/печатки ("Кутовий штамп
+  # військової частини (установи)"), не друкований рядок. Текстовий шар
+  # docx/OCR не дасть цю фразу за жодних умов -- прибрано за рішенням
+  # користувача, а не залишено як завідомо мертве поле.
+
+  - name: unit_to_report
+    type: object_ref
+    registry: military_unit
+    # ВИПРАВЛЕНО (звірено з data/samples/leave/відпускний_шаблон.docx): фрази
+    # "військову частину" тут немає -- реальний текст "зобов'язаний прибути
+    # до місця служби у (значення)\n(найменування військової частини або
+    # населеного пункту)" -- той самий патерн "значення / лейбл під ним",
+    # що й destination_org у deployment_certificate. Старий regex ніколи не
+    # матчився на реальному бланку.
+    extraction: block_before_label
+    label_before: "найменування військової частини або населеного пункту"
+    db_target: additional_info
+
+  - name: co_travelers
+    type: object_ref
+    registry: person
+    multiple: true
+    priority: deferred
+    note: "Поле «Разом з ... прямують ...» — 0 або більше супутників."
+    db_target: additional_info
+
+  - name: authorizing_commander
+    type: object_ref
+    registry: person
+    priority: deferred
+    note: "Підпис на лицьовій стороні. Не впливає на підрахункові запити — відкладено."
+    db_target: additional_info
+
+out_of_scope:
+  - registration_marks_table

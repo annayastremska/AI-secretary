@@ -1,0 +1,151 @@
+# Схема шаблону "Посвідчення про відрядження" (Додаток 28 до Інструкції з
+# діловодства у ЗСУ, пункт 2.8.8.3). Перевірено проти повного тексту docx.
+template: deployment_certificate
+domain: deployment
+fact_type: deployment_location   # -> dictionaries/fact_type_registry.yaml (validity_model: ranged)
+
+# Як упізнати саме цей бланк -- щоб схему вибирав пайплайн, а не людина
+# вручну (див. pipeline/identification.py). Усі фрази взяті з реального
+# OCR-виводу заповненого документа, не вигадані.
+identification:
+  description: "Посвідчення про відрядження (Додаток 28 до Інструкції з діловодства у ЗСУ)"
+  title: ["посвідчення про відрядження"]        # вага 5
+  anchors:                                      # вага 2 кожен
+    - "додаток 28"
+    - "термін відрядження"
+    - "підстава відрядження"
+    - "пункти призначень"
+    - "мета відрядження"
+  min_score: 5
+
+fields:
+  # --- rank + ПІБ: той самий generic-режим, що й у leave_ticket ---
+  # ВИПРАВЛЕНО (знайдено локальним regression-тестом): на цьому бланку "Видано"
+  # надруковане в ТОМУ САМОМУ рядку, що й значення ("Видано  рядовий ПРІЗВИЩЕ
+  # Ім'я По-батькові") -- на відміну від leave_ticket, де рядок звання+ПІБ був
+  # самостійним. Без strip_prefix токенізація зсувалась: "Видано"/"рядовий"
+  # потрапляли в given_name/patronymic замість самого імені.
+  - name: rank
+    type: category
+    category: military_rank
+    extraction: rank_and_name_tokenized
+    label_before: "військове звання, прізвище"
+    strip_prefix: "Видано"
+    db_target: person
+
+  - name: surname
+    type: text
+    extraction: rank_and_name_tokenized
+    strip_prefix: "Видано"
+    normalization: nominative_case
+    db_target: person
+
+  - name: given_name
+    type: text
+    extraction: rank_and_name_tokenized
+    strip_prefix: "Видано"
+    normalization: nominative_case
+    db_target: person
+
+  - name: patronymic
+    type: text
+    extraction: rank_and_name_tokenized
+    strip_prefix: "Видано"
+    normalization: nominative_case
+    db_target: person
+
+  - name: position_and_workplace
+    type: text
+    extraction: llm   # бланк дає посаду й місце роботи одним вільнотекстовим полем, без лейбл-якоря
+    note: "Поле під заголовком «(посада, місце роботи)» — не розділене на бланку."
+    db_target: additional_info
+
+  - name: destination_points
+    type: text
+    extraction: llm
+    note: "Поле «(пункти призначень)» — можливо кілька пунктів в одному рядку."
+    db_target: fact_value
+
+  - name: destination_org
+    type: object_ref
+    registry: military_unit
+    extraction: block_before_label
+    label_before: "найменування військової частини, установи, організації"
+    db_target: additional_info
+
+  - name: deployment_days
+    type: number
+    extraction: regex
+    regex_variants:
+      - pattern: 'відрядження\s*[«"“„]?(?P<value>\d+)[»"”‟]?\s*днів'
+    db_target: additional_info
+
+  - name: deployment_start_date
+    type: date
+    extraction: regex
+    normalization: iso_date
+    regex_variants:
+      # окремий рік при кожній даті -- підтверджено за реальним текстом docx,
+      # тут це основний варіант, не запасний (на відміну від leave_ticket)
+      - pattern: 'з\s*[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2}|[а-яіїє]+)\s+20(?P<year>\d{2})\s*(?:р\.?|рок\w*)'
+    db_target: fact_date_start
+
+  - name: deployment_end_date
+    type: date
+    extraction: regex
+    normalization: iso_date
+    regex_variants:
+      - pattern: 'по\s*[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2}|[а-яіїє]+)\s+20(?P<year>\d{2})\s*(?:р\.?|рок\w*)'
+    db_target: fact_date_end
+
+  - name: purpose
+    type: text
+    extraction: llm   # «мета відрядження» — вільний текст, без контрольованого словника
+    db_target: additional_info
+
+  - name: basis_order_date
+    type: date
+    extraction: regex
+    normalization: iso_date
+    note: >
+      «Підстава відрядження: рішення, наказ від ___ №___» — єдине
+      ідентифікуюче посилання на цьому бланку (власного номера/дати
+      документа тут немає).
+    regex_variants:
+      - pattern: 'наказ від\s*(?P<day>\d{1,2})[.\s]+(?P<month>\d{1,2})[.\s]+(?P<year>\d{4})'
+    db_target: additional_info
+
+  - name: basis_order_number
+    type: text
+    extraction: regex
+    regex_variants:
+      - pattern: 'наказ від[^№]*№\s*(?P<value>\S+)'
+    db_target: additional_info
+
+  # --- Реєстр об'єктів, не довідник значень ---
+  - name: authorizing_commander
+    type: object_ref
+    registry: person
+    priority: deferred
+    note: "Підпис командира (начальника штабу) на лицьовій стороні. Відкладено, як у leave_ticket."
+    db_target: additional_info
+
+  - name: stops
+    type: object_ref
+    registry: none
+    multiple: true
+    priority: deferred
+    note: >
+      Зворотний бік — фіксована таблиця максимум на 4 зупинки, кожна
+      «Вибув із .../Прибув до ...»; «забезпечувався триразовим харчуванням»
+      є лише з 2-ї по 4-у зупинку. Один документ може дати кілька фактів
+      місцезнаходження — складніше за leave, відкладено до реального
+      прогону з кількома заповненими зупинками.
+    db_target: additional_info
+
+# document_number / document_date -- немає на цьому бланку (лише кутовий
+# штамп, не пронумерований запис) -- перевірено за повним текстом docx.
+
+# Довідник для цього шаблону не потрібен додатковий: єдине категоріальне
+# поле — rank, і military_rank уже існує. "мета"/"підстава" — вільний текст.
+out_of_scope: []

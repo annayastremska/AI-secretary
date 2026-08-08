@@ -1,0 +1,43 @@
+# ЗРАЗОК конфігу. Скопіюйте в config.yaml і правте під свою машину:
+#     cp config.example.yaml config.yaml
+# Сам config.yaml у .gitignore -- саме там з'являться DSN Postgres і ключі
+# MinIO, і вони не повинні потрапити в репозиторій.
+#
+# Значення за замовчуванням -- у pipeline/config.py; тут лише те, що
+# відрізняється для конкретної машини. Шляхи -- відносні до кореня репо.
+
+paths:
+  input_dir: data/inbox        # куда кладуться вхідні файли (папка-приймач)
+  output_dir: data/output
+
+llm:
+  enabled: true
+  # Ваги, що реально лежать у ../project_other/models (перевірено).
+  # Якщо 12B на цьому ноуті виявиться заповільним -- є менша офіційна версія
+  # INSAIT-Institute/MamayLM-Gemma-3-4B-IT-v1.0-GGUF (~2.5 ГБ проти ~6.8 ГБ),
+  # її треба завантажити окремо; зміна тут -- один рядок.
+  model_path: ../project_other/models/MamayLM-Gemma-3-12B-IT-v2.0-Q4_K_M.gguf
+  n_gpu_layers: 0              # 0 = CPU; -1 = усі шари на GPU
+  # `python run_pipeline.py --no-llm` вимикає LLM для окремого прогону, не
+  # чіпаючи конфіг (детермінований прохід + чесно позначені прогалини).
+  batch_size: 4                # полів на один LLM-виклик
+  self_consistency_n: 1         # >1 = кілька семплів + majority_vote (дорожче)
+  max_context_chars: 6000
+
+ocr:
+  # none -> обробляються лише docx (зображення явно відхиляються).
+  # surya -> потрібен встановлений surya-ocr; на Windows зазвичай ще й
+  # готовий бінарник llama-server (Surya запускає його всередині).
+  engine: none
+  llama_server_path: null
+
+storage:
+  backend: local               # local | minio
+  local_root: data/output
+
+database:
+  backend: none                # none | postgres
+  dsn: null                    # напр. postgresql://user:pass@localhost:5432/ai_secretary
+
+review:
+  sample_rate: 20              # 1 з 20 підтверджених документів -> ручна перевірка (5%)

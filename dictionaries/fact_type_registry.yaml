@@ -1,0 +1,33 @@
+# Реєстр типів фактів і їхньої моделі чинності (не довідник значень поля --
+# це про сам ТИП факту-рядка, розділ "три форми чинності" з обговорення
+# архітектури БД). Нове fact_type тут -- один рядок, не новий код.
+#
+# validity_model:
+#   ranged          -- має початок і кінець, "активний" = сьогодні в межах діапазону
+#   current_state   -- має початок, лишається чинним, доки не з'явиться новіший факт
+#                       того самого типу для того самого об'єкта
+#   permanent_event -- разова подія, ніколи не "спливає" сама по собі
+fact_types:
+  - code: leave
+    label: Відпустка
+    validity_model: ranged
+
+  - code: deployment_location
+    label: Місцезнаходження під час відрядження
+    validity_model: ranged
+
+  - code: attendance
+    label: Присутність (табель)
+    validity_model: ranged   # один день: date_start = date_end
+
+  - code: rank
+    label: Військове звання
+    validity_model: current_state
+
+  - code: position
+    label: Посада
+    validity_model: current_state
+
+  - code: equipment_status
+    label: Стан техніки
+    validity_model: current_state
