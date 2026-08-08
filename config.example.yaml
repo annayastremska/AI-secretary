@@ -19,20 +19,12 @@ intake:
   failed_dir: data/failed         # unresolved -- потребує людини
 
 llm:
-  # Вимкнено в ПРИКЛАДІ конфігу свідомо: свіжий клон не має ні пакета
-  # llama-cpp-python, ні ваг (~2.5-6.8 ГБ, у репозиторії їх немає). Тому
-  # `python run_pipeline.py` одразу після клону працює без жодних флагів --
-  # детермінований прохід дає результат, а поля extraction: llm лишаються
-  # чесно позначеними прогалинами.
-  #
-  # Щоб увімкнути повний режим:
-  #   1) pip install llama-cpp-python
-  #   2) завантажити ваги GGUF з huggingface.co і вказати СВІЙ шлях нижче:
-  #        INSAIT-Institute/MamayLM-Gemma-3-12B-IT-v2.0-GGUF  (~6.8 ГБ)
-  #        INSAIT-Institute/MamayLM-Gemma-3-4B-IT-v1.0-GGUF   (~2.5 ГБ, слабші машини)
-  #   3) enabled: true
-  enabled: false
-  model_path: null             # напр. D:/models/MamayLM-Gemma-3-12B-IT-v2.0-Q4_K_M.gguf
+  enabled: true
+  # Шлях, куди кладе ваги `python scripts/download_model.py` -- правити не
+  # потрібно. Для 12B (--size 12b) замініть 4b на 12b у назві файлу.
+  # Якщо ваг ще немає, прогін не падає: буде попередження, а поля
+  # extraction: llm лишаться чесно позначеними прогалинами.
+  model_path: models/mamaylm-4b-q4_k_m.gguf
   n_gpu_layers: 0              # 0 = CPU; -1 = усі шари на GPU
   batch_size: 4                # полів на один LLM-виклик
   self_consistency_n: 1         # >1 = кілька семплів + majority_vote (дорожче)
