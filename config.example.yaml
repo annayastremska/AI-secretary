@@ -10,6 +10,14 @@ paths:
   input_dir: data/inbox        # куда кладуться вхідні файли (папка-приймач)
   output_dir: data/output
 
+intake:
+  # Переносити оброблені файли з папки-приймача, щоб вона справді
+  # спорожнялась. Діє лише при скануванні каталогу: файл, переданий через
+  # --input, лишається на місці.
+  archive: true
+  processed_dir: data/processed   # confirmed / needs_review / duplicate
+  failed_dir: data/failed         # unresolved -- потребує людини
+
 llm:
   enabled: true
   # Ваги, що реально лежать у ../project_other/models (перевірено).

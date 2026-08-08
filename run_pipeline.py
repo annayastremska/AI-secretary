@@ -58,9 +58,27 @@ def main(argv=None):
     print(f"LLM: {'увімкнено' if res['llm'] else 'вимкнено'} | "
           f"OCR: {cfg['ocr']['engine'] if res['ocr'] else 'немає'}\n")
 
-    results = process_target(target, res, cfg, force_template=args.template)
+    results, skipped = process_target(target, res, cfg, force_template=args.template)
+
+    # Про пропущене кажемо вголос: інакше людина, що поклала в папку архів або
+    # файл невідомого типу, бачить лише "не знайдено файлів" без пояснення.
+    if skipped["unsupported"]:
+        print(f"[пропущено] непідтримуваний тип ({len(skipped['unsupported'])}): "
+              f"{', '.join(skipped['unsupported'][:5])}"
+              f"{' ...' if len(skipped['unsupported']) > 5 else ''}")
+    if skipped["subdirs"]:
+        print(f"[пропущено] підпапки ({len(skipped['subdirs'])}): "
+              f"{', '.join(skipped['subdirs'][:5])} -- сканування не рекурсивне, "
+              "покладіть файли безпосередньо в папку-приймач")
+
     if not results:
-        print("Не знайдено файлів для обробки (.docx/.jpg/.png/...)")
+        # Порожня папка-приймач -- нормальний стан для планового запуску (нічого
+        # не надійшло), тому код виходу 0. Помилка (2) -- лише коли вказаного
+        # шляху взагалі немає, це перевіряється вище.
+        if os.path.isdir(target):
+            print(f"У папці-приймачі немає файлів для обробки: {target}")
+            return 0
+        print("Не знайдено файлів для обробки (.docx/.pdf/.jpg/.png/...)")
         return 1
 
     for meta in results:
@@ -76,6 +94,8 @@ def main(argv=None):
             line += " | у вибірці аудиту"
         if meta.get("reason"):
             line += f" | {meta['reason']}"
+        if meta.get("archived_to"):
+            line += f"\n     -> перенесено в {meta['archived_to']}"
         print(line)
         for warning in meta.get("warnings", []):
             print(f"     [увага] {warning}")

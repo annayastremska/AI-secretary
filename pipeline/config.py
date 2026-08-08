@@ -15,6 +15,16 @@ DEFAULTS = {
         "dictionaries_dir": "dictionaries",
         "llm_context": "pipeline/llm_context/document_processing_guidelines.md",
     },
+    "intake": {
+        # Переносити оброблені файли з input_dir, щоб папка-приймач справді
+        # спорожнялась, а не перечитувалась цілком на кожному запуску.
+        # Діє ЛИШЕ в режимі сканування каталогу: файл, переданий явно через
+        # --input, нікуди не переміщується (інакше прогін на data/samples/
+        # виносив би зразки з репозиторію).
+        "archive": True,
+        "processed_dir": "data/processed",
+        "failed_dir": "data/failed",
+    },
     "llm": {
         # Вимкнений за замовчуванням: пайплайн має давати результат і без
         # моделі (детермінований прохід + чесні "прогалини"), щоб його можна
@@ -68,6 +78,8 @@ _PATH_KEYS = [
     ("paths", "schemas_dir"),
     ("paths", "dictionaries_dir"),
     ("paths", "llm_context"),
+    ("intake", "processed_dir"),
+    ("intake", "failed_dir"),
     ("storage", "local_root"),
 ]
 

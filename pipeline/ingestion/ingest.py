@@ -9,7 +9,15 @@ import hashlib
 import os
 
 DOCX_EXTS = (".docx",)
+PDF_EXTS = (".pdf",)
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff")
+
+# Нижче цього середнього числа символів на сторінку вважаємо, що текстового
+# шару фактично немає (скан, загорнутий у PDF) -- тоді сторінки рендеряться
+# в зображення й ідуть в OCR. Поріг свідомо низький: краще спробувати
+# текстовий шар, ніж марно ганяти OCR по нормальному PDF.
+MIN_TEXT_CHARS_PER_PAGE = 40
+PDF_RENDER_DPI = 200
 
 
 def extract_docx_blocks(path: str):
@@ -118,6 +126,60 @@ def file_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+def extract_pdf_blocks(path: str, ocr_fn=None):
+    """PDF двома шляхами, залежно від того, чи є текстовий шар:
+
+    - є текст -> `page.get_text("blocks")` дає блоки РАЗОМ з координатами,
+      тому PDF отримує таку саму геометричну обробку, як OCR, без OCR;
+    - тексту фактично немає (скан у PDF-обгортці) -> сторінки рендеряться в
+      зображення й ідуть через ocr_fn.
+
+    Блоки сортуються ВСЕРЕДИНІ кожної сторінки, а сторінки склеюються за
+    порядком: спільне сортування по всьому документу перемішало б сторінки
+    між собою, бо y-координати на кожній сторінці починаються з нуля.
+
+    PyMuPDF імпортується ліниво -- решта пайплайна працює без нього.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError as exc:
+        raise ValueError(
+            f"Для PDF потрібен PyMuPDF (pip install pymupdf): {path}"
+        ) from exc
+
+    blocks = []
+    with fitz.open(path) as doc:
+        total_chars = sum(len(page.get_text() or "") for page in doc)
+        has_text_layer = total_chars >= MIN_TEXT_CHARS_PER_PAGE * max(1, doc.page_count)
+
+        if has_text_layer:
+            for page in doc:
+                page_blocks = []
+                for b in page.get_text("blocks"):
+                    # (x0, y0, x1, y1, text, block_no, block_type); type 1 -- зображення
+                    if len(b) >= 7 and b[6] != 0:
+                        continue
+                    text = (b[4] or "").strip()
+                    if text:
+                        page_blocks.append({"text": text, "bbox": (b[0], b[1], b[2], b[3])})
+                blocks.extend(sort_blocks_by_geometry(page_blocks))
+            return "\n".join(blocks), blocks
+
+        if ocr_fn is None:
+            raise ValueError(
+                f"У PDF {path} немає текстового шару (скан), а OCR не налаштовано "
+                "(ocr.engine: none у конфізі)."
+            )
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, page in enumerate(doc):
+                image_path = os.path.join(tmpdir, f"page_{i:03d}.png")
+                page.get_pixmap(dpi=PDF_RENDER_DPI).save(image_path)
+                blocks.extend(sort_blocks_by_geometry(ocr_fn(image_path)))
+    return "\n".join(blocks), blocks
+
+
 def load_document_blocks(path: str, ocr_fn=None):
     """ocr_fn: (image_path) -> list[{"text","bbox"}] або list[str];
     обов'язковий лише для зображень. Невідоме розширення -- явна помилка,
@@ -129,6 +191,9 @@ def load_document_blocks(path: str, ocr_fn=None):
 
     if ext in DOCX_EXTS:
         return extract_docx_blocks(path)
+
+    if ext in PDF_EXTS:
+        return extract_pdf_blocks(path, ocr_fn=ocr_fn)
 
     if ext in IMAGE_EXTS:
         if ocr_fn is None:

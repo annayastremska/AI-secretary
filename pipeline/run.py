@@ -15,6 +15,7 @@
 import datetime
 import glob
 import os
+import shutil
 import uuid
 
 import yaml
@@ -28,11 +29,17 @@ from pipeline.identification import (
     missing_dictionaries,
     schema_title_phrases,
 )
-from pipeline.ingestion.ingest import DOCX_EXTS, IMAGE_EXTS, file_sha256, load_document_blocks
+from pipeline.ingestion.ingest import (
+    DOCX_EXTS,
+    IMAGE_EXTS,
+    PDF_EXTS,
+    file_sha256,
+    load_document_blocks,
+)
 from pipeline.normalization.normalize import build_alias_lookup
 from pipeline.storage.local_store import LocalDocumentStore
 
-SUPPORTED_EXTS = DOCX_EXTS + IMAGE_EXTS
+SUPPORTED_EXTS = DOCX_EXTS + PDF_EXTS + IMAGE_EXTS
 
 
 def load_dictionaries(dictionaries_dir: str) -> dict:
@@ -255,7 +262,12 @@ def _persist(meta: dict, record, text: str, res: dict, cfg: dict) -> None:
     store = res.get("store")
     if store is None:
         return
-    key = store.key_for(meta.get("domain") or "unresolved", meta["id"])
+    # unresolved завжди в одну теку, навіть коли грубий домен вгадався: інакше
+    # непізнані документи розсипались би по доменних теках (нормативна
+    # інструкція, напр., впізнається як "equipment"), і черга ручного
+    # розгляду перестала б бути одним місцем, куди дивиться людина.
+    folder = "unresolved" if meta.get("status") == "unresolved" else (meta.get("domain") or "unresolved")
+    key = store.key_for(folder, meta["id"])
     meta["storage_key"] = store.save(key, _to_markdown(meta, text), file_hash=meta["file_hash"])
     db = res.get("db")
     if db is not None and record is not None:
@@ -268,17 +280,65 @@ def _persist(meta: dict, record, text: str, res: dict, cfg: dict) -> None:
                 f"запис у Postgres не вдався ({type(exc).__name__}: {exc})")
 
 
-def iter_input_files(target: str):
+def scan_target(target: str):
+    """Повертає (files, skipped). skipped -- те, що НЕ буде оброблено, і про
+    що треба сказати вголос: раніше і підпапки, і файли невідомого типу
+    зникали безслідно, і людина, що поклала папку з документами, бачила
+    лише "не знайдено файлів" без жодного пояснення."""
     if os.path.isfile(target):
-        yield target
-        return
+        return [target], {"unsupported": [], "subdirs": []}
+
+    files, unsupported, subdirs = [], [], []
     for path in sorted(glob.glob(os.path.join(target, "*"))):
-        if os.path.isfile(path) and os.path.splitext(path)[1].lower() in SUPPORTED_EXTS:
-            yield path
+        name = os.path.basename(path)
+        if os.path.isdir(path):
+            subdirs.append(name)
+        elif os.path.splitext(path)[1].lower() in SUPPORTED_EXTS:
+            files.append(path)
+        elif name != ".gitkeep":
+            unsupported.append(name)
+    return files, {"unsupported": unsupported, "subdirs": subdirs}
 
 
-def process_target(target: str, res: dict, cfg: dict, force_template=None) -> list:
+def archive_input_file(path: str, meta: dict, cfg: dict):
+    """Переносить оброблений файл з папки-приймача, щоб наступний запуск не
+    перечитував те саме. unresolved -- окремо: його має подивитись людина.
+    Підкаталог за датою, щоб великий архів лишався навігабельним; при збігу
+    імен додається префікс хеша, а не перезапис."""
+    intake = cfg.get("intake", {})
+    if not intake.get("archive", True):
+        return None
+    base = intake["failed_dir"] if meta.get("status") == "unresolved" else intake["processed_dir"]
+    day = (meta.get("uploaded_at") or "")[:10] or "unknown-date"
+    dest_dir = os.path.join(base, day)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    name = os.path.basename(path)
+    dest = os.path.join(dest_dir, name)
+    if os.path.exists(dest):
+        stem, ext = os.path.splitext(name)
+        dest = os.path.join(dest_dir, f"{stem}_{(meta.get('file_hash') or '')[:8]}{ext}")
+    shutil.move(path, dest)
+    return dest
+
+
+def process_target(target: str, res: dict, cfg: dict, force_template=None):
+    """Повертає (results, skipped). Перенесення оброблених файлів працює лише
+    в режимі сканування каталогу: файл, переданий явно через --input,
+    лишається на місці (інакше прогін на data/samples/ виносив би зразки з
+    репозиторію)."""
+    files, skipped = scan_target(target)
+    is_directory_mode = os.path.isdir(target)
     results = []
-    for path in iter_input_files(target):
-        results.append(process_file(path, res, cfg, force_template=force_template))
-    return results
+    for path in files:
+        meta = process_file(path, res, cfg, force_template=force_template)
+        if is_directory_mode and res.get("store") is not None:
+            try:
+                moved_to = archive_input_file(path, meta, cfg)
+                if moved_to:
+                    meta["archived_to"] = os.path.relpath(moved_to, cfg["project_root"])
+            except OSError as exc:
+                meta.setdefault("warnings", []).append(
+                    f"не вдалося перенести файл з папки-приймача: {exc}")
+        results.append(meta)
+    return results, skipped

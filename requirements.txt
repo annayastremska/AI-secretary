@@ -6,6 +6,7 @@ pyyaml>=6.0
 python-docx>=1.1.0
 
 # --- Опційне, ставити лише за потреби (див. requirements-optional.txt) ---
+# pymupdf            -- PDF (текстовий шар напряму + рендер сканів для OCR)
 # llama-cpp-python   -- LLM-шар (+ окремо ваги .gguf, у репо їх немає)
 # surya-ocr          -- фото/скани; тягне torch і Pillow, вантажить ~1.5 ГБ ваг
 # minio              -- storage.backend: minio замість локальних файлів
