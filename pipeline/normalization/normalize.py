@@ -2,6 +2,7 @@
 category/text), не за назвою поля чи доменом. Один набір функцій для
 будь-якої схеми.
 """
+import datetime
 import re
 
 UKR_MONTHS = {
@@ -23,9 +24,19 @@ PLACEHOLDER_TOKENS = {
 _BLANK_FILL_RE = re.compile(r'^[_\-–—.\s"\'«»“”„‟]*$')
 
 # Гнучкі лапки (guillemets «», прямі "", фігурні "") -- той самий бланк може
-# мати різні лапки для різних полів; і суфікс "р."/"року" в одному правилі.
-_DATE_IN_TEXT = re.compile(
-    r'[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>[а-яіїє]+|\d{1,2})\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
+# мати різні лапки для різних полів.
+#
+# Суфікс "р."/"року" тепер НЕОБОВ'ЯЗКОВИЙ, і додано числовий формат: раніше
+# вимога суфікса означала, що "з 15 травня 2025 до 20 травня 2025 включно" і
+# "15.05.2025" не розпізнавались узагалі -- систематична прогалина покриття,
+# а не окремий випадок. Порядок важливий: числовий формат перший, бо
+# "15.05.2025" інакше частково зматчився б словесним правилом.
+_DATE_PATTERNS = (
+    re.compile(r'(?<!\d)(?P<day>\d{1,2})[.\-/](?P<month>\d{1,2})[.\-/](?P<year>\d{4})(?!\d)'),
+    re.compile(
+        r'[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>[а-яіїє]+|\d{1,2})\s+'
+        r'(?P<year>\d{4})\s*(?:р\.?|рок\w*)?'
+    ),
 )
 
 
@@ -46,14 +57,31 @@ def month_to_num(month):
     return int(month) if str(month).isdigit() else UKR_MONTHS.get(str(month).lower())
 
 
+def _digits_to_int(value):
+    """None, якщо значення не суто цифрове. Потрібно, бо grammar LLM-виводу
+    не обмежує day/month/year шаблоном цифр: модель може повернути
+    {"day": "невідомо"}, і прямий int() кидав ValueError, який ішов угору й
+    валив ВЕСЬ пакетний прогін, а не лише це поле."""
+    text = str(value).strip()
+    return int(text) if text.isdigit() else None
+
+
 def normalize_date(day, month, year):
+    """ISO-дата або None. Ніколи не кидає виняток на будь-якому вході."""
     if day is None or month is None or year is None:
         return None
-    month_num = month_to_num(month)
-    if month_num is None:
+    day_num = _digits_to_int(day)
+    month_num = month_to_num(month)   # None для невідомої назви місяця
+    year_raw = _digits_to_int(year)
+    if day_num is None or month_num is None or year_raw is None:
         return None
-    year_num = int(year) if len(str(year)) == 4 else 2000 + int(year)
-    return f"{year_num:04d}-{month_num:02d}-{int(day):02d}"
+    year_num = year_raw if len(str(year).strip()) == 4 else 2000 + year_raw
+    try:
+        # datetime валідує діапазони й неможливі дати (31 лютого) замість
+        # того, щоб зібрати формально коректний, але неіснуючий рядок.
+        return datetime.date(year_num, month_num, day_num).isoformat()
+    except ValueError:
+        return None
 
 
 def parse_date_from_text(raw_text):
@@ -61,10 +89,12 @@ def parse_date_from_text(raw_text):
     (напр. block_before_label) -- шукає дату прямо в довільному рядку."""
     if not raw_text or is_placeholder(raw_text):
         return None
-    m = _DATE_IN_TEXT.search(raw_text.lower())
-    if not m:
-        return None
-    return {"day": m.group("day"), "month": m.group("month"), "year": m.group("year")}
+    low = raw_text.lower()
+    for pattern in _DATE_PATTERNS:
+        m = pattern.search(low)
+        if m:
+            return {"day": m.group("day"), "month": m.group("month"), "year": m.group("year")}
+    return None
 
 
 def to_int_or_none(value):
@@ -116,10 +146,87 @@ def build_alias_lookup(dictionary: dict) -> dict:
     return lookup
 
 
-def normalize_nominative_case(raw_name):
-    """TODO: називний відмінок (pymorphy2 uk чи аналог) -- не реалізовано.
-    Заглушка повертає текст без змін."""
-    return raw_name
+_MORPH = None
+_MORPH_LOADED = False
+# Граммеми частин імені в pymorphy3: прізвище / ім'я / по батькові.
+_ROLE_GRAMMEME = {"surname": "Surn", "given_name": "Name", "patronymic": "Patr"}
+_NAME_GRAMMEMES = ("Surn", "Name", "Patr")
+
+
+def _get_morph():
+    """pymorphy3 імпортується ліниво й лише раз: аналізатор важкий, а пайплайн
+    мусить працювати й без нього (тоді поле лишається як у документі, але
+    статус це явно показує)."""
+    global _MORPH, _MORPH_LOADED
+    if not _MORPH_LOADED:
+        _MORPH_LOADED = True
+        try:
+            import pymorphy3
+            _MORPH = pymorphy3.MorphAnalyzer(lang="uk")
+        except Exception:
+            _MORPH = None
+    return _MORPH
+
+
+def _restore_case(original: str, value: str) -> str:
+    """pymorphy3 завжди віддає слово в нижньому регістрі, а в бланках прізвище
+    друкують ВЕЛИКИМИ -- регістр джерела несе інформацію (саме за ним
+    parse_rank_and_name відрізняє прізвище від імені), тому його треба
+    відновити, а не втратити при нормалізації."""
+    if original.isupper():
+        return value.upper()
+    if original[:1].isupper():
+        return value[:1].upper() + value[1:]
+    return value
+
+
+def normalize_nominative_case(raw_name, role=None):
+    """Приводить частину ПІБ до називного відмінка через pymorphy3 (uk).
+
+    Повертає (значення, статус), де статус робить видимим те, що раніше було
+    невидимим: до цього тут була заглушка, яка повертала текст без змін, і
+    поле в родовому відмінку ("Іваненку Івану") виглядало в provenance як
+    звичайний успіх нормалізації.
+
+    Статуси:
+      normalized          -- відмінок змінено
+      already_nominative  -- уже називний, змін не потрібно
+      no_morphology       -- pymorphy3 не встановлено
+      not_a_name          -- морфологія не розпізнала слово як частину імені
+      inflect_failed      -- розпізнала, але не змогла провідмінювати
+
+    role ("surname"/"given_name"/"patronymic") звужує розбір до відповідної
+    граммеми -- інакше прізвище могло б бути провідмінюване як звичайний
+    іменник, що дало б тихо неправильний результат.
+    """
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        return raw_name, "skipped"
+    token = raw_name.strip()
+    if " " in token:
+        # Очікується один токен; складене значення не наша задача -- краще
+        # лишити як є, ніж провідмінювати щось несподіване.
+        return raw_name, "skipped"
+
+    morph = _get_morph()
+    if morph is None:
+        return raw_name, "no_morphology"
+
+    required = _ROLE_GRAMMEME.get(role)
+    parses = morph.parse(token)
+    if required:
+        candidates = [p for p in parses if required in p.tag]
+    else:
+        candidates = [p for p in parses if any(g in p.tag for g in _NAME_GRAMMEMES)]
+    if not candidates:
+        return raw_name, "not_a_name"
+
+    best = candidates[0]
+    if "nomn" in best.tag:
+        return _restore_case(token, best.word), "already_nominative"
+    inflected = best.inflect({"nomn"})
+    if inflected is None:
+        return raw_name, "inflect_failed"
+    return _restore_case(token, inflected.word), "normalized"
 
 
 def normalize_null_if_sentinel(raw_text, sentinel: str):
@@ -160,7 +267,13 @@ def normalize_field(field_def: dict, raw_value, dictionaries: dict):
         return None, False
 
     if normalization == "nominative_case":
-        return (None if is_placeholder(raw_value) else normalize_nominative_case(raw_value)), False
+        if is_placeholder(raw_value):
+            return None, False
+        # Статус морфології тут відкидається: поля ПІБ ідуть через окрему
+        # гілку в build_record, яка його зберігає в provenance. Ця гілка --
+        # для схем, що оголосили nominative_case поза rank_and_name.
+        value, _status = normalize_nominative_case(raw_value)
+        return value, False
 
     if normalization == "null_if_not_issued":
         return normalize_null_if_sentinel(raw_value, field_def.get("not_issued_sentinel", ""))

@@ -22,16 +22,24 @@ import json
 import re
 from collections import Counter
 
+from pipeline.classification.classify import phrase_in_text
 from pipeline.normalization.normalize import is_placeholder
 from pipeline.extraction.schema_grammar import build_json_schema_for_fields, chunk_fields
 
 
 def majority_vote(values):
     """Self-consistency: кілька семплів одного поля (temperature > 0 на боці
-    викликача) -> найчастіше НЕ-порожнє значення. Значення можуть бути будь-
-    якого JSON-типу (str/int/dict/None, бо LLM повертає структуровані
-    значення для date-полів) -- dict/list порівнюються за канонічним JSON-
-    рядком, не за ідентичністю об'єкта."""
+    викликача) -> (значення, чи_був_розкол).
+
+    Значення можуть бути будь-якого JSON-типу (str/int/dict/None, бо LLM
+    повертає структуровані значення для date-полів) -- dict/list
+    порівнюються за канонічним JSON-рядком, не за ідентичністю об'єкта.
+
+    Другий елемент -- прапорець розколу: коли за лідера й за іншого варіанта
+    однакова кількість голосів, переможець визначається порядком у списку,
+    тобто фактично випадково. Раніше такий результат виглядав рівно так само
+    впевнено, як одноголосний, і рев'юер не мав жодного способу це побачити.
+    """
     cleaned = []
     for v in values:
         if v is None:
@@ -42,14 +50,15 @@ def majority_vote(values):
                 continue
         cleaned.append(v)
     if not cleaned:
-        return None
+        return None, False
 
     def key(v):
         return json.dumps(v, sort_keys=True, ensure_ascii=False) if isinstance(v, (dict, list)) else v
 
-    counts = Counter(key(v) for v in cleaned)
-    best_key = counts.most_common(1)[0][0]
-    return next(v for v in cleaned if key(v) == best_key)
+    counts = Counter(key(v) for v in cleaned).most_common()
+    best_key, best_count = counts[0]
+    split = len(counts) > 1 and counts[1][1] == best_count
+    return next(v for v in cleaned if key(v) == best_key), split
 
 
 def flatten_blocks(blocks):
@@ -80,33 +89,67 @@ def group_blocks_into_lines(blocks):
     return [[line.strip() for line in block.split("\n") if line.strip()] for block in blocks]
 
 
+def _is_denylisted(candidate: str, denylist) -> bool:
+    """Кандидат відхиляється, якщо ХОЧ ОДИН його рядок є денай-лист фразою.
+
+    Раніше порівнювалось точним рівнянням усього кандидата, тому
+    багаторядковий кандидат (заголовок бланка + номер наступним рядком) не
+    збігався з фразою денай-листа й мовчки приймався як значення поля --
+    саме той випадок, від якого денай-лист і мав захищати."""
+    if not denylist or not candidate:
+        return False
+    lines = [line.strip().lower() for line in candidate.split("\n") if line.strip()]
+    return any(line in denylist for line in lines)
+
+
 def find_block_before_label(blocks, label_substring, denylist=None):
-    """blocks: результат group_blocks_into_lines(). Шукає лейбл усередині
-    КОЖНОГО блоку окремо:
+    """blocks: результат group_blocks_into_lines().
+    Повертає (значення_або_None, причина), причина:
+    matched | no_label | ambiguous_label | denylisted.
+
+    Логіка пошуку:
     - якщо лейбл не перший рядок свого блоку -- значення це ВСІ рядки того ж
       блоку до лейбла (може бути кілька -- багаторядкове значення);
     - якщо лейбл перший рядок свого блоку -- значення це весь попередній блок.
     Ніколи не змішує рядки з двох різних блоків в одну "лінійну" відстань.
 
-    denylist: фрази (заголовок бланка), які НЕ можуть бути справжнім
-    значенням -- захист від випадку, коли лейбл лежить у тому самому блоці,
-    що й значення сусіднього поля, і "попередній блок" -- це насправді
-    заголовок документа."""
+    Якщо лейбл трапляється в КІЛЬКОХ місцях документа -- це `ambiguous_label`,
+    а не "беремо перше входження". Раніше перше входження вигравало мовчки, і
+    документ із двома схожими лейблами (звання заявника й звання командира)
+    міг дати чуже значення з виглядом повного успіху.
+    """
     low_label = label_substring.lower()
     low_denylist = denylist or set()
+
+    hits = []
     for i, lines in enumerate(blocks):
         for j, line in enumerate(lines):
-            if low_label in line.lower():
-                if j > 0:
-                    candidate = "\n".join(lines[:j])
-                elif i > 0 and blocks[i - 1]:
-                    candidate = "\n".join(blocks[i - 1])
-                else:
-                    return None
-                if candidate.strip().lower() in low_denylist:
-                    return None
-                return candidate
-    return None
+            # Межа слова на початку (як у phrase_in_text): лейбл не має
+            # співпадати всередині іншого слова.
+            if phrase_in_text(line.lower(), low_label):
+                hits.append((i, j))
+
+    if not hits:
+        return None, "no_label"
+
+    candidates = []
+    for i, j in hits:
+        lines = blocks[i]
+        if j > 0:
+            candidates.append("\n".join(lines[:j]))
+        elif i > 0 and blocks[i - 1]:
+            candidates.append("\n".join(blocks[i - 1]))
+
+    if not candidates:
+        return None, "no_label"
+    distinct = {c.strip() for c in candidates}
+    if len(distinct) > 1:
+        return None, "ambiguous_label"
+
+    candidate = candidates[0]
+    if _is_denylisted(candidate, low_denylist):
+        return None, "denylisted"
+    return candidate, "matched"
 
 
 def first_block_starting_with(blocks, prefix):
@@ -144,12 +187,16 @@ def parse_rank_and_name(raw_line, rank_alias_lookup):
             break
     rank_result = {"code": rank_value[0], "label": rank_value[1]} if rank_value else None
     name_tokens = tokens[rank_len:]
-    surname = next((t for t in name_tokens if t.isupper() and len(t) > 1), None)
-    if surname is None:
+    surname_index = next((k for k, t in enumerate(name_tokens)
+                          if t.isupper() and len(t) > 1), None)
+    if surname_index is None:
         return rank_result, {"surname": None, "given_name": None, "patronymic": None}
-    rest = [t for t in name_tokens if t != surname]
+    # Видаляємо прізвище за ПОЗИЦІЄЮ, не за значенням: фільтр `t != surname`
+    # прибирав ОБИДВА входження, якщо OCR здублював токен або ім'я збігалося з
+    # прізвищем -- і по батькові зсувалося в поле імені.
+    rest = name_tokens[:surname_index] + name_tokens[surname_index + 1:]
     return rank_result, {
-        "surname": surname,
+        "surname": name_tokens[surname_index],
         "given_name": rest[0] if rest else None,
         "patronymic": rest[1] if len(rest) > 1 else None,
     }
@@ -193,6 +240,7 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     results = {}
     rank_and_name_cache = None   # рахуємо один раз на документ, не на кожне поле
     rank_raw_line = None         # знайдений рядок "звання ПІБ" -- підказка для LLM
+    rank_label_reason = "no_label"
     localized_gaps, global_gaps, hints = [], [], {}
 
     rank_field = next((f for f in schema["fields"] if f.get("name") == "rank"), None)
@@ -204,16 +252,18 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
 
         if mode == "rank_and_name_tokenized":
             if rank_and_name_cache is None:
-                rank_raw_line = find_block_before_label(grouped_blocks, field["label_before"], denylist)
+                rank_raw_line, label_reason = find_block_before_label(
+                    grouped_blocks, field["label_before"], denylist)
                 if rank_raw_line and field.get("strip_prefix"):
                     rank_raw_line = strip_literal_prefix(rank_raw_line, field["strip_prefix"])
                 rank_and_name_cache = parse_rank_and_name(rank_raw_line, rank_alias_lookup)
+                rank_label_reason = label_reason
             rank_result, name_parts = rank_and_name_cache
             value = rank_result if name == "rank" else name_parts.get(name)
             if value:
                 results[name] = (value, "matched")
             else:
-                results[name] = (None, "no_value")
+                results[name] = (None, rank_label_reason if rank_label_reason != "matched" else "no_value")
                 # рядок знайдено, не вдався лише розбір -> локалізована прогалина
                 if rank_raw_line:
                     hints[name] = rank_raw_line
@@ -222,16 +272,18 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                     global_gaps.append(name)
 
         elif mode == "block_before_label":
-            raw = find_block_before_label(grouped_blocks, field["label_before"], denylist)
+            raw, label_reason = find_block_before_label(
+                grouped_blocks, field["label_before"], denylist)
             if raw is not None and field.get("strip_prefix"):
                 raw = strip_literal_prefix(raw, field["strip_prefix"])
             if raw is None:
-                # Місце не локалізоване (лейбл не знайдено АБО кандидат
-                # відхилений denylist-ом). Підказку не даємо навмисно:
-                # відхилений кандидат -- це саме неправильний текст, і
-                # передавати його в LLM означало б підштовхувати до тієї
-                # самої помилки.
-                results[name] = (None, "no_value")
+                # Місце не локалізоване (лейбл відсутній / неоднозначний /
+                # кандидат відхилений denylist-ом). Підказку не даємо
+                # навмисно: відхилений кандидат -- це саме неправильний
+                # текст, і передавати його в LLM означало б підштовхувати до
+                # тієї самої помилки. Причина зберігається в provenance, щоб
+                # "лейбл неоднозначний" не виглядало як "поля просто немає".
+                results[name] = (None, label_reason)
                 global_gaps.append(name)
             else:
                 results[name] = (raw, "matched")
@@ -280,13 +332,26 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 results[name] = (None, f"llm_error:{type(exc).__name__}")
             return
         for name in batch_names:
-            voted = majority_vote([s.get(name) for s in samples if isinstance(s, dict)])
-            results[name] = (voted, "llm") if voted is not None else (None, "no_value")
+            voted, split = majority_vote([s.get(name) for s in samples if isinstance(s, dict)])
+            if voted is None:
+                results[name] = (None, "no_value")
+            else:
+                # llm_split_vote -- голоси розділились навпіл, переможець
+                # обраний фактично випадково; для рев'юера це має виглядати
+                # інакше, ніж одноголосний результат.
+                results[name] = (voted, "llm_split_vote" if split else "llm")
 
-    # локалізовані прогалини: контекст -- лише знайдений фрагмент
-    for batch_names in chunk_fields(localized_gaps, batch_size):
-        local_context = "\n".join(dict.fromkeys(hints[n] for n in batch_names if n in hints))
-        run_group(batch_names, local_context or ocr_text)
+    # Локалізовані прогалини: контекст -- лише знайдений фрагмент. Групуємо за
+    # САМОЮ підказкою, а не просто по batch_size: інакше поля з РІЗНИМИ
+    # підказками потрапляли в один виклик, усі підказки склеювались в один
+    # контекст без прив'язки "яка кому належить", і LLM могла приписати
+    # підказку одного поля іншому.
+    hint_groups = {}
+    for name in localized_gaps:
+        hint_groups.setdefault(hints.get(name, ""), []).append(name)
+    for hint, names in hint_groups.items():
+        for batch_names in chunk_fields(names, batch_size):
+            run_group(batch_names, hint or ocr_text)
 
     # нелокалізовані: контекст -- увесь документ, іншого немає
     for batch_names in chunk_fields(global_gaps, batch_size):

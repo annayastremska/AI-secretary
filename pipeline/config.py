@@ -49,6 +49,9 @@ DEFAULTS = {
         # Surya всередині запускає llama.cpp-сервер; на Windows зручніше
         # вказати шлях до вже зібраного бінарника, ніж збирати з джерел.
         "llama_server_path": None,
+        # Скільки паралельних інференсів дозволяє Surya (env
+        # SURYA_INFERENCE_PARALLEL). Раніше було зашито в коді.
+        "inference_parallel": 2,
     },
     "storage": {
         # Локальні файли -- єдиний бекенд. Зовнішнє сховище й БД -- поза
@@ -83,16 +86,35 @@ def _merge(base: dict, override: dict) -> dict:
     return base
 
 
+def resolve_config_path(path, project_root):
+    """Шлях до самого config.yaml теж прив'язується до кореня проєкту, а не
+    лише до CWD. Раніше запуск не з кореня репо (напр. з планувальника
+    завдань) МОВЧКИ не знаходив конфіг і падав у дефолтний режим без LLM/OCR,
+    без жодного попередження. Повертає (шлях_або_None, чи_знайдено)."""
+    if not path:
+        return None, False
+    if os.path.isabs(path):
+        return path, os.path.exists(path)
+    if os.path.exists(path):
+        return path, True
+    from_root = os.path.join(project_root, path)
+    return from_root, os.path.exists(from_root)
+
+
 def load_config(path=None, project_root=None) -> dict:
     """Читає YAML поверх DEFAULTS. Відносні шляхи розгортаються від
     project_root (за замовчуванням -- каталог, що містить pipeline/), щоб
     запуск із будь-якої робочої директорії давав той самий результат."""
     cfg = deepcopy(DEFAULTS)
-    if path and os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
+    root = project_root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    resolved, found = resolve_config_path(path, root)
+    cfg["config_path"] = resolved
+    cfg["config_found"] = found
+    if found:
+        with open(resolved, encoding="utf-8") as f:
             _merge(cfg, yaml.safe_load(f) or {})
 
-    root = project_root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg["project_root"] = root
     for section, key in _PATH_KEYS:
         value = cfg.get(section, {}).get(key)

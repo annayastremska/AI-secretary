@@ -15,7 +15,10 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _BR_RE = re.compile(r"<br\s*/?>")
 
 
-def make_surya_reader(llama_server_path=None, inference_parallel="2"):
+DEFAULT_INFERENCE_PARALLEL = "2"
+
+
+def make_surya_reader(llama_server_path=None, inference_parallel=None):
     """Повертає callable(image_path) -> list[{"text","bbox"}].
 
     Модель вантажиться один раз на процес (замикання), не на кожен файл --
@@ -25,7 +28,8 @@ def make_surya_reader(llama_server_path=None, inference_parallel="2"):
     Colab він збирається з джерел; на Windows простіше вказати шлях до вже
     готового бінарника, ніж тягнути тулчейн.
     """
-    os.environ.setdefault("SURYA_INFERENCE_PARALLEL", inference_parallel)
+    os.environ.setdefault("SURYA_INFERENCE_PARALLEL",
+                          str(inference_parallel or DEFAULT_INFERENCE_PARALLEL))
     if llama_server_path:
         os.environ["LLAMA_CPP_BINARY"] = llama_server_path
 
@@ -36,11 +40,9 @@ def make_surya_reader(llama_server_path=None, inference_parallel="2"):
     manager = SuryaInferenceManager()
     predictor = RecognitionPredictor(manager)
 
-    def read(image_path: str):
-        image = ImageOps.exif_transpose(Image.open(image_path)).convert("RGB")
-        predictions = predictor([image])
+    def _blocks_from(prediction):
         blocks = []
-        for block in predictions[0].blocks:
+        for block in prediction.blocks:
             plain = _BR_RE.sub("\n", block.html)
             plain = _TAG_RE.sub("", plain)
             plain = html.unescape(plain).strip()
@@ -50,6 +52,21 @@ def make_surya_reader(llama_server_path=None, inference_parallel="2"):
                 # sort_blocks_by_geometry, ніж AttributeError тут або тиха
                 # робота з переплутаним порядком блоків.
                 blocks.append({"text": plain, "bbox": getattr(block, "bbox", None)})
+        return blocks
+
+    def read(image_path: str):
+        """Читає ВСІ кадри багатосторінкового файлу (TIFF), не лише перший:
+        Image.open() відкриває тільки перший кадр, тому решта сторінок раніше
+        мовчки ігнорувалась. Кадри обробляються окремо й склеюються за
+        порядком -- як сторінки PDF."""
+        source = Image.open(image_path)
+        frames = getattr(source, "n_frames", 1)
+        blocks = []
+        for index in range(frames):
+            if frames > 1:
+                source.seek(index)
+            image = ImageOps.exif_transpose(source).convert("RGB")
+            blocks.extend(_blocks_from(predictor([image])[0]))
         return blocks
 
     return read

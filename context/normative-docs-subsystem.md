@@ -292,4 +292,4 @@ architecture-proposal.md, який передбачає окремий менш 
 - PostgreSQL, повнотекстовий пошук (конфігурації мов) —
   https://www.postgresql.org/docs/current/textsearch.html
 - Результати власних тестів моделей (витягування задекларованого vs домислювання
-  відсутнього) — `docs_to_md/colab_llm_testing.ipynb`.
+  відсутнього) — `notebooks/colab_llm_testing.ipynb`.

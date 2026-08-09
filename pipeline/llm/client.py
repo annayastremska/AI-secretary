@@ -13,6 +13,7 @@ Grammar НЕ гарантує правдивості значення -- лиш�
 """
 import json
 import os
+import threading
 
 
 def _escape_gbnf(literal: str) -> str:
@@ -36,35 +37,44 @@ class LlamaClient:
         self.verbose = verbose
         self._llm = None
         self._grammar_cache = {}
+        # Ліниве створення моделі й мутація кешу грамматик не потокобезпечні
+        # самі по собі, а run.py прямо каже, що цей код планується викликати
+        # "у майбутньому з веб-бекенда" -- тобто конкурентно. Лок дешевий і
+        # знімає ризик до того, як він з'явиться. Сам інференс llama.cpp теж
+        # серіалізується цим локом: один процес -> одна модель у пам'яті.
+        self._lock = threading.RLock()
 
     # --- модель ---
 
     @property
     def llm(self):
-        if self._llm is None:
-            from llama_cpp import Llama
-            kwargs = dict(model_path=self.model_path, n_ctx=self.n_ctx,
-                          n_gpu_layers=self.n_gpu_layers, chat_format=self.chat_format,
-                          verbose=self.verbose)
-            if self.n_threads:
-                kwargs["n_threads"] = self.n_threads
-            self._llm = Llama(**kwargs)
-        return self._llm
+        with self._lock:
+            if self._llm is None:
+                from llama_cpp import Llama
+                kwargs = dict(model_path=self.model_path, n_ctx=self.n_ctx,
+                              n_gpu_layers=self.n_gpu_layers, chat_format=self.chat_format,
+                              verbose=self.verbose)
+                if self.n_threads:
+                    kwargs["n_threads"] = self.n_threads
+                self._llm = Llama(**kwargs)
+            return self._llm
 
     def _grammar_from_choices(self, choices):
         key = ("choices", tuple(choices))
-        if key not in self._grammar_cache:
-            from llama_cpp import LlamaGrammar
-            rule = " | ".join(f'"{_escape_gbnf(c)}"' for c in choices)
-            self._grammar_cache[key] = LlamaGrammar.from_string(f"root ::= {rule}")
-        return self._grammar_cache[key]
+        with self._lock:
+            if key not in self._grammar_cache:
+                from llama_cpp import LlamaGrammar
+                rule = " | ".join(f'"{_escape_gbnf(c)}"' for c in choices)
+                self._grammar_cache[key] = LlamaGrammar.from_string(f"root ::= {rule}")
+            return self._grammar_cache[key]
 
     def _grammar_from_json_schema(self, json_schema):
         payload = json.dumps(json_schema, sort_keys=True, ensure_ascii=False)
-        if payload not in self._grammar_cache:
-            from llama_cpp import LlamaGrammar
-            self._grammar_cache[payload] = LlamaGrammar.from_json_schema(payload)
-        return self._grammar_cache[payload]
+        with self._lock:
+            if payload not in self._grammar_cache:
+                from llama_cpp import LlamaGrammar
+                self._grammar_cache[payload] = LlamaGrammar.from_json_schema(payload)
+            return self._grammar_cache[payload]
 
     # --- допоміжне ---
 
@@ -90,11 +100,12 @@ class LlamaClient:
 
     def choose(self, prompt: str, choices: list) -> str:
         """Вибір рівно одного варіанта з choices (класифікація шаблону/домену)."""
-        resp = self.llm.create_chat_completion(
-            messages=self._messages(self._trim(prompt)),
-            max_tokens=16, temperature=0.0,
-            grammar=self._grammar_from_choices(choices),
-        )
+        grammar = self._grammar_from_choices(choices)
+        with self._lock:
+            resp = self.llm.create_chat_completion(
+                messages=self._messages(self._trim(prompt)),
+                max_tokens=16, temperature=0.0, grammar=grammar,
+            )
         return resp["choices"][0]["message"]["content"].strip()
 
     def extract_batch(self, field_defs: list, context_text: str, json_schema: dict) -> dict:
@@ -112,12 +123,13 @@ class LlamaClient:
             "не вигадуй. Відповідай лише JSON-об'єктом.\n\n"
             f"Поля:\n{field_descriptions}\n\nТекст документа:\n{self._trim(context_text)}"
         )
-        resp = self.llm.create_chat_completion(
-            messages=self._messages(user),
-            max_tokens=64 * max(1, len(field_defs)),
-            temperature=self.temperature,
-            grammar=self._grammar_from_json_schema(json_schema),
-        )
+        grammar = self._grammar_from_json_schema(json_schema)
+        with self._lock:
+            resp = self.llm.create_chat_completion(
+                messages=self._messages(user),
+                max_tokens=64 * max(1, len(field_defs)),
+                temperature=self.temperature, grammar=grammar,
+            )
         return json.loads(resp["choices"][0]["message"]["content"])
 
 

@@ -42,16 +42,20 @@ def extract_docx_blocks(path: str):
     # перевіряємо, бо секція без власного header успадковує header
     # попередньої секції -- без цієї перевірки один і той самий текст
     # задублювався б для кожної секції документа.
-    seen_headers = set()
+    # Дедуплікація за id() тут була б тим самим багом, що вже знайдений для
+    # клітинок нижче (lxml перевикористовує id звільнених проксі), тому
+    # порівнюємо за самим ВМІСТОМ header/footer: він короткий, а різні секції
+    # з однаковою шапкою -- це справді один і той самий текст.
+    seen_header_texts = set()
     for section in doc.sections:
         for part in (section.header, section.footer):
-            if part.is_linked_to_previous or id(part) in seen_headers:
+            if part.is_linked_to_previous:
                 continue
-            seen_headers.add(id(part))
-            for para in part.paragraphs:
-                text = para.text.strip()
-                if text:
-                    blocks.append(text)
+            part_texts = tuple(p.text.strip() for p in part.paragraphs if p.text.strip())
+            if not part_texts or part_texts in seen_header_texts:
+                continue
+            seen_header_texts.add(part_texts)
+            blocks.extend(part_texts)
 
     for para in doc.paragraphs:
         text = para.text.strip()
@@ -71,17 +75,27 @@ def extract_docx_blocks(path: str):
     # Тримаємо сильні посилання на елементи -- поки посилання живе, lxml
     # гарантує той самий проксі, отже id стабільний і не перевикористаний.
     seen_ids, seen_refs = set(), []
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                tc = cell._tc
-                if id(tc) in seen_ids:
-                    continue
-                seen_ids.add(id(tc))
-                seen_refs.append(tc)
-                text = cell.text.strip()
-                if text:
-                    blocks.append(text)
+
+    def walk_tables(tables):
+        """Рекурсивно, бо таблиця може лежати ВСЕРЕДИНІ клітинки іншої
+        таблиці (у бланках це звичайна річ), а `doc.tables` віддає лише
+        верхній рівень -- вкладені раніше не читались узагалі й мовчки
+        випадали з екстракції."""
+        for table in tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    tc = cell._tc
+                    if id(tc) in seen_ids:
+                        continue
+                    seen_ids.add(id(tc))
+                    seen_refs.append(tc)
+                    text = cell.text.strip()
+                    if text:
+                        blocks.append(text)
+                    if cell.tables:
+                        walk_tables(cell.tables)
+
+    walk_tables(doc.tables)
     return "\n".join(blocks), blocks
 
 
@@ -127,12 +141,17 @@ def file_sha256(path: str) -> str:
 
 
 def extract_pdf_blocks(path: str, ocr_fn=None):
-    """PDF двома шляхами, залежно від того, чи є текстовий шар:
+    """PDF, рішення "текстовий шар чи скан" ПО КОЖНІЙ СТОРІНЦІ окремо:
 
-    - є текст -> `page.get_text("blocks")` дає блоки РАЗОМ з координатами,
-      тому PDF отримує таку саму геометричну обробку, як OCR, без OCR;
-    - тексту фактично немає (скан у PDF-обгортці) -> сторінки рендеряться в
-      зображення й ідуть через ocr_fn.
+    - сторінка з текстом -> `page.get_text("blocks")` дає блоки РАЗОМ з
+      координатами, тому PDF отримує таку саму геометричну обробку, як OCR,
+      без OCR;
+    - сторінка без тексту (скан, вклеєне фото) -> рендериться в зображення й
+      іде через ocr_fn.
+
+    Раніше рішення приймалось один раз на весь документ за середнім числом
+    символів, тому сторінка-скан усередині текстового PDF ніколи не
+    потрапляла в OCR і мовчки випадала.
 
     Блоки сортуються ВСЕРЕДИНІ кожної сторінки, а сторінки склеюються за
     порядком: спільне сортування по всьому документу перемішало б сторінки
@@ -147,36 +166,39 @@ def extract_pdf_blocks(path: str, ocr_fn=None):
             f"Для PDF потрібен PyMuPDF (pip install pymupdf): {path}"
         ) from exc
 
+    import tempfile
+
     blocks = []
+    pages_needing_ocr = []
     with fitz.open(path) as doc:
-        total_chars = sum(len(page.get_text() or "") for page in doc)
-        has_text_layer = total_chars >= MIN_TEXT_CHARS_PER_PAGE * max(1, doc.page_count)
-
-        if has_text_layer:
-            for page in doc:
-                page_blocks = []
-                for b in page.get_text("blocks"):
-                    # (x0, y0, x1, y1, text, block_no, block_type); type 1 -- зображення
-                    if len(b) >= 7 and b[6] != 0:
-                        continue
-                    text = (b[4] or "").strip()
-                    if text:
-                        page_blocks.append({"text": text, "bbox": (b[0], b[1], b[2], b[3])})
-                blocks.extend(sort_blocks_by_geometry(page_blocks))
-            return "\n".join(blocks), blocks
-
-        if ocr_fn is None:
-            raise ValueError(
-                f"У PDF {path} немає текстового шару (скан), а OCR не налаштовано "
-                "(ocr.engine: none у конфізі)."
-            )
-
-        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, page in enumerate(doc):
+                page_text = page.get_text() or ""
+                if len(page_text.strip()) >= MIN_TEXT_CHARS_PER_PAGE:
+                    page_blocks = []
+                    for b in page.get_text("blocks"):
+                        # (x0, y0, x1, y1, text, block_no, block_type); 1 -- зображення
+                        if len(b) >= 7 and b[6] != 0:
+                            continue
+                        text = (b[4] or "").strip()
+                        if text:
+                            page_blocks.append({"text": text, "bbox": (b[0], b[1], b[2], b[3])})
+                    blocks.extend(sort_blocks_by_geometry(page_blocks))
+                    continue
+
+                # Сторінка без текстового шару
+                if ocr_fn is None:
+                    pages_needing_ocr.append(i + 1)
+                    continue
                 image_path = os.path.join(tmpdir, f"page_{i:03d}.png")
                 page.get_pixmap(dpi=PDF_RENDER_DPI).save(image_path)
                 blocks.extend(sort_blocks_by_geometry(ocr_fn(image_path)))
+
+    if pages_needing_ocr and not blocks:
+        raise ValueError(
+            f"У PDF {path} немає текстового шару (скан), а OCR не налаштовано "
+            "(ocr.engine: none у конфізі)."
+        )
     return "\n".join(blocks), blocks
 
 

@@ -16,7 +16,7 @@ import os
 
 import yaml
 
-from pipeline.classification.classify import classify_domain_rules
+from pipeline.classification.classify import classify_domain_rules, phrase_in_text
 
 TITLE_WEIGHT = 5     # заголовок бланка -- найсильніший сигнал
 ANCHOR_WEIGHT = 2    # характерні лейбли/номер додатка -- підтверджувальні
@@ -43,10 +43,13 @@ def schema_title_phrases(schema: dict) -> list:
 
 
 def score_schema(text: str, schema: dict) -> int:
-    low = text.lower()
-    ident = schema.get("identification", {})
-    title_hits = sum(1 for p in ident.get("title", []) if p.lower() in low)
-    anchor_hits = sum(1 for p in ident.get("anchors", []) if p.lower() in low)
+    """phrase_in_text, а не `p in low`: підрядковий збіг без межі слова давав
+    бал чужій схемі, коли короткий анкор випадково траплявся всередині
+    іншого слова або в цитаті документа іншого типу."""
+    low = (text or "").lower()
+    ident = schema.get("identification") or {}
+    title_hits = sum(1 for p in ident.get("title", []) if phrase_in_text(low, p))
+    anchor_hits = sum(1 for p in ident.get("anchors", []) if phrase_in_text(low, p))
     return title_hits * TITLE_WEIGHT + anchor_hits * ANCHOR_WEIGHT
 
 
@@ -75,7 +78,8 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
         coarse_domain, _ = classify_domain_rules(text, domains)
 
     if best_template is not None:
-        min_score = by_template[best_template].get("identification", {}).get("min_score", DEFAULT_MIN_SCORE)
+        ident = by_template[best_template].get("identification") or {}
+        min_score = ident.get("min_score", DEFAULT_MIN_SCORE)
         # Строга нерівність: рівний бал двох шаблонів -- це неоднозначність,
         # а не перемога того, хто випадково перший у списку.
         if best_score >= min_score and best_score > runner_up_score:
@@ -86,9 +90,10 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
                 "scores": scores, "reason": None,
             }
 
+    llm_error = None
     if llm_choose is not None and schemas:
         options = "\n".join(
-            f"- {s['template']}: " + (s.get("identification", {}).get("description")
+            f"- {s['template']}: " + ((s.get("identification") or {}).get("description")
                                        or s.get("domain", ""))
             for s in schemas
         )
@@ -96,7 +101,13 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
             "Визнач, який це бланк документа, з переліку нижче, або 'unknown', "
             f"якщо жоден не підходить.\n\n{options}\n\nТекст документа:\n{text}"
         )
-        answer = llm_choose(prompt, [s["template"] for s in schemas] + ["unknown"]).strip()
+        try:
+            answer = llm_choose(prompt, [s["template"] for s in schemas] + ["unknown"]).strip()
+        except Exception as exc:
+            # Збій LLM на ідентифікації не має валити прогін: документ
+            # деградує в unresolved (з причиною), а решта батчу обробляється.
+            # Без цього try/except будь-яка помилка моделі тут валила все.
+            answer, llm_error = None, f"llm_error:{type(exc).__name__}"
         if answer in by_template:
             schema = by_template[answer]
             return {
@@ -105,7 +116,12 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
                 "scores": scores, "reason": None,
             }
 
-    reason = "ambiguous" if best_score and best_score == runner_up_score else "no_template_match"
+    if llm_error:
+        reason = llm_error
+    elif best_score and best_score == runner_up_score:
+        reason = "ambiguous"
+    else:
+        reason = "no_template_match"
     return {
         "schema": None, "template": None, "domain": coarse_domain,
         "source": None, "score": best_score, "runner_up": runner_up_score,

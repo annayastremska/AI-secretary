@@ -26,7 +26,22 @@ STATUS_MARK = {
 }
 
 
+def _force_utf8_output():
+    """Кирилиця в stdout/stderr незалежно від кодової сторінки консолі й
+    редіректу у файл. Без цього `python run_pipeline.py > log.txt` на Windows
+    міг кинути UnicodeEncodeError уже ПІСЛЯ того, як усі документи успішно
+    оброблені й збережені -- втрачався лише звіт, але виглядало як падіння."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv=None):
+    _force_utf8_output()
     parser = argparse.ArgumentParser(description="Обробка документів у структуровані записи")
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--input", default=None, help="файл або папка; за замовчуванням paths.input_dir")
@@ -36,6 +51,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
+    if not cfg.get("config_found"):
+        # Явно, а не мовчки: без цього запуск не з кореня репо тихо працював
+        # у дефолтному режимі (без LLM/OCR), і причина була невидима.
+        print(f"[увага] конфіг не знайдено ({args.config}) -- працюємо на значеннях "
+              f"за замовчуванням з pipeline/config.py (LLM і OCR вимкнені)", file=sys.stderr)
     target = args.input or cfg["paths"]["input_dir"]
     if not os.path.exists(target):
         print(f"Немає такого шляху: {target}", file=sys.stderr)

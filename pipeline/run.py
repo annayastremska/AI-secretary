@@ -111,7 +111,8 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
     if cfg["ocr"].get("engine") == "surya":
         from pipeline.ocr.surya_reader import make_surya_reader
         try:
-            res["ocr"] = make_surya_reader(cfg["ocr"].get("llama_server_path"))
+            res["ocr"] = make_surya_reader(cfg["ocr"].get("llama_server_path"),
+                                           cfg["ocr"].get("inference_parallel"))
         except Exception as exc:
             res["warnings"].append(f"OCR недоступний ({type(exc).__name__}: {exc}) -- зображення не обробляться")
 
@@ -309,7 +310,22 @@ def process_target(target: str, res: dict, cfg: dict, force_template=None):
     is_directory_mode = os.path.isdir(target)
     results = []
     for path in files:
-        meta = process_file(path, res, cfg, force_template=force_template)
+        try:
+            meta = process_file(path, res, cfg, force_template=force_template)
+        except Exception as exc:
+            # Ізоляція збою по документу: без цього одна несподівана помилка на
+            # одному файлі валила ВЕСЬ пакетний прогін, і решта папки лишалась
+            # необробленою. process_file і сам намагається не кидати винятків,
+            # але це остання лінія -- вона мусить бути, бо гарантія "вихід
+            # існує завжди" не може залежати від того, що ми передбачили всі
+            # можливі помилки всередині.
+            results.append({
+                "id": None, "status": "unresolved",
+                "source_file": os.path.basename(path),
+                "uploaded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "reason": f"необроблена помилка: {type(exc).__name__}: {exc}",
+            })
+            continue
         if is_directory_mode and res.get("store") is not None:
             try:
                 moved_to = archive_input_file(path, meta, cfg)

@@ -76,6 +76,7 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
 
         raw_value, reason = raw_extraction.get(name, (None, "no_value"))
         confirmed_empty = False
+        morph_status = None
 
         if field.get("extraction") == "rank_and_name_tokenized":
             if field.get("type") == "category":
@@ -84,8 +85,13 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
                 # -- resolve_category приводить обидва до однієї форми.
                 lookup = dictionaries.get(field["category"], {})
                 normalized = resolve_category(raw_value, lookup)
+            elif is_placeholder(raw_value):
+                normalized = None
             else:
-                normalized = None if is_placeholder(raw_value) else normalize_nominative_case(raw_value)
+                # role=name звужує морфологічний розбір до потрібної частини
+                # імені (Surn/Name/Patr), а статус іде в provenance -- щоб
+                # "не нормалізовано" не виглядало як успішна нормалізація.
+                normalized, morph_status = normalize_nominative_case(raw_value, role=name)
         elif field.get("extraction") == "derived_from":
             source_raw, _ = raw_extraction.get(field["derived_from"], (None, None))
             normalized = DERIVE_FUNCS[field["derive"]](source_raw)
@@ -110,6 +116,11 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
             "criticality": criticality,
             "resolved": not (unresolved or confirmed_empty),
         }
+        if morph_status is not None:
+            # Видимий статус морфології: normalized / already_nominative /
+            # no_morphology / not_a_name / inflect_failed. Три останні
+            # означають, що значення лишилось у відмінку джерела.
+            field_provenance[name]["morphology"] = morph_status
 
         if confirmed_empty:
             confirmed_empty_fields.append(name)

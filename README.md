@@ -35,14 +35,14 @@
 
 ```bash
 pip install -r requirements.txt
-python scripts/download_model.py        # ваги MamayLM 4B (~2.5 ГБ) у models/
+python scripts/download_model.py        # ваги MamayLM 12B (~6.8 ГБ) у models/
 cp config.example.yaml config.yaml
 ```
 
 `config.example.yaml` вказує саме туди, куди скрипт кладе ваги, тому конфіг
 правити не потрібно. Ваги окремим кроком, бо pip їх встановити не може: це
-файл на кілька ГБ, а не пакет. Для якіснішої 12B —
-`python scripts/download_model.py --size 12b` (~6.8 ГБ) і одна правка
+файл на кілька ГБ, а не пакет. Якщо машина не тягне 12B, є
+`python scripts/download_model.py --size 4b` (~2.5 ГБ) і одна правка
 `model_path` у `config.yaml`.
 
 **Про `llama-cpp-python`:** на PyPI лежить лише source distribution, тому
