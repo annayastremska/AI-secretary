@@ -45,6 +45,11 @@ GHP="ghp_$(printf 'A%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 
 AWS="AKIA$(printf 'Q%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16)"
 SLK="xoxb-$(printf '1%.0s' 1 2 3 4 5 6)-$(printf 'a%.0s' 1 2 3 4 5 6 7 8 9 10)"
 KEY="-----BEGIN $(printf 'RSA ')PRIVATE KEY-----"
+SKKEY="sk-$(printf 'B%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24)"
+# false-positive fixtures (2026-08 repo adoptions): loopback dev URL, prose slug
+LOCALURL="postgresql+asyncpg://app:$(printf 'p%.0s' 1 2 3 4 5 6 7 8)@127.0.0.1:5432/app"
+REMOTEURL="postgres://deploy:$(printf 's%.0s' 1 2 3 4 5 6 7 8 9 10)@db.example.com/prod"
+SLUG="https://news.example/kursk-$(printf 'a%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22)-hit"
 
 echo "== bones-check selftest =="
 
@@ -66,6 +71,22 @@ rm -rf "$D"
 
 D=$(mk_tree); printf '\000\000%s\n' "$GHP" > "$D/src/blob.bin"
 t "NUL-prefixed (binary) secret still caught" 1 -- run_in "$D" env
+rm -rf "$D"
+
+D=$(mk_tree); printf 'key=%s\n' "$SKKEY" > "$D/src/config.txt"
+t "standalone sk- key still fails" 1 --grep "ROTATE" -- run_in "$D" env
+rm -rf "$D"
+
+D=$(mk_tree); printf 'source: %s\n' "$SLUG" > "$D/src/notes.md"
+t "sk- inside a hyphenated URL slug passes" 0 -- run_in "$D" env
+rm -rf "$D"
+
+D=$(mk_tree); printf 'DB_URL=%s\n' "$LOCALURL" > "$D/src/dev-env.txt"
+t "loopback dev URL cred passes" 0 -- run_in "$D" env
+rm -rf "$D"
+
+D=$(mk_tree); printf 'DB_URL=%s\n' "$REMOTEURL" > "$D/src/dev-env.txt"
+t "remote URL cred still fails" 1 --grep "ROTATE" -- run_in "$D" env
 rm -rf "$D"
 
 D=$(mk_tree); mkdir -p "$D/src/tools"; printf '%s\n' "$AWS" > "$D/src/tools/bones-check.sh"

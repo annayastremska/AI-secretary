@@ -12,6 +12,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -23,8 +24,13 @@ jobs:
 
   # the gate audits itself: the council's game-day negative tests, permanent.
   # Every bypass the red team found must KEEP failing — forever.
+  # Template-only: the fixtures copy the whole tree (cheap here, hours in a
+  # grown team repo — see the 2026-08 extraction hang). Stamped repos consume
+  # the gate; auditing it stays where it evolves.
   selftest:
+    if: endsWith(github.repository, '-template')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: bones-check selftest
