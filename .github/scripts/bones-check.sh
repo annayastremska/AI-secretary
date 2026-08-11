@@ -108,9 +108,13 @@ cred_pattern='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(^|[^A-Za-
 # dropped — contrived enough to accept; the history scan still sees every commit.
 scan_allow='^\./\.github/scripts/bones-check\.sh:|://[^@[:space:]]*@(127\.0\.0\.1|localhost)([:/[:space:]]|$)'
 scan_raw="$(mktemp)" && scan_out="$(mktemp)" || { echo "::error::credential scan could not start (mktemp failed) — treating as FAILED, not clean"; exit 1; }
-grep -rnE --binary-files=text --exclude-dir=.git "$cred_pattern" . > "$scan_raw"
+# LC_ALL=C on every scan grep: in a UTF-8 locale grep goes through the multibyte
+# machinery and megabyte-long single lines (exported HTML decks with base64 images)
+# take minutes-to-hours per line; byte mode is >500x faster and the patterns are
+# pure ASCII, so matching semantics do not change (found: 2026-08 extraction hang).
+LC_ALL=C grep -rnE --binary-files=text --exclude-dir=.git "$cred_pattern" . > "$scan_raw"
 rc_scan=$?
-grep --binary-files=text -vE "$scan_allow" "$scan_raw" > "$scan_out"
+LC_ALL=C grep --binary-files=text -vE "$scan_allow" "$scan_raw" > "$scan_out"
 rc_filter=$?
 matches="$(cat "$scan_out")"
 rm -f "$scan_raw" "$scan_out"
@@ -135,10 +139,10 @@ if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ] \
   hist_raw="$(mktemp)" && hist_grep="$(mktemp)" && hist_out="$(mktemp)" || { echo "::error::history scan could not start (mktemp failed) — treating as FAILED, not clean"; exit 1; }
   git log -p "$base"..HEAD -- . ':(exclude).github/scripts/bones-check.sh' > "$hist_raw"
   rc_log=$?
-  grep -nE --binary-files=text "$cred_pattern" "$hist_raw" > "$hist_grep"
+  LC_ALL=C grep -nE --binary-files=text "$cred_pattern" "$hist_raw" > "$hist_grep"
   rc_hgrep=$?
   # same allowlist as the tree scan: loopback dev URLs are convention, not leaks
-  grep --binary-files=text -vE '://[^@[:space:]]*@(127\.0\.0\.1|localhost)([:/[:space:]]|$)' "$hist_grep" > "$hist_out"
+  LC_ALL=C grep --binary-files=text -vE '://[^@[:space:]]*@(127\.0\.0\.1|localhost)([:/[:space:]]|$)' "$hist_grep" > "$hist_out"
   rc_hfilter=$?
   hist_matches="$(cat "$hist_out")"
   rm -f "$hist_raw" "$hist_grep" "$hist_out"
