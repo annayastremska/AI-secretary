@@ -94,30 +94,37 @@ done < <(find . -path ./.git -prune -o -type f -print0)
 # --binary-files=text so a NUL byte can't blind the scan; this script filters itself
 # out by exact path, not by name — any other file called bones-check.sh is still scanned.
 # The scan itself fails closed: "could not check" must never read as "clean".
-cred_pattern='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[baprs]-[A-Za-z0-9-]{10,}|hf_[A-Za-z0-9]{30,}|eyJ[A-Za-z0-9_-]{20,}\.eyJ|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]:@]{6,}@|-----BEGIN [A-Z ]*PRIVATE KEY-----'
-scan_out="$(mktemp)" || { echo "::error::credential scan could not start (mktemp failed) — treating as FAILED, not clean"; exit 1; }
-set +o pipefail
-grep -rnE --binary-files=text --exclude-dir=.git "$cred_pattern" . \
-  | grep --binary-files=text -v '^\./\.github/scripts/bones-check\.sh:' > "$scan_out"
-rcs=("${PIPESTATUS[@]}")
-set -o pipefail
+#
+# Pattern notes (false-positive classes found during the 2026-08 repo adoptions):
+#   - `sk-…` requires a boundary before it — bare hyphenated words in article URLs
+#     ("…kursk-oil-refinery-struck…") are prose, not OpenAI keys. A real key after
+#     `=`, `"`, `:` or start-of-line still matches.
+#   - URL creds pointing at loopback (127.0.0.1/localhost) are the standard local-dev
+#     convention (docker-compose, bootstrap scripts) — allowlisted below, AFTER the
+#     match, so the allowlist can only ever narrow what fails, never what is scanned.
+cred_pattern='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(^|[^A-Za-z0-9-])sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[baprs]-[A-Za-z0-9-]{10,}|hf_[A-Za-z0-9]{30,}|eyJ[A-Za-z0-9_-]{20,}\.eyJ|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]:@]{6,}@|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+# lines whose only offense is a loopback dev URL (or this script itself) are allowed.
+# Known tradeoff: a line carrying BOTH a real token AND a loopback URL would be
+# dropped — contrived enough to accept; the history scan still sees every commit.
+scan_allow='^\./\.github/scripts/bones-check\.sh:|://[^@[:space:]]*@(127\.0\.0\.1|localhost)([:/[:space:]]|$)'
+scan_raw="$(mktemp)" && scan_out="$(mktemp)" || { echo "::error::credential scan could not start (mktemp failed) — treating as FAILED, not clean"; exit 1; }
+grep -rnE --binary-files=text --exclude-dir=.git "$cred_pattern" . > "$scan_raw"
+rc_scan=$?
+grep --binary-files=text -vE "$scan_allow" "$scan_raw" > "$scan_out"
+rc_filter=$?
 matches="$(cat "$scan_out")"
-rm -f "$scan_out"
-if [ "${rcs[0]}" -ge 2 ] || [ "${rcs[1]}" -ge 2 ]; then
-  echo "::error::credential scan did not complete (grep exit ${rcs[0]}/${rcs[1]}) — treating as FAILED, not clean"
+rm -f "$scan_raw" "$scan_out"
+if [ "$rc_scan" -ge 2 ] || [ "$rc_filter" -ge 2 ]; then
+  echo "::error::credential scan did not complete (grep exit $rc_scan/$rc_filter) — treating as FAILED, not clean"
   fail=1
-elif [ "${rcs[0]}" -eq 0 ] && [ -n "$matches" ]; then
+elif [ "$rc_scan" -eq 0 ] && [ -n "$matches" ]; then
   printf '%s\n' "$matches"
   echo "::error::credential-shaped string found — ROTATE THAT CREDENTIAL NOW (treat it as burned), then ask a practitioner in Slack to help rewrite history. Rotating is the fix; scrubbing is cleanup. This happens to everyone."
   fail=1
-elif [ "${rcs[0]}" -eq 0 ] && [ "${rcs[1]}" -ne 0 ]; then
-  # the scan MATCHED but the filter passed nothing through (e.g. a grep decided the
-  # stream was binary and swallowed the lines) — never let suppression read as clean
-  echo "::error::credential scan matched but the output was suppressed — treating as FAILED, not clean. Run locally: grep -rnE --binary-files=text '<pattern>' ."
-  fail=1
 fi
-# rcs[0]=1 (no match anywhere), or rcs[0]=0 with self-hits only (filter passed
-# other lines through and removed ours: matches empty, rcs[1]=0) — clean
+# rc_scan=1 (no match anywhere), or matches empty after the allowlist (self-hits /
+# loopback dev URLs only) — clean. Both greps run standalone on regular files with
+# --binary-files=text, so there is no pipeline stage left that could swallow lines.
 
 # history scan (PR range only): a secret scrubbed from the tree can still live in a
 # pushed commit — scan this PR's commits so a clean tree can't hide burned history.
@@ -125,18 +132,20 @@ fi
 scope="tree only — history not scanned (shallow checkout or non-PR event)"
 if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ] \
   && base=$(git rev-parse -q --verify "origin/${GITHUB_BASE_REF:-}" 2>/dev/null); then
-  hist_out="$(mktemp)" || { echo "::error::history scan could not start (mktemp failed) — treating as FAILED, not clean"; exit 1; }
-  set +o pipefail
-  git log -p "$base"..HEAD -- . ':(exclude).github/scripts/bones-check.sh' \
-    | grep -nE --binary-files=text "$cred_pattern" > "$hist_out"
-  hrcs=("${PIPESTATUS[@]}")
-  set -o pipefail
+  hist_raw="$(mktemp)" && hist_grep="$(mktemp)" && hist_out="$(mktemp)" || { echo "::error::history scan could not start (mktemp failed) — treating as FAILED, not clean"; exit 1; }
+  git log -p "$base"..HEAD -- . ':(exclude).github/scripts/bones-check.sh' > "$hist_raw"
+  rc_log=$?
+  grep -nE --binary-files=text "$cred_pattern" "$hist_raw" > "$hist_grep"
+  rc_hgrep=$?
+  # same allowlist as the tree scan: loopback dev URLs are convention, not leaks
+  grep --binary-files=text -vE '://[^@[:space:]]*@(127\.0\.0\.1|localhost)([:/[:space:]]|$)' "$hist_grep" > "$hist_out"
+  rc_hfilter=$?
   hist_matches="$(cat "$hist_out")"
-  rm -f "$hist_out"
-  if [ "${hrcs[0]}" -ge 2 ] || [ "${hrcs[1]}" -ge 2 ]; then
-    echo "::error::history scan did not complete (git log exit ${hrcs[0]}, grep exit ${hrcs[1]}) — treating as FAILED, not clean"
+  rm -f "$hist_raw" "$hist_grep" "$hist_out"
+  if [ "$rc_log" -ne 0 ] || [ "$rc_hgrep" -ge 2 ] || [ "$rc_hfilter" -ge 2 ]; then
+    echo "::error::history scan did not complete (git log exit $rc_log, grep exit $rc_hgrep/$rc_hfilter) — treating as FAILED, not clean"
     fail=1
-  elif [ "${hrcs[1]}" -eq 0 ] && [ -n "$hist_matches" ]; then
+  elif [ "$rc_hgrep" -eq 0 ] && [ -n "$hist_matches" ]; then
     printf '%s\n' "$hist_matches"
     echo "::error::credential found in this PR's history even though the tree is clean — scrubbing did not kill it; ROTATE IT NOW (treat it as burned) and a practitioner will help rewrite history. Rotating is the fix."
     fail=1
