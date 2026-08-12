@@ -26,6 +26,10 @@ fields:
   # самостійним. Без strip_prefix токенізація зсувалась: "Видано"/"рядовий"
   # потрапляли в given_name/patronymic замість самого імені.
   - name: rank
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: rank
     type: category
     category: military_rank
     extraction: rank_and_name_tokenized
@@ -34,6 +38,10 @@ fields:
     db_target: person
 
   - name: surname
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: surname
     type: text
     extraction: rank_and_name_tokenized
     strip_prefix: "Видано"
@@ -41,6 +49,10 @@ fields:
     db_target: person
 
   - name: given_name
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: given_name
     type: text
     extraction: rank_and_name_tokenized
     strip_prefix: "Видано"
@@ -48,6 +60,10 @@ fields:
     db_target: person
 
   - name: patronymic
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: patronymic
     type: text
     extraction: rank_and_name_tokenized
     strip_prefix: "Видано"
@@ -56,6 +72,10 @@ fields:
 
   - name: position_and_workplace
     type: text
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: position
     extraction: llm   # бланк дає посаду й місце роботи одним вільнотекстовим полем, без лейбл-якоря
     note: "Поле під заголовком «(посада, місце роботи)» — не розділене на бланку."
     db_target: additional_info
@@ -68,6 +88,10 @@ fields:
 
   - name: destination_org
     type: object_ref
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: deployment_org
     registry: military_unit
     extraction: block_before_label
     label_before: "найменування військової частини, установи, організації"
@@ -75,6 +99,10 @@ fields:
 
   - name: deployment_days
     type: number
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: deployment_days
     extraction: regex
     regex_variants:
       - pattern: 'відрядження\s*[«"“„]?(?P<value>\d+)[»"”‟]?\s*днів'
@@ -100,11 +128,19 @@ fields:
 
   - name: purpose
     type: text
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: deployment_purpose
     extraction: llm   # «мета відрядження» — вільний текст, без контрольованого словника
     db_target: additional_info
 
   - name: basis_order_date
     type: date
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: order_date
     extraction: regex
     normalization: iso_date
     note: >
@@ -117,6 +153,10 @@ fields:
 
   - name: basis_order_number
     type: text
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: order_number
     extraction: regex
     regex_variants:
       - pattern: 'наказ від[^№]*№\s*(?P<value>\S+)'
@@ -143,8 +183,28 @@ fields:
       прогону з кількома заповненими зупинками.
     db_target: additional_info
 
-# document_number / document_date -- немає на цьому бланку (лише кутовий
-# штамп, не пронумерований запис) -- перевірено за повним текстом docx.
+  # ВИПРАВЛЕНО за синтетичним набором (11.08.2026). Раніше тут стояв
+  # priority: deferred з коментарем "реального номера в бланку немає" -- це
+  # висновок з ПОРОЖНЬОГО шаблону, де номер не надрукований. У заповнених
+  # документах номер і дата видачі стоять ОДНИМ рядком: "№ 201    від
+  # 20.05.2026". Обидва regex прив'язані до "від <дата>", тому вони не можуть
+  # злапати "Додаток 28" -- саме через цей ризик поле й було відкладене.
+  - name: document_number
+    type: text
+    extraction: regex
+    dimension: document_number
+    regex_variants:
+      - pattern: '№\s*(?P<value>[\w/\-]+)\s+від\s+\d{1,2}\.\d{1,2}\.\d{4}'
+    db_target: additional_info
+
+  - name: document_date
+    type: date
+    extraction: regex
+    normalization: iso_date
+    dimension: document_date
+    regex_variants:
+      - pattern: '№\s*[\w/\-]+\s+від\s+(?P<day>\d{1,2})\.(?P<month>\d{1,2})\.(?P<year>\d{4})'
+    db_target: additional_info
 
 # Довідник для цього шаблону не потрібен додатковий: єдине категоріальне
 # поле — rank, і military_rank уже існує. "мета"/"підстава" — вільний текст.

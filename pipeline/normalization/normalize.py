@@ -10,10 +10,17 @@ UKR_MONTHS = {
     "липня": 7, "серпня": 8, "вересня": 9, "жовтня": 10, "листопада": 11, "грудня": 12,
 }
 
+MIN_PLAUSIBLE_YEAR = 1900
+MAX_PLAUSIBLE_YEAR = 2100
+
 PLACEHOLDER_TOKENS = {
     "redacted", "???", "",
     "не заповнено", "не вказано", "не зазначено", "не видано", "не видавались",
     "відсутнє", "відсутній", "відсутня", "немає",
+    # Стандартні канцелярські скорочення: "н/д" -- немає даних, "б/н" --
+    # без номера (документ/наказ без номера). Раніше не входили в перелік --
+    # такі значення проходили як реальний текст замість чесної прогалини.
+    "н/д", "б/н",
 }
 
 # Незаповнене поле бланка часто лишається як ряд підкреслень/рисок/лапок
@@ -54,7 +61,10 @@ def is_placeholder(raw_text) -> bool:
 
 
 def month_to_num(month):
-    return int(month) if str(month).isdigit() else UKR_MONTHS.get(str(month).lower())
+    # .strip() обов'язковий: grammar LLM-виводу не обмежує форму рядка, тож
+    # " травня " з одним зайвим пробілом знищувало дату цілком.
+    text = str(month).strip()
+    return int(text) if text.isdigit() else UKR_MONTHS.get(text.lower())
 
 
 def _digits_to_int(value):
@@ -76,11 +86,23 @@ def normalize_date(day, month, year):
     if day_num is None or month_num is None or year_raw is None:
         return None
     year_num = year_raw if len(str(year).strip()) == 4 else 2000 + year_raw
+    # Діапазон року: LLM під grammar може віддати "202" -> 2202, і datetime
+    # прийме таку дату як цілком валідну. Документообіг частини не містить
+    # дат поза цими межами, тож усе інше -- помилка розпізнавання, не дата.
+    if not (MIN_PLAUSIBLE_YEAR <= year_num <= MAX_PLAUSIBLE_YEAR):
+        return None
     try:
         # datetime валідує діапазони й неможливі дати (31 лютого) замість
         # того, щоб зібрати формально коректний, але неіснуючий рядок.
+        # OverflowError -- окремо від ValueError: LLM під grammar не обмежує
+        # ДОВЖИНУ цифрового рядка day/month (лише те, що це цифри), тому
+        # аномально довгий рядок ("99999999999999999999") проходить
+        # _digits_to_int (Python int довільної точності) і падає лише тут,
+        # коли datetime намагається звести його до C long. Без цього виняток
+        # ішов угору й губив ВЕСЬ документ замість чесного None для одного
+        # поля -- відтворено напряму.
         return datetime.date(year_num, month_num, day_num).isoformat()
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
 
 
@@ -104,6 +126,93 @@ def to_int_or_none(value):
         return None
 
 
+# Числа прописом. Потрібні не для повноти, а тому що на реальному бланку
+# кількість днів надрукована ЛИШЕ словом: рядок "терміном на" / "тринадцять" /
+# "(кількість днів прописом)" -- цифри в документі немає взагалі. Regex на
+# цифри через це давав None у 9 з 16 відпускних квитків синтетичного набору.
+# Діапазон свідомо обмежений 1..31 (найбільше комбіноване значення --
+# "тридцять один"): це кількість днів/діб, не довільне число.
+
+# Верхня межа для ЦИФРОВОГО шляху number_from_words (словесний і так
+# обмежений структурою UKR_NUMBER_WORDS вище). Без неї захоплений OCR-шум
+# (номер документа, рік тощо) на regex-провалі для day-полів (duration_days/
+# deployment_days) міг дати правдоподібне, але довільне число днів без
+# жодної помилки. 366 -- з запасом (повний рік): цифрою можуть записати
+# довший сумарний період, ніж є у словесному переліку.
+MAX_PLAUSIBLE_DAYS = 366
+
+UKR_NUMBER_WORDS = {
+    "один": 1, "одна": 1, "одну": 1, "два": 2, "дві": 2, "три": 3, "чотири": 4,
+    "п'ять": 5, "шість": 6, "сім": 7, "вісім": 8, "дев'ять": 9, "десять": 10,
+    "одинадцять": 11, "дванадцять": 12, "тринадцять": 13, "чотирнадцять": 14,
+    "п'ятнадцять": 15, "шістнадцять": 16, "сімнадцять": 17, "вісімнадцять": 18,
+    "дев'ятнадцять": 19, "двадцять": 20, "тридцять": 30,
+}
+_APOSTROPHES = "’‘`´"
+
+
+def number_from_words(raw_value):
+    """'тринадцять' -> 13; 'двадцять один' -> 21; '13' -> 13; інше -> None.
+
+    Складені числа ("двадцять сім") -- сума двох частин, бо українською
+    записуються окремими словами. Апострофи в документах бувають різні
+    (’ ‘ ` ´), тому зводяться до одного.
+    """
+    if raw_value is None:
+        return None
+    direct = to_int_or_none(str(raw_value).strip())
+    if direct is not None:
+        return direct if 1 <= direct <= MAX_PLAUSIBLE_DAYS else None
+    text = str(raw_value).lower().strip()
+    for ch in _APOSTROPHES:
+        text = text.replace(ch, "'")
+    tokens = [t for t in re.split(r"[\s\-]+", text) if t]
+    total, matched = 0, 0
+    for token in tokens[:2]:      # максимум "двадцять сім"
+        value = UKR_NUMBER_WORDS.get(token)
+        if value is None:
+            break
+        total += value
+        matched += 1
+    return total if matched else None
+
+
+def lemmatize_phrase(text):
+    """'старшого сержанта' -> 'старший сержант'. None, якщо морфології немає.
+
+    Потрібно тому, що в документах звання й категорії стоять у тому відмінку,
+    якого вимагає речення бланка ("Видано старшому сержанту ..."), а довідник
+    містить називний. Точний рядковий збіг через це давав "термін не
+    розпізнано" на цілком звичайних формах -- перевірено: "підполковника",
+    "рядового", "старшого сержанта" не знаходились жодна.
+
+    Аліаси-стеми довідника ("відрядж") лематизація не псує: вона лише ДОДАЄ
+    ключі через setdefault, ніколи не замінюючи точні.
+    """
+    morph = _get_morph()
+    if morph is None or not isinstance(text, str) or not text.strip():
+        return None
+    lemmas = []
+    for token in text.split():
+        parses = morph.parse(token)
+        lemmas.append(parses[0].normal_form if parses else token.lower())
+    result = " ".join(lemmas)
+    return result if result != text.strip().lower() else None
+
+
+def lookup_alias(candidate, alias_lookup: dict):
+    """Точний збіг, інакше -- збіг за лемою. Єдина точка, щоб обидва шляхи
+    (match_dictionary і токенізація звання+ПІБ) поводились однаково."""
+    if not candidate:
+        return None
+    key = str(candidate).strip().lower()
+    hit = alias_lookup.get(key)
+    if hit is not None:
+        return hit
+    lemma = lemmatize_phrase(key)
+    return alias_lookup.get(lemma) if lemma else None
+
+
 def match_dictionary(raw_text, alias_lookup: dict):
     """Точний рядковий збіг після нормалізації. Незнайдений термін -> рядок-
     маркер, не None і не 0 (розділ 3.4 ТЗ: нуль не можна відрізнити від
@@ -112,7 +221,7 @@ def match_dictionary(raw_text, alias_lookup: dict):
     if not raw_text or is_placeholder(raw_text):
         return None
     normalized = re.sub(r"\s*за\s*\d{4}\s*рік\s*[,.;]?\s*$", "", raw_text.strip().lower())
-    hit = alias_lookup.get(normalized)
+    hit = lookup_alias(normalized, alias_lookup)
     return {"code": hit[0], "label": hit[1]} if hit else "термін не розпізнано"
 
 
@@ -139,10 +248,22 @@ def resolve_category(value, alias_lookup: dict):
 
 
 def build_alias_lookup(dictionary: dict) -> dict:
+    """Стійкий до неповних записів довідника: запис без `aliases`, alias-число
+    чи alias-null раніше валили ВЕСЬ прогін (KeyError/AttributeError із
+    load_dictionaries), хоч правка YAML -- це заявлений штатний спосіб
+    розширення системи. Некоректний запис тихо пропускається на рівні alias,
+    а не забирає з собою решту довідника."""
     lookup = {}
-    for value in dictionary["values"]:
-        for alias in value["aliases"]:
-            lookup[alias.strip().lower()] = (value["code"], value["label"])
+    for value in (dictionary or {}).get("values") or []:
+        if not isinstance(value, dict) or not value.get("code"):
+            continue
+        code, label = value["code"], value.get("label", value["code"])
+        for alias in value.get("aliases") or []:
+            if isinstance(alias, str) and alias.strip():
+                lookup[alias.strip().lower()] = (code, label)
+        # Сам код теж має бути шляхом до значення: LLM під grammar-enum
+        # віддає саме код, і без цього він залежав від resolve_category.
+        lookup.setdefault(str(code).strip().lower(), (code, label))
     return lookup
 
 
@@ -180,24 +301,63 @@ def _restore_case(original: str, value: str) -> str:
     return value
 
 
-def normalize_nominative_case(raw_name, role=None):
+def _name_parses(token, role=None):
+    """Розбори pymorphy3, обмежені граммемою частини імені (Surn/Name/Patr)."""
+    morph = _get_morph()
+    if morph is None or not isinstance(token, str) or not token.strip():
+        return []
+    text = token.strip()
+    if " " in text:
+        return []
+    required = _ROLE_GRAMMEME.get(role)
+    parses = morph.parse(text)
+    if required:
+        return [p for p in parses if required in p.tag]
+    return [p for p in parses if any(g in p.tag for g in _NAME_GRAMMEMES)]
+
+
+def detect_name_case(token, role=None):
+    """nominative | oblique | None -- у якому відмінку стоїть частина ПІБ.
+
+    Використовується як ПІДКАЗКА для інших частин того самого ПІБ: по батькові
+    має найхарактерніші форми ("Едуардович" проти "Едуардовича"), тому саме за
+    ним найнадійніше видно, чи все ПІБ у називному, чи в непрямому відмінку.
+    None -- сигнал невідомості (немає розбору або він неоднозначний)."""
+    candidates = _name_parses(token, role)
+    if not candidates:
+        return None
+    has_nominative = any("nomn" in p.tag for p in candidates)
+    has_oblique = any("nomn" not in p.tag for p in candidates)
+    if has_nominative and not has_oblique:
+        return "nominative"
+    if has_oblique and not has_nominative:
+        return "oblique"
+    return None
+
+
+def normalize_nominative_case(raw_name, role=None, case_hint=None):
     """Приводить частину ПІБ до називного відмінка через pymorphy3 (uk).
+    Повертає (значення, статус).
 
-    Повертає (значення, статус), де статус робить видимим те, що раніше було
-    невидимим: до цього тут була заглушка, яка повертала текст без змін, і
-    поле в родовому відмінку ("Іваненку Івану") виглядало в provenance як
-    звичайний успіх нормалізації.
+    Статуси: normalized | already_nominative | no_morphology | not_a_name |
+    inflect_failed | ambiguous_case.
 
-    Статуси:
-      normalized          -- відмінок змінено
-      already_nominative  -- уже називний, змін не потрібно
-      no_morphology       -- pymorphy3 не встановлено
-      not_a_name          -- морфологія не розпізнала слово як частину імені
-      inflect_failed      -- розпізнала, але не змогла провідмінювати
+    ГОЛОВНЕ ПРАВИЛО (виправлення підтвердженого тестом руйнівного бага):
+    якщо серед розборів є хоч один у називному відмінку -- слово НЕ
+    відмінюється. Раніше брався просто перший розбір, і для жіночих прізвищ
+    на -ова/-ева перший розбір -- це родовий відмінок ЧОЛОВІЧОГО прізвища:
+    "ПЕТРОВА" ставало "ПЕТРОВ", "КОВАЛЬОВА" -> "КОВАЛЬОВ". У базу йшла інша
+    людина, а provenance показував `normalized`, тобто успіх. Скор pymorphy3
+    тут не допомагає -- він 1.0 в усіх варіантів (перевірено).
 
-    role ("surname"/"given_name"/"patronymic") звужує розбір до відповідної
-    граммеми -- інакше прізвище могло б бути провідмінюване як звичайний
-    іменник, що дало б тихо неправильний результат.
+    case_hint ("oblique"/"nominative") -- підказка від іншої частини того
+    самого ПІБ. Потрібна для справді неоднозначних слів: "ПЕТРОВА" може бути
+    і називним жіночим, і родовим чоловічим, і без контексту вибір
+    неможливий. Якщо по батькові стоїть у непрямому відмінку
+    ("Едуардовича"), то й прізвище непряме -- тоді відмінюємо.
+
+    role звужує розбір до граммеми частини імені (Surn/Name/Patr), інакше
+    прізвище могло б відмінюватись як звичайний іменник.
     """
     if not isinstance(raw_name, str) or not raw_name.strip():
         return raw_name, "skipped"
@@ -211,19 +371,31 @@ def normalize_nominative_case(raw_name, role=None):
     if morph is None:
         return raw_name, "no_morphology"
 
-    required = _ROLE_GRAMMEME.get(role)
-    parses = morph.parse(token)
-    if required:
-        candidates = [p for p in parses if required in p.tag]
-    else:
-        candidates = [p for p in parses if any(g in p.tag for g in _NAME_GRAMMEMES)]
+    candidates = _name_parses(token, role)
     if not candidates:
         return raw_name, "not_a_name"
 
-    best = candidates[0]
-    if "nomn" in best.tag:
-        return _restore_case(token, best.word), "already_nominative"
-    inflected = best.inflect({"nomn"})
+    nominative = [p for p in candidates if "nomn" in p.tag]
+    oblique = [p for p in candidates if "nomn" not in p.tag]
+
+    if nominative and not oblique:
+        return _restore_case(token, nominative[0].word), "already_nominative"
+
+    if nominative and oblique:
+        # Неоднозначно. За замовчуванням НЕ чіпаємо: лишити слово як у
+        # документі -- це прогалина нормалізації, а зіпсувати рід -- це тихо
+        # інша людина. Відмінюємо лише коли решта ПІБ прямо каже "непрямий".
+        if case_hint == "nominative":
+            # Решта ПІБ прямо каже "називний" -- це ДОКАЗ, а не відсутність
+            # доказу. Розділено навмисно: раніше і "по батькові каже називний",
+            # і "підказки немає" давали однаковий ambiguous_case, тому кожне
+            # жіноче прізвище на -ова виглядало так само непевно, як
+            # прізвище без жодного свідчення про відмінок.
+            return _restore_case(token, nominative[0].word), "already_nominative"
+        if case_hint != "oblique":
+            return _restore_case(token, nominative[0].word), "ambiguous_case"
+
+    inflected = (oblique or candidates)[0].inflect({"nomn"})
     if inflected is None:
         return raw_name, "inflect_failed"
     return _restore_case(token, inflected.word), "normalized"
@@ -231,13 +403,22 @@ def normalize_nominative_case(raw_name, role=None):
 
 def normalize_null_if_sentinel(raw_text, sentinel: str):
     """Повертає (значення, чи_підтверджено_порожнє). Розрізняє "документ
-    прямо каже, що цього немає" від "не вдалося прочитати" -- обидва раніше
-    давали однаковий None і губили цю різницю."""
-    if not raw_text or is_placeholder(raw_text):
+    прямо каже, що цього немає" від "не вдалося прочитати" -- обидва інакше
+    дали б однаковий None і згубили цю різницю.
+
+    Семантика раніше була ІНВЕРТОВАНА в обидва боки (підтверджено тестом):
+    реальне значення повертало True (тобто "підтверджено порожнє"), а сам
+    сентинел до цієї функції взагалі не доходив, бо його першим перехоплював
+    is_placeholder -- ті самі фрази є в PLACEHOLDER_TOKENS. Тому сентинел
+    тепер перевіряється ПЕРШИМ, до перевірки на placeholder."""
+    if raw_text is None:
         return None, False
-    if raw_text.strip().lower() == sentinel.lower():
-        return None, True
-    return raw_text.strip(), True
+    text = str(raw_text).strip()
+    if sentinel and text.lower() == sentinel.strip().lower():
+        return None, True          # документ прямо каже "не видавались"
+    if not text or is_placeholder(text):
+        return None, False         # не вдалося прочитати
+    return text, False             # реальне значення
 
 
 def normalize_field(field_def: dict, raw_value, dictionaries: dict):
@@ -256,7 +437,9 @@ def normalize_field(field_def: dict, raw_value, dictionaries: dict):
         return resolve_category(raw_value, lookup), False
 
     if field_type == "number":
-        return to_int_or_none(raw_value), False
+        # number_from_words, а не to_int_or_none: приймає і цифру, і пропис.
+        # Порядок саме такий -- цифра перевіряється першою всередині.
+        return number_from_words(raw_value), False
 
     if field_type == "date":
         if isinstance(raw_value, dict):

@@ -1,0 +1,1922 @@
+{
+ "input": "data/samples/leave/synthetic-2026-05/docx",
+ "llm": false,
+ "per_key": {
+  "ПІБ": [
+   15,
+   16
+  ],
+  "військова_частина": [
+   16,
+   16
+  ],
+  "дата_видачі": [
+   0,
+   16
+  ],
+  "днів": [
+   0,
+   16
+  ],
+  "звання": [
+   8,
+   16
+  ],
+  "кінець": [
+   15,
+   16
+  ],
+  "місце": [
+   0,
+   16
+  ],
+  "номер_документа": [
+   0,
+   16
+  ],
+  "повернення": [
+   15,
+   16
+  ],
+  "початок": [
+   15,
+   16
+  ],
+  "підстава": [
+   16,
+   16
+  ]
+ },
+ "results": [
+  {
+   "id": "LEAVE-001",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "102"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-10",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-10",
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-22",
+     "expected": "2026-05-22"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-23",
+     "expected": "2026-05-23"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 13
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "м. житомир"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "щорічна основна відпустка за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "лемешко",
+      "романівна",
+      "соломія"
+     ],
+     "expected": [
+      "лемешко",
+      "романівна",
+      "соломія"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [
+      "soldier",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 11,
+   "source_file": "LEAVE-001.docx"
+  },
+  {
+   "id": "LEAVE-002",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "109"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-05",
+     "expected": "2026-05-03"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-05",
+     "expected": "2026-05-05"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-09",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-10",
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 5
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка за сімейними обставинами",
+     "expected": "м. івано-франківськ"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка за сімейними обставинами",
+     "expected": "відпустка за сімейними обставинами"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "богуславович",
+      "рубець",
+      "яків"
+     ],
+     "expected": [
+      "богуславович",
+      "рубець",
+      "яків"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [
+      "soldier",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 11,
+   "source_file": "LEAVE-002.docx"
+  },
+  {
+   "id": "LEAVE-003",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "116"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-10",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-10",
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-23",
+     "expected": "2026-05-23"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-24",
+     "expected": "2026-05-24"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 14
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік",
+     "expected": "м. житомир"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік",
+     "expected": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "арсенович",
+      "борислав",
+      "конопля"
+     ],
+     "expected": [
+      "арсенович",
+      "борислав",
+      "конопля"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_soldier",
+      "старший солдат"
+     ],
+     "expected": "старший солдат"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-003.docx"
+  },
+  {
+   "id": "LEAVE-004",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "117"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-10",
+     "expected": "2026-05-08"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-10",
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-15",
+     "expected": "2026-05-15"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-16",
+     "expected": "2026-05-16"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 6
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк",
+     "expected": "м. житомир"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк",
+     "expected": "відпустка для лікування після хвороби згідно з висновком влк"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "матяш",
+      "миколай",
+      "трохимович"
+     ],
+     "expected": [
+      "матяш",
+      "миколай",
+      "трохимович"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [
+      "soldier",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 11,
+   "source_file": "LEAVE-004.docx"
+  },
+  {
+   "id": "LEAVE-005",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "needs_review",
+   "confirmed": false,
+   "review_queue": "unconfirmed_fact",
+   "date_range_error": null,
+   "unknown_critical_fields": [
+    "rank"
+   ],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "118"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-05",
+     "expected": "2026-05-03"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-05",
+     "expected": "2026-05-05"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-12",
+     "expected": "2026-05-12"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-13",
+     "expected": "2026-05-13"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 8
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "м. полтава"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "щорічна основна відпустка за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "валерій",
+      "максимович",
+      "оберемко"
+     ],
+     "expected": [
+      "валерій",
+      "максимович",
+      "оберемко"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [],
+     "expected": "старшина"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 11,
+   "source_file": "LEAVE-005.docx"
+  },
+  {
+   "id": "LEAVE-006",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "124"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-16",
+     "expected": "2026-05-13"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-16",
+     "expected": "2026-05-16"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-29",
+     "expected": "2026-05-29"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-30",
+     "expected": "2026-05-30"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 14
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка у зв'язку з навчанням",
+     "expected": "м. івано-франківськ"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка у зв'язку з навчанням",
+     "expected": "відпустка у зв'язку з навчанням"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "влох",
+      "олесьович",
+      "святослав"
+     ],
+     "expected": [
+      "влох",
+      "олесьович",
+      "святослав"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_sergeant",
+      "старший сержант"
+     ],
+     "expected": "старший сержант"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-006.docx"
+  },
+  {
+   "id": "LEAVE-007",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "126"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-12",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-12",
+     "expected": "2026-05-12"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-25",
+     "expected": "2026-05-25"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-26",
+     "expected": "2026-05-26"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 14
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк",
+     "expected": "м. рівне"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк",
+     "expected": "відпустка для лікування після хвороби згідно з висновком влк"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "макар",
+      "матяш",
+      "павлович"
+     ],
+     "expected": [
+      "макар",
+      "матяш",
+      "павлович"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_sergeant",
+      "старший сержант"
+     ],
+     "expected": "старший сержант"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-007.docx"
+  },
+  {
+   "id": "LEAVE-008",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "130"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-18",
+     "expected": "2026-05-16"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-18",
+     "expected": "2026-05-18"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-26",
+     "expected": "2026-05-26"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-27",
+     "expected": "2026-05-27"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 9
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "м. чернівці"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "щорічна основна відпустка за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "миронович",
+      "руслан",
+      "ющенко"
+     ],
+     "expected": [
+      "миронович",
+      "руслан",
+      "ющенко"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_soldier",
+      "старший солдат"
+     ],
+     "expected": "старший солдат"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-008.docx"
+  },
+  {
+   "id": "LEAVE-009",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "133"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-11",
+     "expected": "2026-05-08"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-11",
+     "expected": "2026-05-11"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-20",
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-21",
+     "expected": "2026-05-21"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 10
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік",
+     "expected": "м. полтава"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік",
+     "expected": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "леонідович",
+      "опанасенко",
+      "ростислав"
+     ],
+     "expected": [
+      "леонідович",
+      "опанасенко",
+      "ростислав"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_sergeant",
+      "старший сержант"
+     ],
+     "expected": "старший сержант"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-009.docx"
+  },
+  {
+   "id": "LEAVE-010",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "136"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-02",
+     "expected": "2026-05-01"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-02",
+     "expected": "2026-05-02"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-14",
+     "expected": "2026-05-14"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-15",
+     "expected": "2026-05-15"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 13
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "м. суми"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "щорічна основна відпустка за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "давимука",
+      "михайлович",
+      "франц"
+     ],
+     "expected": [
+      "давимука",
+      "михайлович",
+      "франц"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "sergeant",
+      "сержант"
+     ],
+     "expected": "сержант"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-010.docx"
+  },
+  {
+   "id": "LEAVE-011",
+   "категорія": "зіпсований",
+   "вада": "empty_fields",
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "needs_review",
+   "confirmed": false,
+   "review_queue": "unconfirmed_fact",
+   "date_range_error": null,
+   "unknown_critical_fields": [
+    "rank",
+    "surname",
+    "given_name",
+    "patronymic",
+    "leave_start_date",
+    "leave_end_date_planned"
+   ],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "143"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": null,
+     "expected": "2026-05-07"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": false,
+     "ours": null,
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": false,
+     "ours": null,
+     "expected": "2026-05-19"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": false,
+     "ours": null,
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 11
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка у зв'язку з навчанням",
+     "expected": "м. хмельницький"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка у зв'язку з навчанням",
+     "expected": "відпустка у зв'язку з навчанням"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": false,
+     "ours": null,
+     "expected": [
+      "артеменко",
+      "віталійович",
+      "прохір"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 2,
+   "fields_total": 11,
+   "source_file": "LEAVE-011.docx"
+  },
+  {
+   "id": "LEAVE-012",
+   "категорія": "зіпсований",
+   "вада": "unknown_person",
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "needs_review",
+   "confirmed": false,
+   "review_queue": "unconfirmed_fact",
+   "date_range_error": null,
+   "unknown_critical_fields": [
+    "rank"
+   ],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "147"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-10",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-10",
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-19",
+     "expected": "2026-05-19"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-20",
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 10
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "м. рівне"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна основна відпустка за 2026 рік",
+     "expected": "щорічна основна відпустка за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "ковердюк",
+      "мирослав",
+      "ілларіонович"
+     ],
+     "expected": [
+      "ковердюк",
+      "мирослав",
+      "ілларіонович"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [],
+     "expected": "старший прапорщик"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 11,
+   "source_file": "LEAVE-012.docx"
+  },
+  {
+   "id": "LEAVE-013",
+   "категорія": "пара",
+   "вада": null,
+   "чинний": false,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "150"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-08",
+     "expected": "2026-05-05"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-08",
+     "expected": "2026-05-08"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-21",
+     "expected": "2026-05-21"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-22",
+     "expected": "2026-05-22"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 14
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк",
+     "expected": "м. львів"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк",
+     "expected": "відпустка для лікування після хвороби згідно з висновком влк"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "вадимович",
+      "килимник",
+      "трохим"
+     ],
+     "expected": [
+      "вадимович",
+      "килимник",
+      "трохим"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [
+      "soldier",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 11,
+   "source_file": "LEAVE-013.docx"
+  },
+  {
+   "id": "LEAVE-014",
+   "категорія": "пара",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "155"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-08",
+     "expected": "2026-05-07"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-08",
+     "expected": "2026-05-08"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-13",
+     "expected": "2026-05-13"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-14",
+     "expected": "2026-05-14"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 6
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк (перервана, відкликаний з відпустки)",
+     "expected": "м. львів"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка для лікування після хвороби згідно з висновком влк (перервана, відкликаний з відпустки)",
+     "expected": "відпустка для лікування після хвороби згідно з висновком влк (перервана, відкликаний з відпустки)"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "вадимович",
+      "килимник",
+      "трохим"
+     ],
+     "expected": [
+      "вадимович",
+      "килимник",
+      "трохим"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": false,
+     "ours": [
+      "soldier",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 11,
+   "source_file": "LEAVE-014.docx"
+  },
+  {
+   "id": "LEAVE-015",
+   "категорія": "пара",
+   "вада": null,
+   "чинний": false,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "157"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-18",
+     "expected": "2026-05-17"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-18",
+     "expected": "2026-05-18"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-27",
+     "expected": "2026-05-27"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-28",
+     "expected": "2026-05-28"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 10
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік",
+     "expected": "м. житомир"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік",
+     "expected": "щорічна додаткова відпустка (за особливий характер служби) за 2026 рік"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "деряжний",
+      "захарович",
+      "омелян"
+     ],
+     "expected": [
+      "деряжний",
+      "захарович",
+      "омелян"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_lieutenant",
+      "старший лейтенант"
+     ],
+     "expected": "старший лейтенант"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-015.docx"
+  },
+  {
+   "id": "LEAVE-016",
+   "категорія": "пара",
+   "вада": null,
+   "чинний": true,
+   "template": "leave_ticket",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": null,
+     "expected": "157"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-22",
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "початок",
+     "field": "leave_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-22",
+     "expected": "2026-05-22"
+    },
+    {
+     "key": "кінець",
+     "field": "leave_end_date_planned",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-28",
+     "expected": "2026-05-28"
+    },
+    {
+     "key": "повернення",
+     "field": "actual_return_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-29",
+     "expected": "2026-05-29"
+    },
+    {
+     "key": "днів",
+     "field": "duration_days",
+     "compare": "number",
+     "ok": false,
+     "ours": null,
+     "expected": 7
+    },
+    {
+     "key": "місце",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": false,
+     "ours": "відпустка за сімейними обставинами (виданий замість анульованого квитка № 157)",
+     "expected": "м. житомир"
+    },
+    {
+     "key": "підстава",
+     "field": "leave_type_and_destination",
+     "compare": "contains",
+     "ok": true,
+     "ours": "відпустка за сімейними обставинами (виданий замість анульованого квитка № 157)",
+     "expected": "відпустка за сімейними обставинами (виданий замість анульованого квитка № 157)"
+    },
+    {
+     "key": "військова_частина",
+     "field": "unit_to_report",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а0000",
+     "expected": "а0000"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "деряжний",
+      "захарович",
+      "омелян"
+     ],
+     "expected": [
+      "деряжний",
+      "захарович",
+      "омелян"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_lieutenant",
+      "старший лейтенант"
+     ],
+     "expected": "старший лейтенант"
+    }
+   ],
+   "fields_ok": 7,
+   "fields_total": 11,
+   "source_file": "LEAVE-016.docx"
+  }
+ ]
+}

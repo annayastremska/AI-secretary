@@ -108,26 +108,68 @@ class LlamaClient:
             )
         return resp["choices"][0]["message"]["content"].strip()
 
+    # Бюджет токенів НА ПОЛЕ за типом, не єдиний спільний на всю групу.
+    # Вільнотекстове поле (напр. "мета відрядження") потребує на порядок
+    # більше токенів, ніж код категорії чи дата -- спільний бюджет
+    # (`64 * len(field_defs)`, попередня версія) означає, що ОДНЕ довге поле
+    # в групі могло вичерпати ліміт до завершення JSON решти полів:
+    # задокументований, не гіпотетичний канал обрізання/помилки JSON
+    # (research-round-2026-08-12.md, розд. "передчасне обрізання").
+    _TOKENS_PER_FIELD = {"text": 96, "object_ref": 96, "date": 32, "number": 16, "category": 16}
+    _TOKENS_OVERHEAD_PER_FIELD = 16   # дужки/кома/лапки/ім'я ключа в JSON
+
+    def _extract_max_tokens(self, field_defs) -> int:
+        return sum(self._TOKENS_PER_FIELD.get(f.get("type"), 64) + self._TOKENS_OVERHEAD_PER_FIELD
+                   for f in field_defs)
+
     def extract_batch(self, field_defs: list, context_text: str, json_schema: dict) -> dict:
         """Один виклик на групу полів; повертає {ім'я поля: значення}.
         json_schema робить кожне поле nullable -- тому в промпті прямо
         сказано повертати null: без цього модель під grammar змушена була б
         вигадати значення там, де його в тексті немає."""
+        # label_before -- реальна українська фраза лейбла з бланка (напр.
+        # "дата повернення") -- і note, якщо є, обидва йдуть в опис поля.
+        # Раніше LLM бачила ЛИШЕ внутрішнє (латинське) ім'я поля з YAML
+        # (напр. "unit_to_report") без жодного орієнтира в тексті бланка --
+        # виміряний провал (research-round-2026-08-12.md): полю без note
+        # LLM не мала за що зачепитися серед кількох схожих сусідніх значень
+        # (три дати поруч -- яка з них "дата повернення", а не "початок"?).
+        #
+        # _category_glossary -- "код=укр.термін" для КОЖНОГО коду enum-у
+        # (schema_grammar.py). Без нього LLM бачила в grammar лише
+        # латинські коди (`soldier`, `lieutenant_colonel`) без жодного
+        # зв'язку з українським терміном із документа -- виміряний провал:
+        # модель повернула `captain`, хоча в тексті це звання не
+        # згадувалось УЗАГАЛІ. Мітка йде в ТЕКСТ інструкції, не в сам enum:
+        # офіційна порада Google (Gemini structured output) -- коротші
+        # назви значень enum, не довші (research-round-2026-08-12.md).
         field_descriptions = "\n".join(
-            f"- {f['name']}" + (f" ({f['note'].strip()})" if f.get("note") else "")
+            f"- {f['name']}"
+            + (f" (лейбл на бланку: «{f['label_before'].strip()}»)" if f.get("label_before") else "")
+            + (f" ({f['note'].strip()})" if f.get("note") else "")
+            + (f" [коди: {f['_category_glossary']}]" if f.get("_category_glossary") else "")
             for f in field_defs
+        )
+        has_category = any(f.get("_category_glossary") for f in field_defs)
+        category_rule = (
+            " Для полів із переліком кодів [коди: ...] -- обирай код лише "
+            "якщо відповідний ЗАГАЛЬНИЙ ТЕРМІН справді присутній у тексті "
+            "(у будь-якій граматичній формі); якщо жоден варіант явно не "
+            "підходить -- null, а не найближчий за здогадкою."
+            if has_category else ""
         )
         user = (
             "З наведеного тексту документа витягни значення полів нижче. "
             "Якщо значення поля в тексті немає -- поверни null для цього поля, "
-            "не вигадуй. Відповідай лише JSON-об'єктом.\n\n"
+            f"не вигадуй.{category_rule} Відповідай лише JSON-об'єктом.\n\n"
             f"Поля:\n{field_descriptions}\n\nТекст документа:\n{self._trim(context_text)}"
+            "\n\nНагадування: null для полів, значення яких немає в тексті вище."
         )
         grammar = self._grammar_from_json_schema(json_schema)
         with self._lock:
             resp = self.llm.create_chat_completion(
                 messages=self._messages(user),
-                max_tokens=64 * max(1, len(field_defs)),
+                max_tokens=self._extract_max_tokens(field_defs),
                 temperature=self.temperature, grammar=grammar,
             )
         return json.loads(resp["choices"][0]["message"]["content"])

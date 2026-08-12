@@ -81,6 +81,13 @@ def _merge(base: dict, override: dict) -> dict:
     for key, value in (override or {}).items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
             _merge(base[key], value)
+        elif value is None and isinstance(base.get(key), dict):
+            # Секція з повністю закомментованим вмістом дає в YAML None
+            # (`llm:` і всі рядки під `#`). Раніше цей None записувався
+            # ПОВЕРХ словника дефолтів, і наступний cfg["llm"].get(...) падав
+            # з AttributeError ще до обробки першого документа. А закомментувати
+            # рядок у конфізі -- найтиповіша дія при налагодженні.
+            continue
         else:
             base[key] = value
     return base

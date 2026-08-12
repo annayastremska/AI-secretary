@@ -1,0 +1,1595 @@
+{
+ "input": "data/samples/deployment/synthetic-2026-05/docx",
+ "llm": true,
+ "per_key": {
+  "ПІБ": [
+   14,
+   14
+  ],
+  "дата_видачі": [
+   13,
+   14
+  ],
+  "днів": [
+   14,
+   14
+  ],
+  "звання": [
+   14,
+   14
+  ],
+  "кінець": [
+   12,
+   14
+  ],
+  "місце": [
+   14,
+   14
+  ],
+  "номер_документа": [
+   13,
+   14
+  ],
+  "організація": [
+   14,
+   14
+  ],
+  "початок": [
+   12,
+   14
+  ],
+  "підстава": [
+   14,
+   14
+  ]
+ },
+ "results": [
+  {
+   "id": "TRIP-001",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "201",
+     "expected": "201"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-20",
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-21",
+     "expected": "2026-05-21"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-22",
+     "expected": "2026-05-22"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 2,
+     "expected": 2
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. вінниця центральна база зберігання майна (в/ч т3011)",
+     "expected": "м. вінниця"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "отримання засобів індивідуального захисту",
+     "expected": "отримання засобів індивідуального захисту"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "центральна база зберігання майна (в/ч т3011)",
+     "expected": "центральна база зберігання майна (в/ч т3011)"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "васильівна",
+      "данна",
+      "якимчук"
+     ],
+     "expected": [
+      "васильівна",
+      "данна",
+      "якимчук"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_sergeant",
+      "ст. сержант",
+      "старший сержант"
+     ],
+     "expected": "старший сержант"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-001.docx"
+  },
+  {
+   "id": "TRIP-002",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "204",
+     "expected": "204"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-21",
+     "expected": "2026-05-21"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-22",
+     "expected": "2026-05-22"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-28",
+     "expected": "2026-05-28"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 7,
+     "expected": 7
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. ужгород центральна база зберігання майна (в/ч т3011)",
+     "expected": "м. ужгород"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "супроводження вантажу та передача автомобільної техніки",
+     "expected": "супроводження вантажу та передача автомобільної техніки"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "центральна база зберігання майна (в/ч т3011)",
+     "expected": "центральна база зберігання майна (в/ч т3011)"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "валентин",
+      "варфоломійович",
+      "усик"
+     ],
+     "expected": [
+      "валентин",
+      "варфоломійович",
+      "усик"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_soldier",
+      "старший солдат"
+     ],
+     "expected": "старший солдат"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-002.docx"
+  },
+  {
+   "id": "TRIP-003",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "208",
+     "expected": "208"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-14",
+     "expected": "2026-05-14"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-15",
+     "expected": "2026-05-15"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-19",
+     "expected": "2026-05-19"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 5,
+     "expected": 5
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. ужгород, навчальний полігон (в/ч а2856-п)",
+     "expected": "м. ужгород"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "участь у зборах фахівців фінансових служб",
+     "expected": "участь у зборах фахівців фінансових служб"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "навчальний полігон (в/ч а2856-п)",
+     "expected": "навчальний полігон (в/ч а2856-п)"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "михайлович",
+      "феофан",
+      "їжак"
+     ],
+     "expected": [
+      "михайлович",
+      "феофан",
+      "їжак"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "lieutenant",
+      "лейтенант"
+     ],
+     "expected": "лейтенант"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-003.docx"
+  },
+  {
+   "id": "TRIP-004",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "209",
+     "expected": "209"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-04",
+     "expected": "2026-05-04"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-07",
+     "expected": "2026-05-07"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-12",
+     "expected": "2026-05-12"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 6,
+     "expected": 6
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. івано-франківськ центральна база зберігання майна (в/ч т3011)",
+     "expected": "м. івано-франківськ"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "технічний нагляд за ремонтом колісної техніки",
+     "expected": "технічний нагляд за ремонтом колісної техніки"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "центральна база зберігання майна (в/ч т3011)",
+     "expected": "центральна база зберігання майна (в/ч т3011)"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "кабалюк",
+      "леонідович",
+      "тимофій"
+     ],
+     "expected": [
+      "кабалюк",
+      "леонідович",
+      "тимофій"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-004.docx"
+  },
+  {
+   "id": "TRIP-005",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "210",
+     "expected": "210"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-05",
+     "expected": "2026-05-05"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-06",
+     "expected": "2026-05-06"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-08",
+     "expected": "2026-05-08"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 3,
+     "expected": 3
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. житомир центральна база зберігання майна (в/ч т3011)",
+     "expected": "м. житомир"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "участь у зборах з бойової підготовки",
+     "expected": "участь у зборах з бойової підготовки"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "центральна база зберігання майна (в/ч т3011)",
+     "expected": "центральна база зберігання майна (в/ч т3011)"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "герман",
+      "засядько",
+      "леонідович"
+     ],
+     "expected": [
+      "герман",
+      "засядько",
+      "леонідович"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-005.docx"
+  },
+  {
+   "id": "TRIP-006",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "needs_review",
+   "confirmed": false,
+   "review_queue": "unconfirmed_fact",
+   "date_range_error": null,
+   "unknown_critical_fields": [
+    "surname"
+   ],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "212",
+     "expected": "212"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-07",
+     "expected": "2026-05-07"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-10",
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-13",
+     "expected": "2026-05-13"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 4,
+     "expected": 4
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. тернопіль",
+     "expected": "м. тернопіль"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "супроводження вантажу та передача автомобільної техніки",
+     "expected": "супроводження вантажу та передача автомобільної техніки"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а2200",
+     "expected": "військова частина а2200"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "дергач",
+      "тимофійович",
+      "ігнат"
+     ],
+     "expected": [
+      "дергач",
+      "тимофійович",
+      "ігнат"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-006.docx"
+  },
+  {
+   "id": "TRIP-007",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "219",
+     "expected": "219"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-01",
+     "expected": "2026-05-01"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-03",
+     "expected": "2026-05-03"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-09",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 7,
+     "expected": 7
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. житомир",
+     "expected": "м. житомир"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "отримання засобів індивідуального захисту",
+     "expected": "отримання засобів індивідуального захисту"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а4419",
+     "expected": "військова частина а4419"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "луценко",
+      "павло",
+      "стефанович"
+     ],
+     "expected": [
+      "луценко",
+      "павло",
+      "стефанович"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-007.docx"
+  },
+  {
+   "id": "TRIP-008",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "225",
+     "expected": "225"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-22",
+     "expected": "2026-05-22"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-23",
+     "expected": "2026-05-23"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-24",
+     "expected": "2026-05-24"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 2,
+     "expected": 2
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. рівне",
+     "expected": "м. рівне"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "участь у зборах фахівців фінансових служб",
+     "expected": "участь у зборах фахівців фінансових служб"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а2200",
+     "expected": "військова частина а2200"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "гайдамака",
+      "глібович",
+      "олесь"
+     ],
+     "expected": [
+      "гайдамака",
+      "глібович",
+      "олесь"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-008.docx"
+  },
+  {
+   "id": "TRIP-009",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "231",
+     "expected": "231"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-16",
+     "expected": "2026-05-16"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-18",
+     "expected": "2026-05-18"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-20",
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 3,
+     "expected": 3
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. івано-франківськ",
+     "expected": "м. івано-франківськ"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "участь у зборах фахівців фінансових служб",
+     "expected": "участь у зборах фахівців фінансових служб"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а4419",
+     "expected": "військова частина а4419"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "зорян",
+      "омелянович",
+      "теліженко"
+     ],
+     "expected": [
+      "зорян",
+      "омелянович",
+      "теліженко"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-009.docx"
+  },
+  {
+   "id": "TRIP-010",
+   "категорія": "правильний",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "needs_review",
+   "confirmed": false,
+   "review_queue": "unconfirmed_fact",
+   "date_range_error": null,
+   "unknown_critical_fields": [
+    "given_name"
+   ],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "238",
+     "expected": "238"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-09",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-10",
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-13",
+     "expected": "2026-05-13"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 4,
+     "expected": 4
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. чернівці",
+     "expected": "м. чернівці"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "участь у зборах з бойової підготовки",
+     "expected": "участь у зборах з бойової підготовки"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а4419",
+     "expected": "військова частина а4419"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "бевз",
+      "володимир",
+      "петрович"
+     ],
+     "expected": [
+      "бевз",
+      "володимир",
+      "петрович"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-010.docx"
+  },
+  {
+   "id": "TRIP-011",
+   "категорія": "зіпсований",
+   "вада": "swapped_dates",
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "needs_review",
+   "confirmed": false,
+   "review_queue": "unconfirmed_fact",
+   "date_range_error": "date_start (2026-05-22) > date_end (2026-05-20)",
+   "unknown_critical_fields": [
+    "deployment_start_date",
+    "deployment_end_date"
+   ],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "244",
+     "expected": "244"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-19",
+     "expected": "2026-05-19"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-22",
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": false,
+     "ours": "2026-05-20",
+     "expected": "2026-05-22"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 3,
+     "expected": 3
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. полтава",
+     "expected": "м. полтава"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "отримання засобів індивідуального захисту",
+     "expected": "отримання засобів індивідуального захисту"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а4419",
+     "expected": "військова частина а4419"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "орестович",
+      "остап",
+      "скиба"
+     ],
+     "expected": [
+      "орестович",
+      "остап",
+      "скиба"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_sergeant",
+      "ст. сержант",
+      "старший сержант"
+     ],
+     "expected": "старший сержант"
+    }
+   ],
+   "fields_ok": 8,
+   "fields_total": 10,
+   "source_file": "TRIP-011.docx"
+  },
+  {
+   "id": "TRIP-012",
+   "категорія": "зіпсований",
+   "вада": "ocr_noise",
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "needs_review",
+   "confirmed": false,
+   "review_queue": "unconfirmed_fact",
+   "date_range_error": null,
+   "unknown_critical_fields": [
+    "deployment_start_date",
+    "deployment_end_date"
+   ],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": false,
+     "ours": "25о",
+     "expected": "250"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": false,
+     "ours": null,
+     "expected": "2026-05-07"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": false,
+     "ours": null,
+     "expected": "2026-05-10"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": false,
+     "ours": null,
+     "expected": "2026-05-13"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 4,
+     "expected": 4
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. полтава",
+     "expected": "м. полтава"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "участь у зборах фахівців фінансових служб",
+     "expected": "участь у зборах фахівців фінансових служб"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а2200",
+     "expected": "військова частина а2200"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "захар",
+      "перебийніс",
+      "святославович"
+     ],
+     "expected": [
+      "захар",
+      "перебийніс",
+      "святославович"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "senior_soldier",
+      "старший солдат"
+     ],
+     "expected": "старший солдат"
+    }
+   ],
+   "fields_ok": 6,
+   "fields_total": 10,
+   "source_file": "TRIP-012.docx"
+  },
+  {
+   "id": "TRIP-013",
+   "категорія": "пара",
+   "вада": null,
+   "чинний": false,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "254",
+     "expected": "254"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-09",
+     "expected": "2026-05-09"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-11",
+     "expected": "2026-05-11"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-15",
+     "expected": "2026-05-15"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 5,
+     "expected": 5
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. суми",
+     "expected": "м. суми"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "проходження курсу підвищення кваліфікації",
+     "expected": "проходження курсу підвищення кваліфікації"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а4419",
+     "expected": "військова частина а4419"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "богодар",
+      "святославович",
+      "ґоляш"
+     ],
+     "expected": [
+      "богодар",
+      "святославович",
+      "ґоляш"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-013.docx"
+  },
+  {
+   "id": "TRIP-014",
+   "категорія": "пара",
+   "вада": null,
+   "чинний": true,
+   "template": "deployment_certificate",
+   "template_ok": true,
+   "status": "confirmed",
+   "confirmed": true,
+   "review_queue": null,
+   "date_range_error": null,
+   "unknown_critical_fields": [],
+   "checks": [
+    {
+     "key": "номер_документа",
+     "field": "document_number",
+     "compare": "exact",
+     "ok": true,
+     "ours": "260",
+     "expected": "260"
+    },
+    {
+     "key": "дата_видачі",
+     "field": "document_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-17",
+     "expected": "2026-05-17"
+    },
+    {
+     "key": "початок",
+     "field": "deployment_start_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-20",
+     "expected": "2026-05-20"
+    },
+    {
+     "key": "кінець",
+     "field": "deployment_end_date",
+     "compare": "date",
+     "ok": true,
+     "ours": "2026-05-23",
+     "expected": "2026-05-23"
+    },
+    {
+     "key": "днів",
+     "field": "deployment_days",
+     "compare": "number",
+     "ok": true,
+     "ours": 4,
+     "expected": 4
+    },
+    {
+     "key": "місце",
+     "field": "destination_points",
+     "compare": "contains",
+     "ok": true,
+     "ours": "м. суми",
+     "expected": "м. суми"
+    },
+    {
+     "key": "підстава",
+     "field": "purpose",
+     "compare": "contains",
+     "ok": true,
+     "ours": "проходження курсу підвищення кваліфікації (переоформлено замість посвідчення № 254)",
+     "expected": "проходження курсу підвищення кваліфікації (переоформлено замість посвідчення № 254)"
+    },
+    {
+     "key": "організація",
+     "field": "destination_org",
+     "compare": "contains",
+     "ok": true,
+     "ours": "військова частина а4419",
+     "expected": "військова частина а4419"
+    },
+    {
+     "key": "ПІБ",
+     "field": "person_alias",
+     "compare": "name",
+     "ok": true,
+     "ours": [
+      "богодар",
+      "святославович",
+      "ґоляш"
+     ],
+     "expected": [
+      "богодар",
+      "святославович",
+      "ґоляш"
+     ]
+    },
+    {
+     "key": "звання",
+     "field": "rank",
+     "compare": "category",
+     "ok": true,
+     "ours": [
+      "soldier",
+      "рядовий",
+      "солдат"
+     ],
+     "expected": "рядовий"
+    }
+   ],
+   "fields_ok": 10,
+   "fields_total": 10,
+   "source_file": "TRIP-014.docx"
+  }
+ ]
+}

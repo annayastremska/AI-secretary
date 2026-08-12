@@ -27,6 +27,10 @@ fields:
   # батькові за регістром. Той самий режим підходить і для deployment_certificate
   # (там та сама структура "звання ПІБ" перед тим самим лейблом).
   - name: rank
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: rank
     type: category
     category: military_rank
     extraction: rank_and_name_tokenized
@@ -34,18 +38,30 @@ fields:
     db_target: person
 
   - name: surname
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: surname
     type: text
     extraction: rank_and_name_tokenized   # той самий виклик, інша частина результату
     normalization: nominative_case
     db_target: person
 
   - name: given_name
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: given_name
     type: text
     extraction: rank_and_name_tokenized
     normalization: nominative_case
     db_target: person
 
   - name: patronymic
+    # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
+    # поля, керує морфологією й ключем у subject -- тому схема може
+    # називати поля як завгодно (applicant_surname, prizvyshche).
+    part: patronymic
     type: text
     extraction: rank_and_name_tokenized
     normalization: nominative_case
@@ -68,6 +84,20 @@ fields:
     strip_prefix: "звільнений"
     db_target: fact_value
 
+  # ВИПРАВЛЕНО за синтетичним набором: населений пункт НЕ входить в об'єднане
+  # поле вище. На бланку лейбл розрізаний на два блоки, а значення стоїть МІЖ
+  # ними: "(вид відпустки та найменування населеного пункту," / "м. Житомир" /
+  # "до якого звільнено військовослужбовця)". Тому leave_type_and_destination
+  # (шукає блок перед ПЕРШОЮ половиною лейбла) віддавав лише вид відпустки, і
+  # місце губилось у 16 з 16 документів -- саме те поле, що відповідає на
+  # питання "де ця людина".
+  - name: destination_place
+    type: text
+    extraction: block_before_label
+    label_before: "до якого звільнено військовослужбовця"
+    dimension: leave_place
+    db_target: additional_info
+
   - name: leave_year
     type: number
     extraction: derived_from
@@ -77,8 +107,18 @@ fields:
 
   - name: duration_days
     type: number
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: leave_days
     extraction: regex
+    # ВИПРАВЛЕНО за синтетичним набором: на бланку кількість днів надрукована
+    # ЛИШЕ прописом ("терміном на" / "тринадцять" / "(кількість днів
+    # прописом)") -- цифри в документі немає взагалі, тому старий паттерн на
+    # \d+ давав None у 9 з 16 документів. Перший варіант -- пропис (основний
+    # випадок), другий лишається для бланків із цифрою.
     regex_variants:
+      - pattern: 'терміном\s+на\s+(?P<value>[а-яіїєґ''’\s]+?)\s*\(кількість днів'
       - pattern: 'терміном\s+(?:на\s+)+(?P<value>\d+)\s*\([^)]*\)\s*(?:діб|календарних днів|днів)'
     db_target: additional_info
 
@@ -104,6 +144,10 @@ fields:
 
   - name: actual_return_date
     type: date
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: leave_actual_return
     extraction: block_before_label
     label_before: "дата повернення"
     normalization: iso_date
@@ -117,19 +161,31 @@ fields:
   # №" тихо повертав би "30" для кожного документа -- гірше, ніж чесне
   # no_value. Якщо реальний номер є лише в кутовому штампі (зображення),
   # це поле екстракції з тексту не підлягає.
+  # ВИПРАВЛЕНО за синтетичним набором (11.08.2026). Раніше тут стояв
+  # priority: deferred з коментарем "реального номера в бланку немає" -- це
+  # висновок з ПОРОЖНЬОГО шаблону, де номер не надрукований. У заповнених
+  # документах номер і дата видачі стоять ОДНИМ рядком: "№ 102    від
+  # 09.05.2026". Обидва regex прив'язані до "від <дата>", тому вони не можуть
+  # злапати "Додаток 30" -- саме через цей ризик поле й було відкладене.
   - name: document_number
     type: text
-    priority: deferred
-    note: "Регіструйний номер, якщо є, -- ймовірно лише в кутовому штампі (зображення), не в текстовому шарі."
+    extraction: regex
+    dimension: document_number
+    regex_variants:
+      - pattern: '№\s*(?P<value>[\w/\-]+)\s+від\s+\d{1,2}\.\d{1,2}\.\d{4}'
     db_target: additional_info
 
+  # ВИПРАВЛЕНО за синтетичним набором: старі паттерни були загальними датами
+  # й брали ПЕРШИЙ збіг у тексті -- а перша дата в документі це початок
+  # відпустки, не дата видачі. Наслідок: 13 з 16 документів отримували
+  # правдоподібну, але неправильну дату видачі й статус confirmed.
   - name: document_date
     type: date
     extraction: regex
     normalization: iso_date
+    dimension: document_date
     regex_variants:
-      - pattern: '[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>[а-яіїє]+)\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
-      - pattern: '[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2})\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
+      - pattern: '№\s*[\w/\-]+\s+від\s+(?P<day>\d{1,2})\.(?P<month>\d{1,2})\.(?P<year>\d{4})'
     db_target: additional_info
 
   - name: travel_document_number
@@ -150,6 +206,10 @@ fields:
 
   - name: unit_to_report
     type: object_ref
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
+    # воно лишається лише в additional_info, який завантажувач не читає,
+    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    dimension: unit_to_report
     registry: military_unit
     # ВИПРАВЛЕНО (звірено з data/samples/leave/відпускний_шаблон.docx): фрази
     # "військову частину" тут немає -- реальний текст "зобов'язаний прибути

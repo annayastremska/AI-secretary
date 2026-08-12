@@ -7,10 +7,29 @@ dictionaries/domain_keyphrases.yaml. Новий домен -- новий бло�
 схеми бланка робить pipeline/identification.py на рівні template.
 """
 import re
+import unicodedata
 
 import yaml
 
 _PHRASE_RE_CACHE = {}
+
+# Пробіли, які в docx/OCR трапляються замість звичайного: нерозривний,
+# вузький нерозривний, тонкий, а також переноси рядків усередині заголовка,
+# розбитого OCR на два рядки.
+_WS_RE = re.compile(r"[\s   ​]+")
+
+
+def normalize_ws(text: str) -> str:
+    """Зводить будь-які пробіли до одного звичайного й прибирає керуючі
+    символи. Без цього фраза не знаходилась узагалі: "Додаток\\u00a030" з
+    нерозривним пробілом, подвійний пробіл чи заголовок, розбитий OCR на два
+    рядки, давали збіг False -- документ втрачав 5 балів і йшов у unresolved
+    (перевірено)."""
+    if not text:
+        return ""
+    cleaned = "".join(ch for ch in str(text)
+                      if unicodedata.category(ch)[0] != "C" or ch in "\n\t")
+    return _WS_RE.sub(" ", cleaned).strip()
 
 
 def load_domain_keyphrases(path):
@@ -18,21 +37,51 @@ def load_domain_keyphrases(path):
         return yaml.safe_load(f)["domains"]
 
 
-def phrase_in_text(text_low: str, phrase: str) -> bool:
-    """Збіг фрази з межею слова НА ПОЧАТКУ, але БЕЗ межі в кінці.
+def phrase_in_text(text_low: str, phrase: str, is_stem: bool = False) -> bool:
+    """Збіг фрази з межею слова НА ПОЧАТКУ завжди; межа В КІНЦІ теж вимагається,
+    ОКРІМ коли is_stem=True.
 
-    Асиметрія навмисна: довідники свідомо містять стеми ("відрядж",
-    "особов", "штатн"), які мають ловити всі словоформи, тому вимога межі в
-    кінці зламала б їх. А от межа на початку потрібна: без неї коротка фраза
-    співпадає всередині непов'язаного слова й накручує бал чужій схемі.
+    is_stem=True -- лише для довідникових записів, СВІДОМО позначених як
+    стем ("відрядж", "особов", "штатн" -- мають ловити всі словоформи).
+    За замовчуванням межа потрібна з ОБОХ боків -- виправлений баг: раніше
+    відсутність межі в кінці застосовувалась до КОЖНОЇ фрази без розбору,
+    тому "додаток 28" (номер, не стем) хибно збігався всередині "додаток
+    289"/"додаток 28а", а "діб" (ціле слово) -- всередині "дібрати"/
+    "дібраний". Обидва підтверджено як реальний false positive у скорингу
+    домену/шаблону (research-round-2026-08-12.md).
     """
-    phrase = (phrase or "").strip().lower()
+    phrase = normalize_ws(phrase).lower()
     if not phrase:
         return False
-    pattern = _PHRASE_RE_CACHE.get(phrase)
+    cache_key = (phrase, is_stem)
+    pattern = _PHRASE_RE_CACHE.get(cache_key)
     if pattern is None:
-        pattern = _PHRASE_RE_CACHE[phrase] = re.compile(r"(?<!\w)" + re.escape(phrase))
-    return pattern.search(text_low) is not None
+        # Пробіли у ФРАЗІ теж можуть бути будь-якими в документі, тому кожен
+        # пробіл фрази компілюється як "один або більше будь-яких пробілів".
+        parts = [re.escape(p) for p in phrase.split(" ") if p]
+        body = r"\s+".join(parts)
+        suffix = "" if is_stem else r"(?!\w)"
+        pattern = _PHRASE_RE_CACHE[cache_key] = re.compile(r"(?<!\w)" + body + suffix)
+    return pattern.search(normalize_ws(text_low).lower()) is not None
+
+
+def _phrase_entry(entry):
+    """Запис довідника -- або звичайний рядок (потрібна межа з обох боків),
+    або {"stem": "..."} (свідомо позначений стем, межа лише на початку).
+    Повертає (текст, is_stem); (None, False) для порожнього/невалідного
+    запису -- виклик відсіює None перед phrase_in_text."""
+    if isinstance(entry, dict):
+        return entry.get("stem"), True
+    return entry, False
+
+
+def _count_phrase_hits(low_text: str, entries) -> int:
+    count = 0
+    for entry in entries or []:
+        text, is_stem = _phrase_entry(entry)
+        if text and phrase_in_text(low_text, text, is_stem=is_stem):
+            count += 1
+    return count
 
 
 def classify_domain_rules(text: str, domains: dict):
@@ -49,8 +98,8 @@ def classify_domain_rules(text: str, domains: dict):
         # .get(..., []) замість phrases["title"]: один неповний запис у
         # довіднику не має валити обробку всіх документів батчу.
         phrases = phrases or {}
-        title_hits = sum(1 for p in phrases.get("title", []) if phrase_in_text(low, p))
-        body_hits = sum(1 for p in phrases.get("body", []) if phrase_in_text(low, p))
+        title_hits = _count_phrase_hits(low, phrases.get("title", []))
+        body_hits = _count_phrase_hits(low, phrases.get("body", []))
         scores[domain] = title_hits * 3 + body_hits
 
     if not scores:

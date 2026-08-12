@@ -1,0 +1,52 @@
+# Відповідність: ключ еталона -> поле нашої схеми.
+#
+# Живе в YAML, а не в коді, з тієї самої причини, що й решта схемних рішень:
+# новий шаблон із власним набором полів не має вимагати правки скрипта оцінки.
+#
+# Джерело еталона: data/eval/synthetic-2026-05/per-document/<ID>.json,
+# розділ "правильні_відповіді" (плюс "людина" для ПІБ/звання).
+#
+# compare: як зіставляти
+#   exact       -- рівність після strip
+#   date        -- обидва боки як ISO YYYY-MM-DD
+#   number      -- як int
+#   contains    -- еталон має міститись у нашому значенні (для об'єднаних полів,
+#                  напр. leave_type_and_destination = підстава + місце разом)
+#   category    -- порівнюємо label або code нашого {code,label} з рядком еталона
+
+templates:
+  leave_ticket:
+    номер_документа: {field: document_number, compare: exact}
+    дата_видачі:     {field: document_date, compare: date}
+    початок:         {field: leave_start_date, compare: date}
+    кінець:          {field: leave_end_date_planned, compare: date}
+    повернення:      {field: actual_return_date, compare: date}
+    днів:            {field: duration_days, compare: number}
+    # На бланку вид відпустки й населений пункт -- одне вільнотекстове поле,
+    # тому обидва ключі еталона зіставляються з ним через contains.
+    # Населений пункт -- окреме поле destination_place (лейбл розрізаний на
+    # два блоки, значення стоїть між ними).
+    місце:           {field: destination_place, compare: contains}
+    підстава:        {field: leave_type_and_destination, compare: contains}
+    військова_частина: {field: unit_to_report, compare: contains}
+
+  deployment_certificate:
+    номер_документа: {field: document_number, compare: exact}
+    дата_видачі:     {field: document_date, compare: date}
+    початок:         {field: deployment_start_date, compare: date}
+    кінець:          {field: deployment_end_date, compare: date}
+    днів:            {field: deployment_days, compare: number}
+    місце:           {field: destination_points, compare: contains}
+    підстава:        {field: purpose, compare: contains}
+    організація:     {field: destination_org, compare: contains}
+
+# ПІБ і звання -- спільні для всіх шаблонів, беруться з розділу "людина".
+person:
+  ПІБ:
+    # Еталон дає "Лемешко Соломія Романівна" одним рядком у називному --
+    # порівнюємо з нашим subject.person_alias, який складається так само.
+    field: person_alias
+    compare: name
+  звання:
+    field: rank
+    compare: category

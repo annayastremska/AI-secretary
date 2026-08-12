@@ -10,8 +10,40 @@
 """
 import json
 import os
+import sys
 
 INDEX_REL_PATH = os.path.join("index", "processed.jsonl")
+
+# Блокування файлу індексу на час запису -- без нього два одночасні процеси
+# (уже сьогодні можливо: `python run_pipeline.py` двічі паралельно на різні
+# папки-приймачі, що пишуть у ТОЙ САМИЙ index/processed.jsonl; а `run.py`
+# прямо каже, що виклик "у майбутньому з веб-бекенда" планується
+# конкурентним) можуть переплести записи двох append() всередині одного
+# рядка -- пошкоджений JSON-рядок, що `_load_index` мовчки пропускає
+# (рядок 38), тобто той запис зникає з дедуплікації без жодного сигналу.
+# НЕ закриває ширшу гонку "перевірка find_by_hash + пізніший save() не
+# атомарні разом" -- два процеси все ще можуть одночасно вирішити, що той
+# самий документ новий, і обидва його зберегти; це вимагало б блокування
+# на весь process_file, не лише на сам запис, і лишається за межами цього
+# фіксу, поки конкурентний виклик не став реальним сценарієм.
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_index_file(f):
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _unlock_index_file(f):
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _lock_index_file(f):
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+    def _unlock_index_file(f):
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 class LocalDocumentStore:
@@ -54,6 +86,11 @@ class LocalDocumentStore:
         if file_hash:
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             with open(self.index_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"file_hash": file_hash, "key": key}, ensure_ascii=False) + "\n")
+                _lock_index_file(f)
+                try:
+                    f.write(json.dumps({"file_hash": file_hash, "key": key}, ensure_ascii=False) + "\n")
+                    f.flush()
+                finally:
+                    _unlock_index_file(f)
             self._load_index()[file_hash] = key
         return path

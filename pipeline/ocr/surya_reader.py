@@ -28,8 +28,12 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None):
     Colab він збирається з джерел; на Windows простіше вказати шлях до вже
     готового бінарника, ніж тягнути тулчейн.
     """
-    os.environ.setdefault("SURYA_INFERENCE_PARALLEL",
-                          str(inference_parallel or DEFAULT_INFERENCE_PARALLEL))
+    # Явне присвоєння, не setdefault: якщо змінна вже була в середовищі,
+    # setdefault мовчки ігнорував конфіг, і конфіг перестав описувати те, що
+    # реально працює. `is None`, а не `or`, щоб явний 0 не перетворювався на 2.
+    if inference_parallel is None:
+        inference_parallel = DEFAULT_INFERENCE_PARALLEL
+    os.environ["SURYA_INFERENCE_PARALLEL"] = str(inference_parallel)
     if llama_server_path:
         os.environ["LLAMA_CPP_BINARY"] = llama_server_path
 
@@ -40,7 +44,7 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None):
     manager = SuryaInferenceManager()
     predictor = RecognitionPredictor(manager)
 
-    def _blocks_from(prediction):
+    def _blocks_from(prediction, page):
         blocks = []
         for block in prediction.blocks:
             plain = _BR_RE.sub("\n", block.html)
@@ -51,7 +55,14 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None):
                 # віддавати геометрію, краще явна помилка в
                 # sort_blocks_by_geometry, ніж AttributeError тут або тиха
                 # робота з переплутаним порядком блоків.
-                blocks.append({"text": plain, "bbox": getattr(block, "bbox", None)})
+                # `page` -- КАДР (для багатосторінкового TIFF), не глобальний
+                # індекс: bbox кожного кадру рахується в ЙОГО ВЛАСНІЙ системі
+                # координат (з нуля), тому геометричне порівняння bbox з
+                # ІНШОГО кадру безглузде -- виміряний реальний баг (той самий
+                # клас, що для сторінок PDF): без мітки сторінки блок з кадру
+                # 2 міг "геометрично вирівнятись" із лейблом на кадрі 1 лише
+                # тому, що обидва кадри рахують y з нуля.
+                blocks.append({"text": plain, "bbox": getattr(block, "bbox", None), "page": page})
         return blocks
 
     def read(image_path: str):
@@ -66,7 +77,7 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None):
             if frames > 1:
                 source.seek(index)
             image = ImageOps.exif_transpose(source).convert("RGB")
-            blocks.extend(_blocks_from(predictor([image])[0]))
+            blocks.extend(_blocks_from(predictor([image])[0], index))
         return blocks
 
     return read

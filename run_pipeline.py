@@ -6,6 +6,7 @@
     python run_pipeline.py --no-llm                    # лише детермінований прохід
     python run_pipeline.py --template leave_ticket     # примусова схема (для тестів)
     python run_pipeline.py --dry-run                   # нічого не зберігати
+    python run_pipeline.py --reprocess                 # ігнорувати дедуплікацію
 
 Вихід -- коротка таблиця по документах; повний запис лягає у сховище
 (data/output/documents/<domain>/<id>.md) з YAML-шапкою, що містить subject,
@@ -48,6 +49,9 @@ def main(argv=None):
     parser.add_argument("--template", default=None, help="примусово використати цей шаблон схеми")
     parser.add_argument("--no-llm", action="store_true", help="лише детермінований прохід")
     parser.add_argument("--dry-run", action="store_true", help="не зберігати нічого")
+    parser.add_argument("--reprocess", action="store_true",
+                        help="обробити повторно навіть якщо такий вміст уже в індексі "
+                             "(після додавання схеми чи виправлення довідника)")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -73,7 +77,8 @@ def main(argv=None):
     print(f"LLM: {'увімкнено' if res['llm'] else 'вимкнено'} | "
           f"OCR: {cfg['ocr']['engine'] if res['ocr'] else 'немає'}\n")
 
-    results, skipped = process_target(target, res, cfg, force_template=args.template)
+    results, skipped = process_target(target, res, cfg, force_template=args.template,
+                                      reprocess=args.reprocess)
 
     # Про пропущене кажемо вголос: інакше людина, що поклала в папку архів або
     # файл невідомого типу, бачить лише "не знайдено файлів" без пояснення.
@@ -81,6 +86,9 @@ def main(argv=None):
         print(f"[пропущено] непідтримуваний тип ({len(skipped['unsupported'])}): "
               f"{', '.join(skipped['unsupported'][:5])}"
               f"{' ...' if len(skipped['unsupported']) > 5 else ''}")
+    if skipped.get("not_archived"):
+        print(f"[увага] {target} -- не налаштована папка-приймач "
+              f"({cfg['paths']['input_dir']}), тому оброблені файли НЕ переносяться")
     if skipped["subdirs"]:
         print(f"[пропущено] підпапки ({len(skipped['subdirs'])}): "
               f"{', '.join(skipped['subdirs'][:5])} -- сканування не рекурсивне, "
