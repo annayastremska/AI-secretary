@@ -911,6 +911,33 @@ def test_empty_blank_is_still_empty_after_token_change():
     assert normalize_field(by_name["travel_document_number"], "7367/26", {}) == ("7367/26", False)
 
 
+def test_procedural_domain_wins_over_topical_score():
+    """Документ ПРАВИЛ не класифікується як документ про тему, яку він описує.
+
+    Заміряно на data/samples/normative/інструкція_діловодство.docx (402898
+    символів): бали leave 8, equipment 8, staffing 9, deployment 7 --
+    інструкція МІСТИТЬ усі бланки й згадує всі теми, тому тематичний
+    переможець визначався шумом (до появи домену normative вона була
+    `equipment`, після -- `staffing`, і жоден не є правдою). Тепер `normative`
+    оголошений як `kind: procedural` і перевіряється окремо: це інша ВІСЬ
+    (запис проти правил), а не сильніший конкурент за балами.
+    """
+    domains = {
+        "normative": {"kind": "procedural", "title": ["інструкція з діловодства"]},
+        # тематичний домен зі свідомо ВИЩИМ балом, щоб перевірялась саме
+        # окремість перевірки, а не те, чия вага більша
+        "staffing": {"title": ["обліку особового складу"],
+                     "body": ["особовий склад", "штат", "посада"]},
+    }
+    text = ("Інструкція з діловодства у Збройних Силах України. "
+            "Обліку особового складу. Особовий склад, штат, посада.")
+    assert classify_domain_rules(text, domains)[0] == "normative"
+    # і навпаки: бланк, що лише ПОСИЛАЄТЬСЯ на інструкцію в родовому відмінку
+    # ("до Інструкції з діловодства"), процедурним не стає
+    blank = "Додаток 30 до Інструкції з діловодства у Збройних Силах України"
+    assert classify_domain_rules(blank, domains)[0] != "normative"
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):

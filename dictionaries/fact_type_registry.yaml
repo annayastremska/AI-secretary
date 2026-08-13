@@ -90,3 +90,12 @@ fact_types:
   - code: leave_place
     label: Населений пункт, до якого звільнено
     validity_model: ranged
+
+  # Додано 13.08.2026 у відповідь на зауваження команди БД: вони помітили, що
+  # travel_document_number лежить в additional_info основного факту, тоді як
+  # решта реквізитів (document_number, order_number) піднята окремими фактами.
+  # Асиметрія була не свідомою -- просто не дійшли руки. Прибираємо, бо
+  # непояснена асиметрія в контракті дорожча за один зайвий рядок у dimensions.
+  - code: travel_document
+    label: Військові перевізні документи
+    validity_model: permanent_event

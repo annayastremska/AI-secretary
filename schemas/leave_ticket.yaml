@@ -96,6 +96,12 @@ fields:
     extraction: block_before_label
     label_before: "до якого звільнено військовослужбовця"
     dimension: leave_place
+    # criticality явно: за замовчуванням поле з db_target additional_info
+    # НЕкритичне, але це поле відповідає на друге за важливістю питання
+    # системи -- "де ця людина" (project-overview.md: "скільки людей зараз у
+    # відпустці" -> далі неминуче "де саме"). Порожнє місце в підтвердженому
+    # записі означає факт відпустки без прив'язки до місця.
+    criticality: critical
     db_target: additional_info
 
   - name: leave_year
@@ -206,6 +212,7 @@ fields:
 
   - name: travel_document_number
     type: text
+    dimension: travel_document
     extraction: regex
     normalization: null_if_not_issued   # сентинел "не видавались" -> null, підтверджено-порожнє
     not_issued_sentinel: "не видавались"
