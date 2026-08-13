@@ -10,43 +10,84 @@
 #   exact       -- рівність після strip
 #   date        -- обидва боки як ISO YYYY-MM-DD
 #   number      -- як int
-#   contains    -- еталон має міститись у нашому значенні (для об'єднаних полів,
-#                  напр. leave_type_and_destination = підстава + місце разом)
+#   contains    -- еталон має міститись у нашому значенні. Допускається ЛИШЕ
+#                  там, де на бланку лейбл і значення фізично злиті в один
+#                  рядок, а еталон записує тільки значення. Кожен випадок
+#                  обґрунтований коментарем поруч; решта -- exact, бо м'яке
+#                  порівняння приховує приклеєний сусідній блок.
 #   category    -- порівнюємо label або code нашого {code,label} з рядком еталона
+#
+# printed: ключі розділу "надруковано" того самого JSON -- те, що ФІЗИЧНО
+#   стоїть на бланку. Якщо всі перелічені ключі присутні й порожні, очікуване
+#   значення поля -- null, і null від пайплайна це УСПІХ (рішення Анни,
+#   13.08.2026). Без цього еталон брав відповідь зі СЦЕНАРІЮ, а не з паперу, і
+#   винагороджував галюцинацію: LEAVE-011 має DAYS_WORDS: "", але
+#   правильні_відповіді.днів = 11, тож модель, що вигадала б саме "11", була б
+#   зарахована як правильна, а чесний null -- як помилка.
+#   Ключ, відсутній у "надруковано" цього шаблону, ігнорується (не рахується
+#   порожнім). Якщо жодного з ключів немає -- правило не застосовується.
 
 templates:
   leave_ticket:
-    номер_документа: {field: document_number, compare: exact}
-    дата_видачі:     {field: document_date, compare: date}
-    початок:         {field: leave_start_date, compare: date}
-    кінець:          {field: leave_end_date_planned, compare: date}
-    повернення:      {field: actual_return_date, compare: date}
-    днів:            {field: duration_days, compare: number}
-    # На бланку вид відпустки й населений пункт -- одне вільнотекстове поле,
-    # тому обидва ключі еталона зіставляються з ним через contains.
-    # Населений пункт -- окреме поле destination_place (лейбл розрізаний на
-    # два блоки, значення стоїть між ними).
-    місце:           {field: destination_place, compare: contains}
-    підстава:        {field: leave_type_and_destination, compare: contains}
-    військова_частина: {field: unit_to_report, compare: contains}
+    номер_документа: {field: document_number, compare: exact, printed: [DOC_NUMBER]}
+    дата_видачі:     {field: document_date,   compare: date,  printed: [ISSUE_DATE]}
+    початок:         {field: leave_start_date,       compare: date, printed: [START_D, START_M, START_Y]}
+    кінець:          {field: leave_end_date_planned, compare: date, printed: [END_D, END_M, END_Y]}
+    повернення:      {field: actual_return_date,     compare: date, printed: [RET_D, RET_M, RET_Y]}
+    днів:            {field: duration_days,          compare: number, printed: [DAYS_WORDS]}
+    # Населений пункт -- окреме поле destination_place (лейбл розрізаний на два
+    # блоки, значення стоїть МІЖ ними). Значення на бланку -- чистий топонім
+    # ("м. Житомир"), рівно те, що в еталоні: 16/16 збігаються посимвольно
+    # (замір 13.08), тому exact, а не contains. Саме тут ловиться приклеєний
+    # сусідній блок ("м. Полтава, військова частина А4419").
+    місце:           {field: destination_place, compare: exact, printed: [LEAVE_PLACE]}
+    # ІСТОРИЧНЕ: тут стояв contains із коментарем "вид відпустки й населений
+    # пункт -- одне вільнотекстове поле". Це вже не так: за коментарем у
+    # schemas/leave_ticket.yaml:70-96 місце вийняте в destination_place, а
+    # leave_type_and_destination віддає ЛИШЕ вид відпустки -- 16/16 рівні
+    # еталону посимвольно. Обґрунтування для contains зникло разом із
+    # об'єднанням, тому exact.
+    підстава:        {field: leave_type_and_destination, compare: exact, printed: [LEAVE_TYPE]}
+    # contains ВИПРАВДАНИЙ: на бланку надруковано "військова частина А0000"
+    # одним рядком (ключ RETURN_UNIT), а еталон записує лише код "А0000".
+    # Лейбл і значення злиті в самому документі -- вимагати exact означало б
+    # вимагати від екстрактора викидати слова бланка. Надлишок ("військова
+    # частина ") видно в розділі "ЗАРАХОВАНО ЧЕРЕЗ contains" звіту.
+    військова_частина: {field: unit_to_report, compare: contains, printed: [UNIT, RETURN_UNIT]}
 
   deployment_certificate:
-    номер_документа: {field: document_number, compare: exact}
-    дата_видачі:     {field: document_date, compare: date}
-    початок:         {field: deployment_start_date, compare: date}
-    кінець:          {field: deployment_end_date, compare: date}
-    днів:            {field: deployment_days, compare: number}
-    місце:           {field: destination_points, compare: contains}
-    підстава:        {field: purpose, compare: contains}
-    організація:     {field: destination_org, compare: contains}
+    номер_документа: {field: document_number, compare: exact, printed: [DOC_NUMBER]}
+    дата_видачі:     {field: document_date,   compare: date,  printed: [ISSUE_DATE]}
+    початок:         {field: deployment_start_date, compare: date, printed: [START_D, START_M, START_Y]}
+    кінець:          {field: deployment_end_date,   compare: date, printed: [END_D, END_M, END_Y]}
+    днів:            {field: deployment_days,       compare: number, printed: [DAYS]}
+    # Бланк друкує пункт призначення чистим топонімом (DEST, він же DEST_CITY),
+    # і всі 14 значень еталона -- рівно він. Схема застерігає "можливо кілька
+    # пунктів в одному рядку" (schemas/deployment_certificate.yaml:86), але в
+    # наборі такого документа немає; якщо з'явиться -- еталон має записати
+    # ПОВНИЙ рядок з усіма пунктами, а не перший. exact, бо саме на цьому полі
+    # 13.08 зафіксовано приклеювання сусіднього блоку DEST_ORG.
+    місце:           {field: destination_points, compare: exact, printed: [DEST, DEST_CITY]}
+    # PURPOSE друкується окремим вільнотекстовим полем і в еталоні записаний
+    # посимвольно так само (14/14 у розділі "надруковано"), тому exact.
+    підстава:        {field: purpose, compare: exact, printed: [PURPOSE]}
+    # DEST_ORG -- окреме поле бланка, еталон записує його цілком
+    # ("Центральна база зберігання майна (в/ч Т3011)"); 14/14 наших значень
+    # рівні йому посимвольно (замір 13.08), тому exact.
+    організація:     {field: destination_org, compare: exact, printed: [DEST_ORG]}
 
 # ПІБ і звання -- спільні для всіх шаблонів, беруться з розділу "людина".
+# printed вказує на PERSON_FULL/PERSON_SHORT: якщо на бланку ПІБ не
+# надруковано (LEAVE-011), то й звання там немає -- воно друкується в тому
+# самому рядку -- тож обидва поля очікуються як null.
 person:
   ПІБ:
     # Еталон дає "Лемешко Соломія Романівна" одним рядком у називному --
     # порівнюємо з нашим subject.person_alias, який складається так само.
     field: person_alias
     compare: name
+    printed: [PERSON_FULL, PERSON_SHORT]
   звання:
     field: rank
     compare: category
+    printed: [PERSON_FULL, PERSON_SHORT]

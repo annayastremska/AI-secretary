@@ -54,17 +54,41 @@ def doc_id_from_filename(name: str):
     return m.group(1).upper() if m else None
 
 
-def load_ground_truth() -> dict:
+def load_ground_truth(eval_dir: str = None) -> dict:
     truth = {}
-    for path in glob.glob(os.path.join(EVAL_DIR, "per-document", "*.json")):
+    for path in glob.glob(os.path.join(eval_dir or EVAL_DIR, "per-document", "*.json")):
         with io.open(path, encoding="utf-8") as f:
             data = json.load(f)
         truth[data["id"].upper()] = data
     return truth
 
 
+def _iso_or_raw(y, mo, d, text):
+    """Календарно неможливу дату НЕ перетворюємо в ISO.
+
+    Інакше '32.13.2026' стало б '2026-13-32' -- рядком, який виглядає як ISO і
+    може зійтися з таким самим сміттям з іншого боку порівняння. Повертаємо
+    сирий текст: він не зійдеться з жодною справжньою датою, і помилка лишиться
+    видимою в полі `ours` звіту.
+    """
+    try:
+        import datetime
+        datetime.date(int(y), int(mo), int(d))
+    except (ValueError, TypeError):
+        return text
+    return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+
+
 def as_iso_date(value):
-    """Еталон дає і '2026-05-09', і '09.05.2026'; наш вихід -- ISO."""
+    """Еталон дає і '2026-05-09', і '09.05.2026'; наш вихід -- ISO.
+
+    Формати приймаються різні НАВМИСНО (еталон і пайплайн пишуть по-різному),
+    але лише як запис ОДНІЄЇ дати: обидва боки проганяються через цю саму
+    функцію, тому "неправильна, але схожа" дата зійтися не може -- 2026-05-09 і
+    09.05.2026 це один день, а 09.05.2026 і 05.09.2026 дають різні ISO.
+    Двоцифровий рік не приймається взагалі: '09.05.26' лишиться сирим текстом,
+    бо вгадування століття -- це вже інтерпретація, а не нормалізація.
+    """
     if value is None:
         return None
     text = str(value).strip()
@@ -72,14 +96,14 @@ def as_iso_date(value):
         return None
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", text)
     if m:
-        return text
+        return _iso_or_raw(m.group(1), m.group(2), m.group(3), text)
     m = re.match(r"^(\d{1,2})[.\s/](\d{1,2})[.\s/](\d{4})$", text)
     if m:
         d, mo, y = m.groups()
-        return f"{y}-{int(mo):02d}-{int(d):02d}"
+        return _iso_or_raw(y, mo, d, text)
     m = re.match(r"^(\d{1,2})\s+([а-яіїєґ]+)\s+(\d{4})$", text.lower())
     if m and m.group(2) in UKR_MONTHS:
-        return f"{m.group(3)}-{UKR_MONTHS[m.group(2)]:02d}-{int(m.group(1)):02d}"
+        return _iso_or_raw(m.group(3), UKR_MONTHS[m.group(2)], m.group(1), text)
     return text
 
 
@@ -99,6 +123,41 @@ def norm_name(value):
         return None
     tokens = [t for t in re.split(r"\s+", str(value).strip()) if t]
     return tuple(sorted(t.lower().replace("’", "'") for t in tokens)) or None
+
+
+BLANK_MARKS = ("", "—", "–", "-", "н/д", "null", "none")
+
+
+def is_blank_value(value):
+    """Чи наше значення -- «нічого». Порожній dict {code:None,label:None} з
+    нерозпізнаної категорії теж «нічого»."""
+    if value is None:
+        return True
+    if isinstance(value, dict):
+        return not any(str(v).strip() for v in value.values() if v is not None)
+    if isinstance(value, (list, tuple, set)):
+        return not any(not is_blank_value(v) for v in value)
+    return str(value).strip().lower() in BLANK_MARKS
+
+
+def printed_state(printed: dict, keys) -> str:
+    """Що фізично стоїть на бланку в друкованих ключах поля.
+
+    -> 'blank'   усі присутні ключі порожні -> очікуване значення null;
+       'filled'  хоч один непорожній -> звіряємось із правильні_відповіді;
+       'unknown' у цього шаблону таких ключів немає -> правило не діє.
+
+    Ключ, якого немає в "надруковано", НЕ вважається порожнім: у посвідченні
+    про відрядження немає PERSON_SHORT, і це не означає, що ПІБ не надруковано.
+    """
+    if not keys:
+        return "unknown"
+    present = [k for k in keys if k in (printed or {})]
+    if not present:
+        return "unknown"
+    if any(str(printed[k]).strip() for k in present):
+        return "filled"
+    return "blank"
 
 
 def compare(kind, ours, expected):
@@ -171,12 +230,72 @@ def values_by_field(meta: dict, schema: dict) -> dict:
     return out
 
 
+# Ключі, які пайплайн кладе в meta["subject"] поза списком полів схеми.
+SUBJECT_EXTRA_KEYS = {"person_alias", "person_complete"}
+
+
+def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
+    """Помилки САМОГО зіставлення, а не пайплайна.
+
+    Опечатка в `field:` дає тихий 0% -- значення просто не знаходиться, і це
+    неможливо відрізнити від невитягнутого поля. Так уже було: 0% на датах
+    відпустки виявились багом оцінювача (див. values_by_field). Тому мапінг
+    звіряється зі схемами й з розділом "надруковано" ДО прогону.
+    """
+    problems = []
+    by_template = {s["template"]: s for s in schemas or []}
+    printed_seen = collections.defaultdict(set)
+    tpl_of = {"відпускний квиток": "leave_ticket",
+              "посвідчення про відрядження": "deployment_certificate"}
+    for doc in (truth or {}).values():
+        tpl = tpl_of.get(doc.get("тип"))
+        printed_seen[tpl] |= set((doc.get("надруковано") or {}).keys())
+
+    def check_printed(where, key, spec, templates):
+        keys = spec.get("printed")
+        if not keys:
+            problems.append(f"{where}: '{key}' без `printed` -- правило "
+                            f"«порожнє на бланку -> null» для нього не діє")
+            return
+        for tpl in templates:
+            known = printed_seen.get(tpl) or set()
+            unknown = [k for k in keys if known and k not in known]
+            if unknown and len(unknown) == len(keys):
+                problems.append(f"{where}: '{key}' printed={keys} -- жодного "
+                                f"такого ключа немає в 'надруковано' шаблону "
+                                f"{tpl}; правило порожнього поля не діятиме")
+
+    for tpl, keys in (mapping.get("templates") or {}).items():
+        schema = by_template.get(tpl)
+        if schema is None:
+            problems.append(f"templates.{tpl}: такого шаблону немає в schemas/")
+            continue
+        names = {f["name"] for f in (schema.get("fields") or [])}
+        for key, spec in keys.items():
+            if spec["field"] not in names:
+                problems.append(f"templates.{tpl}.{key}: поля "
+                                f"'{spec['field']}' немає в схемі {tpl} -- "
+                                f"перевірка дасть тихий 0%")
+            check_printed(f"templates.{tpl}", key, spec, [tpl])
+
+    all_names = set(SUBJECT_EXTRA_KEYS)
+    for s in schemas or []:
+        all_names |= {f["name"] for f in (s.get("fields") or [])}
+    for key, spec in (mapping.get("person") or {}).items():
+        if spec["field"] not in all_names:
+            problems.append(f"person.{key}: поля '{spec['field']}' немає ні в "
+                            f"схемах, ні в subject -- тихий 0%")
+        check_printed("person", key, spec, list(by_template))
+    return problems
+
+
 def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dict:
     """Порівнює один запис пайплайна з еталоном одного документа."""
     template = meta.get("template")
     per_template = (mapping.get("templates") or {}).get(template or "", {})
     expected = truth.get("правильні_відповіді") or {}
     person = truth.get("людина") or {}
+    printed = truth.get("надруковано") or {}
 
     facts = meta.get("facts") or []
     main = facts[0] if facts else {}
@@ -185,7 +304,22 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
 
     checks = []
 
-    def add(key, field, kind, ours, exp):
+    def add(key, field, kind, ours, exp, printed_keys=None):
+        state = printed_state(printed, printed_keys)
+        if state == "blank":
+            # ПОРОЖНЄ ПОЛЕ НА БЛАНКУ -> очікуване значення null (рішення Анни,
+            # 13.08.2026). Раніше тут звірялось значення зі СЦЕНАРІЮ, якого на
+            # папері немає, і прилад винагороджував галюцинацію: LEAVE-011 має
+            # DAYS_WORDS: "", але правильні_відповіді.днів = 11, тож вигадане
+            # "11" зараховувалось як правильне, а чесний null -- як помилка.
+            ok = is_blank_value(ours)
+            checks.append({"key": key, "field": field, "compare": "null",
+                           "ok": ok, "surplus": False, "expected_blank": True,
+                           "printed_keys": list(printed_keys or ()),
+                           "ours": compare(kind, ours, None)[1],
+                           "expected": None,
+                           "scenario_said": exp})
+            return
         ok, a, b = compare(kind, ours, exp)
         # "surplus" -- перевірка пройшла ЛИШЕ тому, що порівняння м'яке
         # (`contains`), а наше значення містить зайвий текст понад еталон.
@@ -196,20 +330,28 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         # служби у військова частина А0000"). Рахуємо окремо, СТАТУС `ok`
         # не змінюємо: інакше всі попередні цифри стали б незрівнянними.
         surplus = bool(ok) and kind == "contains" and a != b
-        checks.append({"key": key, "field": field, "compare": kind,
-                       "ok": bool(ok), "surplus": surplus,
-                       "ours": a, "expected": b})
+        row = {"key": key, "field": field, "compare": kind,
+               "ok": bool(ok), "surplus": surplus,
+               "expected_blank": False,
+               "ours": a, "expected": b}
+        if surplus:
+            # Сам зайвий текст, а не лише факт його наявності: без цього в звіті
+            # видно "надлишок 16", але не видно, чи це стале "військова частина "
+            # з бланка, чи приклеєний сусідній блок.
+            row["extra"] = a.replace(b, "…", 1) if (a and b) else a
+        checks.append(row)
 
     for key, spec in per_template.items():
         if key not in expected:
             continue
         field = spec["field"]
         ours = by_field.get(field, subject.get(field))
-        add(key, field, spec["compare"], ours, expected[key])
+        add(key, field, spec["compare"], ours, expected[key], spec.get("printed"))
 
     for key, spec in (mapping.get("person") or {}).items():
         if key in person:
-            add(key, spec["field"], spec["compare"], subject.get(spec["field"]), person[key])
+            add(key, spec["field"], spec["compare"], subject.get(spec["field"]),
+                person[key], spec.get("printed"))
 
     return {
         "id": truth["id"],
@@ -269,6 +411,10 @@ def main(argv=None):
     with io.open(MAPPING_PATH, encoding="utf-8") as f:
         mapping = yaml.safe_load(f)
 
+    map_problems = check_mapping(mapping, res["schemas"], truth)
+    for p in map_problems:
+        print(f"[МАПІНГ] {p}", file=sys.stderr)
+
     paths = sorted(glob.glob(os.path.join(args.input, "*")))
     paths = [p for p in paths if os.path.isfile(p) and doc_id_from_filename(os.path.basename(p))]
     if args.only:
@@ -318,6 +464,15 @@ def main(argv=None):
         for key, total in dead:
             print(f"     {key:20} 0/{total}")
 
+    # Поле, що працює 1 раз із 14, зламане так само, як те, що не працює
+    # жодного разу, але блок вище його не показує, а середнє -- тим більше.
+    weak = [(k, o, t) for k, (o, t) in sorted(per_key.items())
+            if t and 0 < o and o / t < 0.5]
+    if weak:
+        print("\n  !  ПОЛЯ НИЖЧЕ 50% (працюють як виняток, не як правило):")
+        for key, ok, total in weak:
+            print(f"     {key:20} {ok}/{total}")
+
     # Значення, що пройшли лише завдяки м'якому `contains`.
     surplus = collections.Counter(
         c["key"] for row in results for c in row["checks"] if c.get("surplus")
@@ -326,15 +481,45 @@ def main(argv=None):
         print("\n  ~ ЗАРАХОВАНО ЧЕРЕЗ contains, але зі зайвим текстом "
               "(еталон усередині нашого значення, не дорівнює йому):")
         for key, n in surplus.most_common():
-            print(f"     {key:20} {n}")
+            extras = collections.Counter(
+                c.get("extra") for row in results for c in row["checks"]
+                if c.get("surplus") and c["key"] == key
+            )
+            shape = "; ".join(f"{e!r}×{n2}" for e, n2 in extras.most_common(3))
+            print(f"     {key:20} {n:>3}  зайве: {shape}")
         print("     ^ це НЕ помилки за поточним правилом порівняння, але саме "
-              "тут ховається приклеєний бланковий шум -- дивіться, якщо "
-              "число зростає після зміни екстракції")
+              "тут ховається приклеєний бланковий шум. '…' -- місце еталонного "
+              "значення; усе решта в лапках наш екстрактор додав від себе.")
+
+    # Поля, ПОРОЖНІ на бланку: очікуване значення -- null. Показуємо окремо,
+    # бо це «безкоштовні» перевірки: пайплайн, який нічого не витягує, отримує
+    # їх задарма. Без цього блоку зростання загальної цифри після 13.08 не
+    # можна відрізнити від справжнього покращення екстракції.
+    blanks = [(row["id"], c) for row in results for c in row["checks"]
+              if c.get("expected_blank")]
+    if blanks:
+        good = sum(1 for _, c in blanks if c["ok"])
+        print(f"\n  ø ОЧІКУЄТЬСЯ NULL (поле порожнє на бланку): "
+              f"{good}/{len(blanks)} правильно")
+        for doc_id, c in blanks:
+            verdict = "null, як і слід" if c["ok"] else f"ВИГАДАНО {c['ours']!r}"
+            print(f"     {doc_id:10} {c['key']:18} {verdict}"
+                  f"   (сценарій казав {c.get('scenario_said')!r})")
+        print("     ^ на папері цих значень НЕМА. Раніше тут звірялось значення "
+              "зі сценарію, тому вигадане правильне число зараховувалось, а "
+              "чесний null -- ні.")
 
     ok_fields = sum(r["fields_ok"] for r in results)
     all_fields = sum(r["fields_total"] for r in results)
     print(f"\nусього полів правильно: {ok_fields}/{all_fields} "
           f"({100 * ok_fields / max(1, all_fields):.1f}%)")
+    if blanks:
+        pen_ok = ok_fields - sum(1 for _, c in blanks if c["ok"])
+        pen_all = all_fields - len(blanks)
+        print(f"  з них порожніх на бланку (очікується null): {len(blanks)}; "
+              f"без них: {pen_ok}/{pen_all} "
+              f"({100 * pen_ok / max(1, pen_all):.1f}%) -- саме цю цифру "
+              f"порівнюйте з замірами до 13.08")
     print("шаблон визначено правильно: "
           f"{sum(1 for r in results if r['template_ok'])}/{len(results)}")
     print("статуси:", dict(collections.Counter(r["status"] for r in results)))
@@ -363,7 +548,13 @@ def main(argv=None):
         os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
         with io.open(args.report, "w", encoding="utf-8") as f:
             json.dump({"input": args.input, "llm": bool(res["llm"]),
+                       "mapping_problems": map_problems,
                        "per_key": {k: v for k, v in sorted(per_key.items())},
+                       "blank_expected": [
+                           {"id": i, "key": c["key"], "ok": c["ok"],
+                            "ours": c["ours"], "scenario_said": c.get("scenario_said")}
+                           for i, c in blanks],
+                       "surplus": dict(surplus),
                        "results": results}, f, ensure_ascii=False, indent=1, default=str)
         print(f"\nзвіт: {args.report}")
     return 0
