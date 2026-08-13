@@ -35,6 +35,15 @@ DEFAULTS = {
         # 0 = чистий CPU (ноут без CUDA); -1 = віддати всі шари GPU.
         "n_gpu_layers": 0,
         "n_threads": None,
+        # "gemma" -- правильний формат і для Gemma-3 (MamayLM): звірено з
+        # офіційним шаблоном із самих ваг (`tokenizer.chat_template` у GGUF)
+        # -- послідовності токенів збігаються, а llama-cpp-python на
+        # jinja-шляху ще й ГУБИТЬ BOS (`bos_token` цієї моделі
+        # детокенізується в порожній рядок), тож явний "gemma" тут КРАЩИЙ за
+        # автовизначення. Обмеження цього форматера -- він не має ролі
+        # `system`; guidelines підмішуються на початок user-ходу в
+        # `LlamaClient._with_guidelines` рівно так, як це робить офіційний
+        # шаблон Gemma-3.
         "chat_format": "gemma",
         "batch_size": 4,
         "self_consistency_n": 1,

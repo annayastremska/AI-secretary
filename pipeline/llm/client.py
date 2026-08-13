@@ -89,12 +89,34 @@ class LlamaClient:
         tail = self.max_context_chars - head
         return text[:head] + "\n[...пропущено...]\n" + text[-tail:]
 
+    def _with_guidelines(self, body: str) -> str:
+        """Gemma-3 НЕ має ролі `system` як окремого ходу розмови.
+
+        Джерело -- офіційний chat-template, вшитий у самі ваги
+        (`tokenizer.chat_template` у GGUF MamayLM-Gemma-3-12B): якщо
+        `messages[0]['role'] == 'system'`, шаблон бере його вміст і
+        приклеює на ПОЧАТОК першого user-ходу
+        (`first_user_prefix = messages[0]['content'] + '\\n\\n'`);
+        тега `<start_of_turn>system` не існує взагалі.
+
+        Раніше ми клали окреме повідомлення з `role="system"`, а
+        `chat_format="gemma"` (`llama_chat_format.py:1439`) його МОВЧКИ
+        викидав: його `_roles` містить лише user/assistant, і далі йде
+        дослівно `_format_no_colon_single(system_message="", ...)`. Тобто
+        575 токенів інструкції фізично не доходили до моделі.
+
+        Тому склеюємо самі -- результат байт-у-байт збігається з тим, що
+        дав би офіційний шаблон моделі (перевірено зіставленням двох
+        форматерів), і не залежить від того, який `chat_format` увімкнено:
+        повідомлення з роллю `system` більше не створюється взагалі, тож
+        жоден форматер не має що втрачати чи дублювати.
+        """
+        if not self.system_prompt:
+            return body
+        return self.system_prompt.strip() + "\n\n" + body
+
     def _messages(self, user_content):
-        messages = []
-        if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
-        messages.append({"role": "user", "content": user_content})
-        return messages
+        return [{"role": "user", "content": self._with_guidelines(user_content)}]
 
     # --- публічний API, який очікує решта пайплайна ---
 
@@ -158,11 +180,29 @@ class LlamaClient:
             "підходить -- null, а не найближчий за здогадкою."
             if has_category else ""
         )
+        # ПОРЯДОК ЧАСТИН ПРОМПТУ -- СТАЛЕ СПОЧАТКУ, ЗМІННЕ В КІНЦІ.
+        #
+        # llama-cpp-python 0.3.34 повторно використовує KV-кеш за спільним
+        # префіксом з попереднім викликом (`llama.py:909-950`, зіставлення
+        # `self._input_ids` з новими токенами до першої розбіжності). Тобто
+        # економить рівно стільки, скільки збігається З ПОЧАТКУ.
+        #
+        # Було: інструкція -> ОПИСИ ПОЛІВ -> текст документа. Описи полів
+        # різні для кожної групи полів, тому вже на них префікс ламався, і
+        # документ (556-570 токенів, медіана) переприфілювався ПОВНІСТЮ на
+        # кожен виклик; спільного префікса лишалось ~59 токенів
+        # (research-round-2026-08-13.md, розд. 4.3).
+        #
+        # Стало: guidelines (однакові завжди, додаються в `_messages`) ->
+        # текст документа (однаковий для всіх груп полів одного документа)
+        # -> інструкція+поля (єдине, що змінюється між викликами). Жоден
+        # байт контексту не втрачено -- лише переставлено.
         user = (
-            "З наведеного тексту документа витягни значення полів нижче. "
+            f"Текст документа:\n{self._trim(context_text)}\n\n"
+            "З наведеного тексту документа вище витягни значення полів нижче. "
             "Якщо значення поля в тексті немає -- поверни null для цього поля, "
             f"не вигадуй.{category_rule} Відповідай лише JSON-об'єктом.\n\n"
-            f"Поля:\n{field_descriptions}\n\nТекст документа:\n{self._trim(context_text)}"
+            f"Поля:\n{field_descriptions}"
             "\n\nНагадування: null для полів, значення яких немає в тексті вище."
         )
         grammar = self._grammar_from_json_schema(json_schema)

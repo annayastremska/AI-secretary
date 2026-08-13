@@ -23,7 +23,8 @@ import re
 from collections import Counter
 
 from pipeline.classification.classify import phrase_in_text, normalize_ws
-from pipeline.normalization.normalize import is_placeholder, lookup_alias
+from pipeline.normalization.normalize import (
+    is_placeholder, lookup_alias, homoglyph_tolerant_pattern, fix_declared_numeric)
 from pipeline.extraction.schema_grammar import build_json_schema_for_fields, chunk_fields
 
 
@@ -141,21 +142,51 @@ def _is_denylisted(candidate: str, denylist) -> bool:
 OVERSIZED_CANDIDATE_CHARS = 200
 
 
-# Блок, вищий за медіанну висоту блоку в стільки разів, найпевніше містить
-# КІЛЬКА логічних рядків/полів, злитих Surya в один bbox, а не одне значення
-# -- виміряно: LEAVE-001, блок з "вид відпустки"/"дата повернення"/
-# "найменування військової частини" висотою ~908px проти медіани ~84px
-# (10.8x). bbox такого блоку не описує позицію ЖОДНОГО окремого рядка
-# всередині нього -- ні для геометричного вирівнювання, ні для "рядки в
-# тому самому блоці до лейбла", ні для "попередній блок за списком": усі
-# три мовчки візьмуть щось під/над/перед УСІМ блоком, а не рядком, де
-# насправді стоїть лейбл. Легітимний багаторядковий блок (напр. заголовок
-# бланка у 4 рядки, ~2.1x медіани) лишається під порогом з запасом.
+# Блок, чия висота НЕ ПОЯСНЮЄТЬСЯ кількістю рядків, які ми з нього бачимо,
+# найпевніше містить кілька логічних рядків/полів, злитих в один bbox без
+# внутрішніх меж, а не одне значення. bbox такого блоку не описує позицію
+# ЖОДНОГО окремого рядка всередині нього -- ні для геометричного
+# вирівнювання, ні для "рядки в тому самому блоці до лейбла", ні для
+# "попередній блок за списком": усі три мовчки візьмуть щось під/над/перед
+# УСІМ блоком, а не рядком, де насправді стоїть лейбл.
+#
+# Міра -- ВИСОТА НА ОДИН РЯДОК блоку проти типової висоти рядка в документі,
+# а НЕ повна висота блоку проти медіанної висоти БЛОКУ. Різниця принципова,
+# і попередня (повна висота) міра давала виміряний хибний позитив на цілому
+# джерелі: у PDF з текстовим шаром PyMuPDF віддає блок-абзац, де "\n" -- це
+# СПРАВЖНІ рядки тексту в справжньому порядку читання, тож звичайний
+# 6-рядковий абзац бланка (h≈74px) переганяв медіану блоку (≈15px, бо
+# більшість блоків однорядкові) у 4.8 раза й оголошувався мега-блоком.
+# Наслідок був заміряний: на leave-pdf поля `звання` і `місце` давали 0/16,
+# бо їхні лейбли лежать саме в таких абзацах.
+#
+# Заміряні числа, на яких стоїть поріг (обидва -- LEAVE-001):
+#   Surya (png, справжній мега-блок): h=907.5 на 4 рядки = 226.9 px/рядок
+#     проти медіани 43.3 px/рядок -> 5.2x, лишається мега-блоком;
+#     решта блоків тієї ж сторінки -- 39.8-46.8 px/рядок, тобто ~1.0x;
+#   PyMuPDF (pdf, звичайний абзац): h=74.6 на 6 рядків = 12.4 px/рядок
+#     проти медіани 15.5 px/рядок -> 0.8x, мега-блоком більше не є.
+# Тобто розділення між двома класами -- не на межі, а на порядок.
 MEGA_BLOCK_HEIGHT_RATIO = 2.5
 
 
+def _block_line_height(block):
+    """Висота bbox блоку, поділена на кількість НЕПОРОЖНІХ рядків, які ми з
+    нього прочитали -- скільки вертикалі припадає на один відомий нам рядок.
+    None, якщо геометрії немає (docx)."""
+    bbox = block.get("bbox")
+    if not bbox:
+        return None
+    lines = block.get("lines") or []
+    return (bbox[3] - bbox[1]) / max(1, len(lines))
+
+
 def _median_block_height(blocks):
-    heights = [b["bbox"][3] - b["bbox"][1] for b in blocks if b.get("bbox")]
+    """Типова висота ОДНОГО рядка в документі (медіана по блоках).
+
+    Назва збережена історично; повертає саме висоту рядка -- див. коментар
+    до MEGA_BLOCK_HEIGHT_RATIO про те, чому міряти треба рядок, а не блок."""
+    heights = [h for h in (_block_line_height(b) for b in blocks) if h]
     if not heights:
         return None
     heights.sort()
@@ -163,10 +194,10 @@ def _median_block_height(blocks):
 
 
 def _is_mega_block(block, h_med) -> bool:
-    bbox = block.get("bbox")
-    if not bbox or not h_med:
+    line_h = _block_line_height(block)
+    if not line_h or not h_med:
         return False
-    return (bbox[3] - bbox[1]) > MEGA_BLOCK_HEIGHT_RATIO * h_med
+    return line_h > MEGA_BLOCK_HEIGHT_RATIO * h_med
 
 
 def _geometric_candidate(blocks, label_i, h_med):
@@ -201,9 +232,12 @@ def _geometric_candidate(blocks, label_i, h_med):
     "вирівнювався" зі СУСІДНІМ мега-блоком лише тому, що впритул сидів
     НАД ним усім, а не над конкретним рядком-значенням).
 
-    Повертає "\\n".join(lines) знайденого блоку або None -- коли жоден блок
-    не має bbox (docx -- геометрії немає, попередня лінійна поведінка
-    незмінна) або жоден кандидат не пройшов фільтр вирівнювання.
+    Повертає ІНДЕКС знайденого блоку або None -- коли жоден блок не має bbox
+    (docx -- геометрії немає, попередня лінійна поведінка незмінна) або
+    жоден кандидат не пройшов фільтр вирівнювання. Індекс, а не готовий
+    текст, бо викликачу потрібна ПОЗИЦІЯ кандидата в документі -- від неї
+    відлічують ліву межу значення (_value_lines_after_label_note,
+    _extend_to_anchor).
 
     "Той самий рядок/стовпець" визначається ПЕРЕТИНОМ діапазонів bbox по
     перпендикулярній осі, а не відстанню між ЦЕНТРАМИ блоків. Виміряний
@@ -238,16 +272,16 @@ def _geometric_candidate(blocks, label_i, h_med):
         y_overlap = by1 < ly2 and ly1 < by2
         x_overlap = bx1 < lx2 and lx1 < bx2
         if y_overlap and bx1 > lx2:
-            same_row.append((bx1 - lx2, block))
+            same_row.append((bx1 - lx2, i))
         elif x_overlap and by2 <= ly1:
-            same_above.append((ly1 - by2, block))
+            same_above.append((ly1 - by2, i))
         elif x_overlap and by1 >= ly2:
-            same_below.append((by1 - ly2, block))
+            same_below.append((by1 - ly2, i))
 
     for group in (same_row, same_above, same_below):
         if group:
             group.sort(key=lambda t: t[0])
-            return "\n".join(group[0][1]["lines"])
+            return group[0][1]
     return None
 
 
@@ -309,6 +343,123 @@ def _has_unmatched_close_paren(text: str) -> bool:
     return False
 
 
+def _is_printed_label_note(line: str) -> bool:
+    """Рядок -- ПОВНА дужкова примітка бланка ("(вид відпустки та...)",
+    "(військове звання, прізвище, ім'я та по батькові)"), тобто друкована
+    підказка, що ЗАКРИВАЄ попереднє поле, а не текст значення.
+
+    Вимагається і "(" на початку, і ")" в кінці, і збалансованість. Саме
+    збалансованість відрізняє примітку від ХВОСТА значення, розірваного
+    переносом усередині дужки: "Т3011)" (кінець "Центральна база зберігання
+    майна (в/ч Т3011)") має ")" в кінці, але не має "(" на початку -- і його
+    підбирає _extend_across_block_boundary, а не ця перевірка."""
+    s = line.strip()
+    return (s.startswith("(") and s.endswith(")")
+            and s.count("(") == s.count(")"))
+
+
+def _value_lines_after_label_note(lines):
+    """Значення починається ПІСЛЯ останньої друкованої примітки-лейбла серед
+    рядків-кандидатів, а не з першого рядка блоку.
+
+    Це той самий інваріант бланка, на якому вже стоїть _sandwich_value
+    ("текст між найближчою попередньою ')' і початком лейбла"), лише
+    застосований до багаторядкового блоку, а не до суцільного OCR-тексту.
+
+    Навіщо: у PDF з текстовим шаром один блок PyMuPDF нерідко містить
+    КІЛЬКА полів бланка з їхніми примітками підряд, напр. (LEAVE-001.pdf)
+        '№ 102    від 09.05.2026'
+        'рядовий ЛЕМЕШКО Соломія Романівна'
+        "(військове звання, прізвище, ім'я та по батькові)"
+        'звільнена'
+        'щорічна основна відпустка за 2026 рік'
+        '(вид відпустки та найменування населеного пункту,'   <- лейбл
+    Без цієї межі значення поля "вид відпустки" = ВСІ п'ять рядків до
+    лейбла, тобто номер документа й ПІБ приклеюються до відповіді. Перевірка
+    еталона це пропускала лише тому, що field-mapping.yaml порівнює цей ключ
+    через `compare: contains` -- заміряно на 7 документах leave-pdf.
+
+    Порожній залишок -> рядки НЕ ріжуться: примітка в кінці кандидата це
+    частина самого значення ("(перервана, відкликаний з відпустки)"), а не
+    межа перед ним."""
+    last_note = None
+    for k, line in enumerate(lines):
+        if _is_printed_label_note(line):
+            last_note = k
+    if last_note is None or last_note + 1 >= len(lines):
+        return lines
+    return lines[last_note + 1:]
+
+
+# Скільки рядків назад максимум шукати оголошений схемою якір. Обмеження, а
+# не істина про бланк: якщо якір не знайшовся поруч, ми, найпевніше, шукаємо
+# не те -- і мовчки набрати півсторінки гірше, ніж лишити значення як є.
+MAX_ANCHOR_LOOKBACK_LINES = 6
+
+
+def _lines_backwards(blocks, i, j):
+    """Рядки документа ПЕРЕД blocks[i]["lines"][j], у зворотному порядку.
+    Не виходить за межі СТОРІНКИ: на іншій сторінці "попередній рядок" --
+    це низ попередньої сторінки, тобто підписи й печатки, а не продовження
+    значення (та сама причина, що й у _geometric_candidate)."""
+    page = blocks[i].get("page")
+    for k in range(j - 1, -1, -1):
+        yield blocks[i]["lines"][k]
+    for bi in range(i - 1, -1, -1):
+        if blocks[bi].get("page") != page:
+            return
+        for line in reversed(blocks[bi]["lines"]):
+            yield line
+
+
+def _extend_to_anchor(blocks, i, start_j, value_lines, anchor):
+    """`strip_prefix` зі схеми -- це не лише те, що треба ЗРІЗАТИ, а й
+    оголошення ЛІВОЇ МЕЖІ значення: літерал, одразу після якого значення
+    починається ("звільнений", "Видано"). Якщо його немає в кандидаті --
+    значення обірване, і бракує саме початку.
+
+    Навіщо: PyMuPDF ріже довгий рядок бланка на межі переносу, і початок
+    значення лишається в ПОПЕРЕДНЬОМУ блоці. Заміряно на LEAVE-003/009/015
+    (кандидат = 'рік' -- сам лише хвіст "...за 2026 / рік") і LEAVE-014
+    (кандидат = '(перервана, відкликаний з відпустки)' -- сама лише
+    примітка в дужках, без відпустки, до якої вона належить).
+
+    Добираємо рядки назад, поки не знайдемо якір; не знайшли в межах ліміту
+    -- повертаємо кандидата БЕЗ ЗМІН (безпечний відкат, та сама дисципліна,
+    що в _extend_across_block_boundary), а не найкращий здогад.
+
+    Зупинка на друкованій примітці-лейблі (_is_printed_label_note) --
+    обов'язкова: примітка закриває ПОПЕРЕДНЄ поле, тож значення нашого поля
+    почалось після неї за побудовою бланка. Без цієї зупинки документ, де
+    якір надрукований в іншому роді ("звільненА" в жіночому проти
+    "звільнений" у схемі), не знаходив би якір і набирав би назад чужі поля
+    -- заміряно на LEAVE-001.
+
+    Працює зі СПИСКОМ рядків і ЯВНИМ start_j (індексом рядка, з якого
+    кандидат починається в блоці i), а не з готовим рядком-кандидатом:
+    відновлювати позицію підрахунком "\\n" у кандидаті не можна, бо кандидат
+    міг бути вже розширений іншим механізмом, і та сама арифметика давала
+    ДУБЛЮВАННЯ тексту (виміряно на LEAVE-016: 'відпустка за сімейними
+    обставинами (виданий замість анульованого відпустка за сімейними
+    обставинами (виданий замість анульованого квитка № 157)')."""
+    if not anchor:
+        return value_lines
+    low_anchor = anchor.lower()
+    if any(phrase_in_text(line.lower(), low_anchor) for line in value_lines):
+        return value_lines
+    prefix = []
+    for n, line in enumerate(_lines_backwards(blocks, i, start_j)):
+        if n >= MAX_ANCHOR_LOOKBACK_LINES or _is_printed_label_note(line):
+            break
+        prefix.insert(0, line)
+        merged = prefix + value_lines
+        if len("\n".join(merged)) > OVERSIZED_CANDIDATE_CHARS:
+            break
+        if phrase_in_text(line.lower(), low_anchor):
+            return merged
+    return value_lines
+
+
 def _extend_across_block_boundary(blocks, label_block_i, candidate):
     """Якщо candidate має незакриту ")" -- добирає рядки з КІНЦЯ
     попереднього блоку, по одному, поки дужки не збалансуються. Мінімально
@@ -333,9 +484,13 @@ def _extend_across_block_boundary(blocks, label_block_i, candidate):
     return candidate
 
 
-def find_block_before_label(blocks, label_substring, denylist=None):
+def find_block_before_label(blocks, label_substring, denylist=None, anchor=None):
     """blocks: результат group_blocks_into_lines() -- список
     {"lines": [...], "bbox": (...)|None}.
+
+    anchor -- необов'язковий літерал ЛІВОЇ МЕЖІ значення (на практиці
+    `strip_prefix` зі схеми); див. _extend_to_anchor. None -> поведінка як
+    була.
     Повертає (значення_або_None, причина), причина:
     matched | no_label | ambiguous_label | denylisted |
     oversized_block_suspect.
@@ -425,25 +580,54 @@ def find_block_before_label(blocks, label_substring, denylist=None):
     candidates = []
     unresolved_hit = False
     for i, j in hits:
-        lines = blocks[i]["lines"]
+        # (блок-джерело, його рядки-кандидати) -- ЄДИНА точка, де вони
+        # визначаються, далі ліва межа значення шукається однаково для всіх
+        # трьох шляхів. Раніше межа рахувалась лише на шляху "лейбл не
+        # перший рядок", і той самий бланк давав чисте значення або значення
+        # з приклеєними чужими полями залежно від того, чи PyMuPDF поклав
+        # лейбл в окремий блок -- заміряний розкид на LEAVE-004/007/013
+        # (лейбл у власному блоці) проти LEAVE-002/005/006 (лейбл разом зі
+        # значенням), при тому що бланк той самий.
         if j > 0:
-            candidate = "\n".join(lines[:j])
-            candidates.append(_extend_across_block_boundary(blocks, i, candidate))
-            continue
-        geo = _geometric_candidate(blocks, i, h_med)
-        if geo is not None:
-            candidates.append(geo)
-        elif i > 0 and blocks[i - 1]["lines"]:
-            candidates.append("\n".join(blocks[i - 1]["lines"]))
+            src_i, src_lines = i, blocks[i]["lines"][:j]
         else:
-            # Цей хіт не дав ЖОДНОГО кандидата (лейбл -- перший рядок
-            # першого блоку документа, і геометрія теж не спрацювала).
-            # Раніше хіт просто мовчки випадав зі списку candidates -- якщо
-            # лейбл трапляється кілька разів, а цей конкретний хіт міг би
-            # дати ІНШЕ значення, ми цього не дізнаємось і ризикуємо
-            # видати "matched" за збігом решти хітів, хоча справжньої
-            # одностайності не перевірено.
-            unresolved_hit = True
+            geo_i = _geometric_candidate(blocks, i, h_med)
+            if geo_i is not None:
+                src_i, src_lines = geo_i, blocks[geo_i]["lines"]
+            elif i > 0 and blocks[i - 1]["lines"]:
+                src_i, src_lines = i - 1, blocks[i - 1]["lines"]
+            else:
+                # Цей хіт не дав ЖОДНОГО кандидата (лейбл -- перший рядок
+                # першого блоку документа, і геометрія теж не спрацювала).
+                # Раніше хіт просто мовчки випадав зі списку candidates --
+                # якщо лейбл трапляється кілька разів, а цей конкретний хіт
+                # міг би дати ІНШЕ значення, ми цього не дізнаємось і
+                # ризикуємо видати "matched" за збігом решти хітів, хоча
+                # справжньої одностайності не перевірено.
+                unresolved_hit = True
+                continue
+
+        value_lines = _value_lines_after_label_note(src_lines)
+        extended = _extend_to_anchor(blocks, src_i,
+                                     len(src_lines) - len(value_lines),
+                                     value_lines, anchor)
+        if extended is not value_lines:
+            # Якір уже встановив ліву межу значення. Добирати ще й
+            # _extend_across_block_boundary НЕ МОЖНА: обидва механізми
+            # тягнуть з ПОПЕРЕДНЬОГО блоку, і другий приклеїв би вдруге те,
+            # що перший уже взяв -- рівно той клас дублювання, який описаний
+            # у _extend_to_anchor.
+            candidates.append("\n".join(extended))
+        elif j > 0:
+            # Добір хвоста через межу блоку лишається лише на шляху "лейбл
+            # не перший рядок свого блоку" -- там кандидат за побудовою
+            # закінчується рівно перед лейблом, тож незакрита ")" справді
+            # означає обрізаний ПОЧАТОК. На шляху "весь попередній блок" цієї
+            # гарантії немає, і поведінка тут навмисно лишається як була.
+            candidates.append(_extend_across_block_boundary(
+                blocks, src_i, "\n".join(value_lines)))
+        else:
+            candidates.append("\n".join(value_lines))
 
     if not candidates:
         return None, "no_label"
@@ -478,9 +662,38 @@ def strip_literal_prefix(text, prefix):
     return text
 
 
+def _find_rank_run(tokens, rank_alias_lookup):
+    """(значення_звання, індекс_початку, індекс_кінця) -- НАЙЛІВІША позиція, з
+    якої починається відомий рядок звання, і на ній -- найдовший збіг.
+    (None, 0, 0), якщо звання немає ніде.
+
+    Чому не лише префікс (як було): звання шукалось виключно з ТОКЕНА 0, тоді
+    як прізвище шукалось СКАНУВАННЯМ по всіх токенах. Ця асиметрія і давала
+    заміряний провал `звання` = 0/16 на leave-pdf і 0/14 на trip-pdf: у PDF
+    рядок звання+ПІБ приходить у кандидаті разом із сусіднім рядком бланка
+    ("№ 102    від 09.05.2026\\nрядовий ЛЕМЕШКО Соломія Романівна"), тож
+    токен 0 -- це "№", і префіксний пошук не знаходив звання ніколи, хоча
+    ПІБ (скануванням) знаходився нормально.
+
+    Скан ЛІВОРУЧ-ПРАВОРУЧ, а не "найближче до прізвища": у бланку ЗСУ
+    порядок завжди "звання ПРІЗВИЩЕ Ім'я По-батькові", і коли токен 0 таки є
+    званням (весь шлях docx), найлівіша позиція -- це і є 0, тобто поведінка
+    на docx лишається побайтово тією самою."""
+    for start in range(len(tokens)):
+        for end in range(len(tokens), start, -1):
+            # lookup_alias, а не пряме `in`: у документі звання стоїть у тому
+            # відмінку, якого вимагає речення бланка ("Видано старшому
+            # сержанту"), а довідник містить називний. Точний збіг через це не
+            # знаходив навіть "підполковника" -- перевірено.
+            hit = lookup_alias(" ".join(tokens[start:end]), rank_alias_lookup)
+            if hit is not None:
+                return hit, start, end
+    return None, 0, 0
+
+
 def parse_rank_and_name(raw_line, rank_alias_lookup):
-    """Токенізація замість одного regex на все: найдовший префікс токенів, що
-    є відомим званням, визначає межу; решта токенів -- прізвище (ВЕЛИКІ
+    """Токенізація замість одного regex на все: найдовший рядок токенів, що є
+    відомим званням, визначає межу; токени ПІСЛЯ нього -- прізвище (ВЕЛИКІ
     ЛІТЕРИ) / ім'я / по батькові за регістром.
 
     Якщо жоден токен не у ВЕЛИКОМУ регістрі -- повертає всі три поля як
@@ -488,23 +701,23 @@ def parse_rank_and_name(raw_line, rank_alias_lookup):
     ЗСУНУТІ (не порожні, а тихо неправильні) given_name/patronymic, які
     виглядали як успішний розбір, тому LLM-фолбек для них ніколи не
     спрацьовував (підтверджено тестом). rank при цьому лишається -- його
-    визначення не залежить від регістру прізвища."""
+    визначення не залежить від регістру прізвища.
+
+    Прізвище шукається лише СЕРЕД ТОКЕНІВ ПІСЛЯ ЗВАННЯ (коли звання знайдене),
+    а не з початку рядка. Це другий бік тієї самої асиметрії, описаної в
+    _find_rank_run, і він теж заміряний: TRIP-012.pdf має гомогліфи в номері
+    документа ("№ 25О    від О7.О5.2О2б"), а токен '25О' проходить
+    `str.isupper()` -- кирилична "О" є літерою у ВЕЛИКОМУ регістрі. Тому
+    прізвищем ставало '25О', ім'ям -- 'від', по батькові -- 'О7.О5.2О2б', і
+    все це з провенансом `matched`. Відлік від знайденого звання прибирає
+    цілий клас таких збігів: до звання ПІБ бути не може за побудовою бланка.
+    """
     if not raw_line or is_placeholder(raw_line):
         return None, {"surname": None, "given_name": None, "patronymic": None}
     tokens = raw_line.split()
-    rank_value, rank_len = None, 0
-    for n in range(len(tokens), 0, -1):
-        candidate = " ".join(tokens[:n])
-        # lookup_alias, а не пряме `in`: у документі звання стоїть у тому
-        # відмінку, якого вимагає речення бланка ("Видано старшому сержанту"),
-        # а довідник містить називний. Точний збіг через це не знаходив навіть
-        # "підполковника" -- перевірено.
-        hit = lookup_alias(candidate, rank_alias_lookup)
-        if hit is not None:
-            rank_value, rank_len = hit, n
-            break
+    rank_value, _rank_start, rank_end = _find_rank_run(tokens, rank_alias_lookup)
     rank_result = {"code": rank_value[0], "label": rank_value[1]} if rank_value else None
-    name_tokens = tokens[rank_len:]
+    name_tokens = tokens[rank_end:]
     surname_index = next((k for k, t in enumerate(name_tokens)
                           if t.isupper() and len(t) > 1), None)
     if surname_index is None:
@@ -605,7 +818,8 @@ def resolve_name_groups(schema, grouped_blocks, denylist, dictionaries):
             resolved[group] = (None, {"surname": None, "given_name": None,
                                       "patronymic": None}, None, "no_label")
             continue
-        raw_line, label_reason = find_block_before_label(grouped_blocks, label, denylist)
+        raw_line, label_reason = find_block_before_label(grouped_blocks, label,
+                                                         denylist, anchor=strip)
         if raw_line and strip:
             raw_line = strip_literal_prefix(raw_line, strip)
         rank_result, name_parts = parse_rank_and_name(raw_line, rank_lookup)
@@ -614,19 +828,47 @@ def resolve_name_groups(schema, grouped_blocks, denylist, dictionaries):
 
 
 def _compile_variants(field_def):
-    return [re.compile(v["pattern"]) for v in field_def.get("regex_variants", [])]
+    """(скомпільований_патерн, чи_розширений) для кожного варіанта.
+
+    `\\d` у схемному патерні розширюється до "цифра АБО її гомогліф"
+    (homoglyph_tolerant_pattern). Причина -- виміряна: дефект, записаний у
+    наборі як `ocr_noise`, насправді ГОМОГЛІФИ, вписані в сам документ
+    (кирилична "О" замість 0, "б" замість 6, "З" замість 3, "І" замість 1) --
+    ті самі літери є в текстовому шарі .docx, де розпізнавання не
+    відбувається взагалі. Тому патерн, який вимагає справжніх цифр, не
+    збігається: TRIP-012 має "№ 25О    від О7.О5.2О2б", і
+    `\\s+від\\s+\\d{1,2}\\.\\d{1,2}\\.\\d{4}` не матчиться -- разом із
+    номером документа втрачалась і дата видачі.
+
+    `\\d` -- це вже декларація автора схеми "тут стоїть число", тож
+    розширювати саме її безпечно; схеми лишаються читабельними, а список
+    гомогліфів не дублюється в десятку місць."""
+    out = []
+    for v in field_def.get("regex_variants", []):
+        expanded_pattern, was_expanded = homoglyph_tolerant_pattern(v["pattern"])
+        out.append((re.compile(expanded_pattern), was_expanded))
+    return out
 
 
 def extract_field_regex(field_def, text: str):
     """Пробує всі відомі варіанти по черзі. Групи стандартизовані за типом
-    поля: date -> (day, month, year); інші -> (value)."""
-    for pattern in _compile_variants(field_def):
+    поля: date -> (day, month, year); інші -> (value).
+
+    Захоплене значення проганяється через `fix_declared_numeric` ЛИШЕ якщо
+    патерн справді був розширений (`was_expanded`). Якщо `\\d` у патерні не
+    було, автор схеми не оголошував це число -- і перетворювати літери на
+    цифри в захопленому тексті не можна (напр. вид відпустки чи мета
+    відрядження -- вільний текст, де "б" має лишитись "б")."""
+    for pattern, was_expanded in _compile_variants(field_def):
         m = pattern.search(text)
         if m:
             groups = m.groupdict()
+            fix = fix_declared_numeric if was_expanded else (lambda x: x)
             if field_def.get("type") == "date":
-                return {"day": groups.get("day"), "month": groups.get("month"), "year": groups.get("year")}, "matched"
-            return groups.get("value"), "matched"
+                return {"day": fix(groups.get("day")),
+                        "month": fix(groups.get("month")),
+                        "year": fix(groups.get("year"))}, "matched"
+            return fix(groups.get("value")), "matched"
     return None, "no_value"
 
 
@@ -688,7 +930,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
 
         elif mode == "block_before_label":
             raw, label_reason = find_block_before_label(
-                grouped_blocks, field["label_before"], denylist)
+                grouped_blocks, field["label_before"], denylist,
+                anchor=field.get("strip_prefix"))
             if raw is not None and field.get("strip_prefix"):
                 raw = strip_literal_prefix(raw, field["strip_prefix"])
             if raw is None:

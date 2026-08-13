@@ -187,8 +187,18 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
 
     def add(key, field, kind, ours, exp):
         ok, a, b = compare(kind, ours, exp)
+        # "surplus" -- перевірка пройшла ЛИШЕ тому, що порівняння м'яке
+        # (`contains`), а наше значення містить зайвий текст понад еталон.
+        # Без цього прапорця оцінювач сліпий до цілого класу псування:
+        # 13.08.2026 варіант екстракції показав "виправив 4, зламав 0", а
+        # насправді приклеїв бланковий шум до 21 уже правильного значення
+        # ("військова частина А0000" -> "зобов'язаний прибути до місця
+        # служби у військова частина А0000"). Рахуємо окремо, СТАТУС `ok`
+        # не змінюємо: інакше всі попередні цифри стали б незрівнянними.
+        surplus = bool(ok) and kind == "contains" and a != b
         checks.append({"key": key, "field": field, "compare": kind,
-                       "ok": bool(ok), "ours": a, "expected": b})
+                       "ok": bool(ok), "surplus": surplus,
+                       "ours": a, "expected": b})
 
     for key, spec in per_template.items():
         if key not in expected:
@@ -298,6 +308,28 @@ def main(argv=None):
     print("\n=== точність по полях (усі документи) ===")
     for key, (ok, total) in sorted(per_key.items(), key=lambda kv: kv[1][0] / max(1, kv[1][1])):
         print(f"  {key:20} {ok:>3}/{total:<3} {100 * ok / max(1, total):5.1f}%")
+
+    # Поля, що не працюють УЗАГАЛІ, окремим блоком. Агрегат їх ховає:
+    # 69.3% по корпусу читається як "помірно погано", тоді як за ним стояли
+    # звання 0/16 і місце 0/16 -- тобто поле не працює жодного разу.
+    dead = [(k, t) for k, (o, t) in sorted(per_key.items()) if o == 0 and t]
+    if dead:
+        print("\n  !! ПОЛЯ НА НУЛІ (жодного правильного значення):")
+        for key, total in dead:
+            print(f"     {key:20} 0/{total}")
+
+    # Значення, що пройшли лише завдяки м'якому `contains`.
+    surplus = collections.Counter(
+        c["key"] for row in results for c in row["checks"] if c.get("surplus")
+    )
+    if surplus:
+        print("\n  ~ ЗАРАХОВАНО ЧЕРЕЗ contains, але зі зайвим текстом "
+              "(еталон усередині нашого значення, не дорівнює йому):")
+        for key, n in surplus.most_common():
+            print(f"     {key:20} {n}")
+        print("     ^ це НЕ помилки за поточним правилом порівняння, але саме "
+              "тут ховається приклеєний бланковий шум -- дивіться, якщо "
+              "число зростає після зміни екстракції")
 
     ok_fields = sum(r["fields_ok"] for r in results)
     all_fields = sum(r["fields_total"] for r in results)

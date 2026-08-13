@@ -532,6 +532,54 @@ def test_placeholder_detection():
     assert not is_placeholder("БЕВЗЕНКО")
 
 
+def test_homoglyph_dates_recovered():
+    """Клас `ocr_noise` -- не шум розпізнавання, а гомогліфи, вписані в сам
+    документ (заміряно: ті самі літери є в текстовому шарі .docx, де OCR не
+    відбувається). TRIP-012 давав 0 з трьох дат."""
+    from pipeline.normalization.normalize import parse_date_from_text
+    assert parse_date_from_text("О7.О5.2О2б") == {
+        "day": "07", "month": "05", "year": "2026"}
+    # День лише з літер ("ІО" = 10) -- ловиться тільки завдяки лапкам, які
+    # шаблон вимагає навколо дня.
+    assert parse_date_from_text('з "ІО" травня 202б р.') == {
+        "day": "10", "month": "травня", "year": "2026"}
+
+
+def test_homoglyph_fix_does_not_eat_ordinary_words():
+    """Найнебезпечніший бік правила: "з" -- найчастіший прийменник у датах,
+    і глобальна заміна перетворила б його на "3", а "жовтня" на "ж0втня"."""
+    from pipeline.normalization.normalize import (
+        parse_date_from_text, fix_numeric_homoglyphs)
+    assert parse_date_from_text('"01" жовтня 2026 р.') == {
+        "day": "01", "month": "жовтня", "year": "2026"}
+    assert parse_date_from_text("з 15 травня 2025 до 20 травня 2025") == {
+        "day": "15", "month": "травня", "year": "2025"}
+    assert parse_date_from_text("зобов'язаний прибути") is None
+    assert parse_date_from_text("після закінчення строку") is None
+    # Токенне правило вимагає СПРАВЖНЬОЇ цифри в токені.
+    assert fix_numeric_homoglyphs("з") == "з"
+    assert fix_numeric_homoglyphs("об") == "об"
+    assert fix_numeric_homoglyphs("2О2б") == "2026"
+
+
+def test_homoglyph_tolerant_pattern_expansion():
+    """`\\d` у схемному регексі -- це декларація "тут число", тому лише її
+    безпечно розширювати. Усередині символьного класу -- не можна: вкладені
+    дужки зламали б клас."""
+    import re
+    from pipeline.normalization.normalize import (
+        homoglyph_tolerant_pattern, fix_declared_numeric)
+    pattern = r'№\s*(?P<value>[\w/\-]+)\s+від\s+\d{1,2}\.\d{1,2}\.\d{4}'
+    expanded, was_expanded = homoglyph_tolerant_pattern(pattern)
+    assert was_expanded
+    m = re.search(expanded, "№ 25О    від О7.О5.2О2б".lower())
+    assert m and fix_declared_numeric(m.group("value")) == "250"
+    # Патерн без \d не оголошував числа -- захоплене чіпати не можна.
+    assert homoglyph_tolerant_pattern(r'abc(?P<v>[а-я]+)')[1] is False
+    # \d усередині [...] лишається як є.
+    assert homoglyph_tolerant_pattern(r'[\d\w]+')[0] == r'[\d\w]+'
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):
