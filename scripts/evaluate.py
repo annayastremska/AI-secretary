@@ -160,6 +160,73 @@ def printed_state(printed: dict, keys) -> str:
     return "blank"
 
 
+_MONTH_WORDS = {v: k for k, v in UKR_MONTHS.items()}
+
+# Гомогліфи цифр -- ВЛАСНА копія, свідомо НЕ імпорт з pipeline.normalization.
+# Прилад мусить читати гліфи незалежно від того, що робить вимірюваний код:
+# спільна функція означала б, що обидва боки помиляються однаково й порівняння
+# сходиться за побудовою.
+_PRINTED_HOMOGLYPHS = str.maketrans({
+    "О": "0", "о": "0", "O": "0", "o": "0", "З": "3", "з": "3",
+    "б": "6", "І": "1", "і": "1", "l": "1", "I": "1", "S": "5",
+})
+
+
+def _transcribe_printed(value: str) -> str:
+    """Знімає ГЛІФОВЕ псування з надрукованого значення, не змінюючи змісту.
+
+    Тут проходить межа між двома різними вадами набору:
+    - `ocr_noise` (TRIP-012: `О7.О5.2О2б`) -- це зіпсоване ЗОБРАЖЕННЯ числа.
+      Прочитати його як 07.05.2026 -- транскрипція, і саме цього ми хочемо;
+    - `swapped_dates` (TRIP-011: 22 і 20) -- це зіпсований ЗМІСТ. Обидві дати
+      прочитані правильно, переставлений порядок, і виправляти його пайплайн
+      права не має.
+
+    Без цього поділу правило "очікуємо надруковане" вимагало б від пайплайна
+    віддавати `О7.О5.2О2б` як дату -- тобто карало б за нормалізацію гомогліфів.
+    """
+    return str(value).translate(_PRINTED_HOMOGLYPHS)
+
+
+def printed_expected(printed: dict, keys, kind):
+    """Значення, СКЛАДЕНЕ з блоку `надруковано`, або None якщо не складається.
+
+    Рішення Анни 13.08.2026: **очікуватися має надруковане**. Підстава --
+    вада `swapped_dates`: TRIP-011 має на папері START_D=22, END_D=20 (кінець
+    раніше початку), а `правильні_відповіді` дають ВИПРАВЛЕНИЙ порядок 20/22.
+    Пайплайн читає надруковане й ставить `date_range_error` -- тобто працює
+    правильно, -- а оцінювач рахував це двома помилками й винагородив би
+    пайплайн, що тихо перевертає дати. Документ при цьому НЕ каже, яка з двох
+    дат хибна (може, описка в кінці, а не порядок), тому автовиправлення --
+    це здогадка, а не нормалізація.
+
+    Свідомо реалізовано ЛИШЕ для дат: саме там живе відомий клас розходження
+    "папір проти сценарію", і саме там складання однозначне. Для решти типів
+    розходження не змінює оцінку, а показується в звіті (див. `divergence`) --
+    щоб не переписувати правила порівняння там, де їх ніхто не перевіряв.
+    """
+    if kind != "date" or not keys:
+        return None
+    values = [_transcribe_printed(str((printed or {}).get(k, "")).strip())
+              for k in keys]
+    if not all(values):
+        return None
+    if len(values) == 1:
+        return as_iso_date(values[0])
+    if len(values) != 3:
+        return None
+    day, month, year = values
+    # Рік на бланку двоцифровий ("26"); місяць -- слово або цифра.
+    if year.isdigit() and len(year) == 2:
+        year = f"20{year}"
+    if month.isdigit():
+        month_word = _MONTH_WORDS.get(int(month))
+        if month_word is None:
+            return None
+        month = month_word
+    return as_iso_date(f"{day} {month} {year}")
+
+
 def compare(kind, ours, expected):
     """-> (ok, наше_у_порівнюваній_формі, очікуване_у_порівнюваній_формі)"""
     if kind == "date":
@@ -320,6 +387,19 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
                            "expected": None,
                            "scenario_said": exp})
             return
+
+        # НАДРУКОВАНЕ ПЕРЕВАЖАЄ СЦЕНАРІЙ (рішення Анни, 13.08.2026). Якщо на
+        # папері стоїть інше, ніж у `правильні_відповіді`, міряємо проти
+        # паперу: пайплайн не може знати сценарій, а виправляти документ
+        # самостійно він не має права.
+        from_printed = False
+        divergence = None
+        printed_value = printed_expected(printed, printed_keys, kind)
+        if printed_value is not None:
+            if compare(kind, printed_value, exp)[0] is False:
+                divergence = {"printed": printed_value, "scenario": exp}
+                exp, from_printed = printed_value, True
+
         ok, a, b = compare(kind, ours, exp)
         # "surplus" -- перевірка пройшла ЛИШЕ тому, що порівняння м'яке
         # (`contains`), а наше значення містить зайвий текст понад еталон.
@@ -333,7 +413,10 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         row = {"key": key, "field": field, "compare": kind,
                "ok": bool(ok), "surplus": surplus,
                "expected_blank": False,
+               "from_printed": from_printed,
                "ours": a, "expected": b}
+        if divergence:
+            row["divergence"] = divergence
         if surplus:
             # Сам зайвий текст, а не лише факт його наявності: без цього в звіті
             # видно "надлишок 16", але не видно, чи це стале "військова частина "
@@ -508,6 +591,22 @@ def main(argv=None):
         print("     ^ на папері цих значень НЕМА. Раніше тут звірялось значення "
               "зі сценарію, тому вигадане правильне число зараховувалось, а "
               "чесний null -- ні.")
+
+    # Розходження "папір проти сценарію": еталон дає одне, на бланку інше.
+    # Показуємо явно, бо саме тут ми свідомо міряємо проти паперу, і читач
+    # звіту має бачити, що цифра стосується надрукованого, а не задуманого.
+    diverged = [(r["id"], c) for r in results for c in r["checks"] if c.get("divergence")]
+    if diverged:
+        good = sum(1 for _, c in diverged if c["ok"])
+        print(f"\n  ≠ ПАПІР ПРОТИ СЦЕНАРІЮ: {good}/{len(diverged)} правильно "
+              "(міряємо проти НАДРУКОВАНОГО -- рішення 13.08.2026)")
+        for doc_id, c in diverged:
+            d = c["divergence"]
+            print(f"     {doc_id:10} {c['key']:18} на папері {d['printed']!r}, "
+                  f"сценарій казав {d['scenario']!r}, ми {c['ours']!r}"
+                  f"  {'+' if c['ok'] else '-'}")
+        print("     ^ пайплайн не може знати сценарій і не має права виправляти "
+              "документ сам; суперечність позначається date_range_error.")
 
     ok_fields = sum(r["fields_ok"] for r in results)
     all_fields = sum(r["fields_total"] for r in results)
