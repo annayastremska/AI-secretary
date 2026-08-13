@@ -268,9 +268,29 @@ def test_unreliable_provenance_blocks_confirmed():
                     "normalization": "nominative_case", "db_target": "person"}],
     }
     record = build_record(schema, {"surname": ("Таблиця", "llm")}, {})
-    assert record["field_provenance"]["surname"]["morphology"] == "not_a_name"
+    # ОНОВЛЕНО 13.08.2026: статус тепер `untagged_name`, не `not_a_name`.
+    # Причина зміни: pymorphy3 ЗНАЄ слово "Таблиця" (як і "Володимир" чи
+    # "Дергач") -- просто без граммеми імені. Старе очікування `not_a_name`
+    # було неточним описом того, що сталося: словник знає слово, а не "не
+    # знає". Суть тесту не змінилась і перевіряється двома рядками нижче:
+    # значення від МОДЕЛІ, яке морфологія не підтвердила як ім'я, не дає
+    # критичному полю `resolved`.
+    assert record["field_provenance"]["surname"]["morphology"] == "untagged_name"
     assert record["field_provenance"]["surname"]["resolved"] is False
     assert "surname" in record["unknown_critical_fields"]
+
+    # Друга половина того самого правила, і саме вона нова: те саме значення,
+    # здобуте ДЕТЕРМІНОВАНО, підтвердження НЕ блокує. Морфологія "Володимира"
+    # від "Таблиці" не відрізняє (обидва -- відоме слово в називному без
+    # граммеми імені), тому розрізнювачем працює джерело: детермінований збіг
+    # означає, що значення стояло в позиції ПІБ на бланку.
+    # Без цього рядка TRIP-006 ("Дергач") і TRIP-010 ("Володимир") висіли в
+    # черзі ручного рев'ю з ПРАВИЛЬНО витягнутим ПІБ -- через прогалину
+    # розмітки словника VESUM, а не через сумнівне значення.
+    matched_record = build_record(schema, {"surname": ("Володимир", "matched")}, {})
+    assert matched_record["field_provenance"]["surname"]["morphology"] == "untagged_name"
+    assert matched_record["field_provenance"]["surname"]["resolved"] is True
+    assert "surname" not in matched_record["unknown_critical_fields"]
 
 
 # --- КРАХ ---

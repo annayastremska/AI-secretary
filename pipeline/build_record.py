@@ -47,8 +47,23 @@ UNRELIABLE_METHODS = ("llm_split_vote",)
 # випадок "решта ПІБ каже називний" тепер дає already_nominative
 # (normalize.normalize_nominative_case), тож жіночі прізвища на -ова з
 # називним по батькові в цей блокер не потрапляють.
+# untagged_name блокує ЛИШЕ значення від LLM, і це не компроміс, а єдиний
+# доступний розрізнювач. Морфологія "Володимира" (справжнє ім'я, не розмічене
+# у VESUM) від "Таблиці" (не ім'я взагалі) НЕ відрізняє: обидва -- відоме
+# слово в називному без граммеми імені. Відрізняє їх ДЖЕРЕЛО: детермінований
+# збіг означає, що значення стояло в позиції ПІБ на бланку, а токен від
+# моделі такої гарантії не має. Тому untagged_name від `matched` не блокує, а
+# від `llm` -- блокує (регресійний тест на "Таблиця" саме про це).
+# Далі -- решта міркування про untagged_name (рішення Анни 13.08.2026): це
+# випадок "словник знає слово, але не розмітив його як імя" -- напр.
+# "Володимир" і "Дергач" у VESUM. Значення при цьому правильне й уже в
+# називному, тому блокувати підтвердження немає підстав. А
+# untagged_oblique блокує: там слово відоме, стоїть у непрямому
+# відмінку, і без граммеми імені привести його до називного безпечно
+# неможливо -- це той самий ризик "інша людина в базі".
 UNRELIABLE_MORPHOLOGY = ("not_a_name", "inflect_failed",
-                         "no_morphology", "ambiguous_case")
+                         "no_morphology", "ambiguous_case",
+                         "untagged_oblique")
 
 # Числова впевненість для facts.confidence у БД-споживача (колонка існує й
 # досі лишалась NULL). Не ймовірність, а порядок довіри до СПОСОБУ отримання:
@@ -67,6 +82,10 @@ CONFIDENCE_CAP_BY_MORPHOLOGY = {
     "inflect_failed": 0.4,
     "no_morphology": 0.5,
     "ambiguous_case": 0.7,
+    # Значення правильне й у називному, лише словник не розмітив його
+    # як імя -- нижче за matched, але не блокує підтвердження.
+    "untagged_name": 0.8,
+    "untagged_oblique": 0.4,
 }
 
 
@@ -352,7 +371,9 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
 
         criticality = field_criticality(field)
         unreliable = (reason in UNRELIABLE_METHODS
-                      or morph_status in UNRELIABLE_MORPHOLOGY)
+                      or morph_status in UNRELIABLE_MORPHOLOGY
+                      or (morph_status == "untagged_name"
+                          and (reason or "").startswith("llm")))
         unresolved = normalized is None or unreliable
         field_provenance[name] = {
             "method": reason,
