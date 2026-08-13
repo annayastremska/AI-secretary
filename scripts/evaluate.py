@@ -446,6 +446,12 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
                                      "посвідчення про відрядження": "deployment_certificate"}
                         .get(truth.get("тип"))),
         "status": meta.get("status"),
+        # Причина, чому документ не дійшов до екстракції. Без неї звіт не
+        # відрізняв "OCR віддав порожнє" від "текст є, анкори не збіглись", і
+        # саме через це тиха деградація OCR посеред пакетного прогону
+        # (7 з 16 фото -> unresolved) виглядала як низька точність екстракції.
+        "reason": meta.get("reason"),
+        "warnings": meta.get("warnings") or [],
         "confirmed": bool(main.get("confirmed")),
         "review_queue": meta.get("review_queue"),
         "date_range_error": meta.get("date_range_error"),
