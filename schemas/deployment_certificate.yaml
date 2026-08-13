@@ -80,9 +80,23 @@ fields:
     note: "Поле під заголовком «(посада, місце роботи)» — не розділене на бланку."
     db_target: additional_info
 
+  # ВИПРАВЛЕНО за синтетичним набором (13.08.2026). Тут стояв `extraction: llm`
+  # -- тобто поле ОСНОВНОГО факту («де людина») не витягувалось без моделі ЗА
+  # ПОБУДОВОЮ, і всі 14 документів корпусу висіли в needs_review з
+  # `confirmed: 0 з 14`. Насправді на бланку це окреме поле з лейблом:
+  # значення стоїть у власному блоці ПЕРЕД друкованою приміткою
+  # "(пункти призначень)", рівно той самий патерн, що вже працює для
+  # destination_org. Заміряно: block_before_label дає 14/14 правильних значень
+  # на docx і на pdf.
+  # strip_prefix: на бланку перед значенням надруковано "відрядженому до" /
+  # "відрядженій до" -- форма ЗА СТАТТЮ. Зрізання розпізнає обидві словоформи
+  # (extract.prefix_match_length), як і "звільнений"/"звільнена" в
+  # leave_ticket.
   - name: destination_points
     type: text
-    extraction: llm
+    extraction: block_before_label
+    label_before: "пункти призначень"
+    strip_prefix: "відрядженому до"
     note: "Поле «(пункти призначень)» — можливо кілька пунктів в одному рядку."
     db_target: fact_value
 
@@ -106,6 +120,13 @@ fields:
     extraction: regex
     regex_variants:
       - pattern: 'відрядження\s*[«"“„]?(?P<value>\d+)[»"”‟]?\s*днів'
+    # Той самий клас, що duration_days у leave_ticket: кількість днів
+    # визначається діапазоном включно з обома кінцями (14/14 у наборі, разом
+    # із TRIP-011, де дати переставлені -- 3 дні між 22 і 20).
+    consistency:
+      rule: days_span_inclusive
+      start: deployment_start_date
+      end: deployment_end_date
     db_target: additional_info
 
   - name: deployment_start_date
@@ -126,13 +147,25 @@ fields:
       - pattern: 'по\s*[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2}|[а-яіїє]+)\s+20(?P<year>\d{2})\s*(?:р\.?|рок\w*)'
     db_target: fact_date_end
 
+  # ВИПРАВЛЕНО за синтетичним набором (13.08.2026), та сама причина, що й у
+  # destination_points: «мета відрядження» -- вільний текст, але НЕ безлейблове
+  # поле. Значення стоїть перед друкованою приміткою "(мета відрядження)", і
+  # block_before_label дає 14/14 на docx і на pdf.
+  # value_starts_after: у PDF PyMuPDF складає в один блок рядок терміну
+  # відрядження ("Термін відрядження “2” днів   з ... по ... р.") РАЗОМ із
+  # метою, а дужкової примітки між ними на бланку немає -- без цієї межі
+  # чужий рядок приклеювався до значення (див.
+  # extract.compile_value_boundaries).
   - name: purpose
     type: text
     # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
     # воно лишається лише в additional_info, який завантажувач не читає,
     # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
     dimension: deployment_purpose
-    extraction: llm   # «мета відрядження» — вільний текст, без контрольованого словника
+    extraction: block_before_label
+    label_before: "мета відрядження"
+    value_starts_after:
+      - 'Термін\s+відрядження'
     db_target: additional_info
 
   - name: basis_order_date
@@ -147,8 +180,16 @@ fields:
       «Підстава відрядження: рішення, наказ від ___ №___» — єдине
       ідентифікуюче посилання на цьому бланку (власного номера/дати
       документа тут немає).
+    # ВИПРАВЛЕНО 13.08.2026: патерн вимагав літерально "наказ від", а бланк
+    # друкує "наказ КОМАНДИРА ВІЙСЬКОВОЇ ЧАСТИНИ А0000 від 19.05.2026 № 345"
+    # -- тобто не збігався НІКОЛИ, і поле давало 0/14 на обох корпусах. Це
+    # було невидимо, бо `basis_order_date` немає в data/eval/field-mapping.yaml,
+    # а поле має `dimension:`, тобто йде в БД ОКРЕМИМ фактом: у facts мовчки
+    # не було жодної дати наказу-підстави.
+    # `[^№]*?` -- ліниво й БЕЗ переходу через "№": так проміжок між "наказ" і
+    # "від" не може дотягтися до дати наступного поля.
     regex_variants:
-      - pattern: 'наказ від\s*(?P<day>\d{1,2})[.\s]+(?P<month>\d{1,2})[.\s]+(?P<year>\d{4})'
+      - pattern: 'наказ[^№]*?від\s*(?P<day>\d{1,2})[.\s]+(?P<month>\d{1,2})[.\s]+(?P<year>\d{4})'
     db_target: additional_info
 
   - name: basis_order_number
@@ -158,8 +199,32 @@ fields:
     # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
     dimension: order_number
     extraction: regex
+    # ВИПРАВЛЕНО 13.08.2026 разом із basis_order_date: та сама вимога
+    # літерального "наказ від", те саме 0/14, та сама невидимість.
     regex_variants:
-      - pattern: 'наказ від[^№]*№\s*(?P<value>\S+)'
+      - pattern: 'наказ[^№]*№\s*(?P<value>\S+)'
+    db_target: additional_info
+
+  # --- Зв'язок документ -> документ (скасовує/змінює) ---
+  # Обґрунтування й межі -- у schemas/leave_ticket.yaml, поле
+  # supersedes_document_number. Тут надруковано "(переоформлено замість
+  # посвідчення № 254)" (TRIP-014), тобто номер є.
+  - name: supersedes_document_number
+    type: text
+    extraction: regex
+    link_type: supersedes
+    llm_fallback: false
+    regex_variants:
+      - pattern: 'замість\s+посвідчення\s*№\s*(?P<value>[\w/\-]+)'
+    db_target: additional_info
+
+  - name: supersession_note
+    type: text
+    extraction: regex
+    link_type: supersedes
+    llm_fallback: false
+    regex_variants:
+      - pattern: '(?P<value>переоформлено|анульован\w*|скасован\w*)'
     db_target: additional_info
 
   # --- Реєстр об'єктів, не довідник значень ---

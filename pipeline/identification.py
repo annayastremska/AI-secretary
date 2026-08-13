@@ -17,9 +17,11 @@ import re
 
 import yaml
 
-from pipeline.build_record import DERIVE_FUNCS
+from pipeline.build_record import CONSISTENCY_RULES, DERIVE_FUNCS
 from pipeline.classification.classify import classify_domain_rules, phrase_in_text
 from pipeline.extraction.extract import NAME_PART_ROLES, field_part, name_group_key
+from pipeline.normalization.normalize import (
+    PLACEHOLDER_TOKENS_EXCEPT_KEY, PLACEHOLDER_TOKENS_KEY)
 
 TITLE_WEIGHT = 5     # заголовок бланка -- найсильніший сигнал
 ANCHOR_WEIGHT = 2    # характерні лейбли/номер додатка -- підтверджувальні
@@ -76,6 +78,10 @@ KNOWN_FIELD_TYPES = {"category", "text", "date", "number", "object_ref"}
 # незаповненого поля через тиждень. `note` тут свідомо НЕМА: він і не має
 # читатись кодом, це документація для людини, і попередження на нього -- шум.
 DECLARED_BUT_UNREAD_KEYS = {"multiple", "registry", "out_of_scope"}
+# Типи зв'язку документ->документ, які build_record складає в
+# record["document_links"]. Перелік закритий: невідомий тип означав би, що
+# зв'язок оголошений у YAML і мовчки нікуди не пішов.
+KNOWN_LINK_TYPES = {"supersedes"}
 
 
 def validate_schema(schema: dict, known_fact_types=None) -> list:
@@ -152,6 +158,40 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
         if criticality not in (None, "critical", "optional"):
             err(f"поле '{name}': criticality '{criticality}' -- допустимо "
                 "лише critical або optional")
+
+        # Опечатка в `consistency:` не має означати "перевірки немає" -- це
+        # рівно той клас тихої помилки, проти якого сама перевірка й стоїть.
+        rule = field.get("consistency")
+        if rule is not None:
+            if not isinstance(rule, dict) or not rule.get("rule"):
+                err(f"поле '{name}': consistency без ключа 'rule'")
+            elif rule["rule"] not in CONSISTENCY_RULES:
+                err(f"поле '{name}': consistency.rule '{rule['rule']}' не "
+                    f"реалізовано (відомі: {sorted(CONSISTENCY_RULES)}) -- "
+                    "перевірка узгодженості мовчки не виконувалась би")
+            else:
+                for ref in CONSISTENCY_RULES[rule["rule"]][0]:
+                    target = rule.get(ref)
+                    if not target:
+                        err(f"поле '{name}': consistency '{rule['rule']}' "
+                            f"вимагає посилання '{ref}'")
+                    elif target not in {f.get("name") for f in schema.get("fields") or []}:
+                        err(f"поле '{name}': consistency.{ref} посилається на "
+                            f"поле '{target}', якого в схемі немає")
+
+        link_type = field.get("link_type")
+        if link_type is not None and link_type not in KNOWN_LINK_TYPES:
+            err(f"поле '{name}': link_type '{link_type}' невідомий (відомі: "
+                f"{sorted(KNOWN_LINK_TYPES)}) -- зв'язок мовчки не потрапив би "
+                "у record['document_links']")
+
+        if field.get("llm_fallback") not in (None, True, False):
+            err(f"поле '{name}': llm_fallback мусить бути true або false")
+
+        for key in (PLACEHOLDER_TOKENS_KEY, PLACEHOLDER_TOKENS_EXCEPT_KEY):
+            value = field.get(key)
+            if value is not None and not isinstance(value, list):
+                err(f"поле '{name}': {key} мусить бути списком рядків")
 
         if field.get("type") == "category" and not field.get("category"):
             err(f"поле '{name}': type: category без ключа category")
@@ -244,6 +284,20 @@ def validate_schema_set(schemas: list) -> list:
     return problems
 
 
+def _spread_schema_defaults(schema: dict) -> None:
+    """Розкладає ключі, оголошені на рівні СХЕМИ, по її полях -- один раз, при
+    завантаженні. Потрібно тому, що normalize_field бачить лише field_def і не
+    має доступу до схеми, а перелік токенів-заповнювачів природно оголошувати
+    на бланк цілком ("у книзі обліку техніки «немає» -- значення"), а не
+    переписувати в кожне поле. Ключ, оголошений на самому полі, важить більше
+    й не перетирається."""
+    for key in (PLACEHOLDER_TOKENS_KEY, PLACEHOLDER_TOKENS_EXCEPT_KEY):
+        if key not in schema:
+            continue
+        for field in schema.get("fields") or []:
+            field.setdefault(key, schema[key])
+
+
 def load_schemas(schemas_dir: str) -> list:
     """Усі *.yaml, що є схемами (мають template + fields). Довідники й
     domain_keyphrases сюди не потрапляють -- визначається за ВМІСТОМ, не за
@@ -255,6 +309,7 @@ def load_schemas(schemas_dir: str) -> list:
             content = yaml.safe_load(f)
         if isinstance(content, dict) and "template" in content and "fields" in content:
             content["_path"] = path
+            _spread_schema_defaults(content)
             schemas.append(content)
     return schemas
 

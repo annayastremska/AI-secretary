@@ -24,7 +24,9 @@ from collections import Counter
 
 from pipeline.classification.classify import phrase_in_text, normalize_ws
 from pipeline.normalization.normalize import (
-    is_placeholder, lookup_alias, homoglyph_tolerant_pattern, fix_declared_numeric)
+    is_placeholder, lookup_alias, homoglyph_tolerant_pattern, fix_declared_numeric,
+    lemmatize_phrase, normalize_field, field_placeholder_tokens,
+    fix_numeric_homoglyphs, number_from_words, number_word_value)
 from pipeline.extraction.schema_grammar import build_json_schema_for_fields, chunk_fields
 
 
@@ -358,9 +360,34 @@ def _is_printed_label_note(line: str) -> bool:
             and s.count("(") == s.count(")"))
 
 
-def _value_lines_after_label_note(lines):
-    """Значення починається ПІСЛЯ останньої друкованої примітки-лейбла серед
-    рядків-кандидатів, а не з першого рядка блоку.
+def compile_value_boundaries(field: dict):
+    """Скомпільовані патерни `value_starts_after` зі схеми -- рядки бланка, які
+    ЗАКРИВАЮТЬ попереднє поле, але НЕ є дужковою приміткою, тому
+    _is_printed_label_note їх не бачить.
+
+    Навіщо окремий ключ, а не ще одна хардкод-евристика: у PDF з текстовим
+    шаром PyMuPDF складає в ОДИН блок кілька полів бланка підряд, і межа між
+    ними -- звичайний друкований рядок. Заміряно на deployment/pdf, поле
+    `purpose`: кандидат перед лейблом "(мета відрядження)" виходив як
+        'Термін відрядження “2” днів   з “21” травня 2026 р. по “22” травня 2026 р.'
+        'отримання засобів індивідуального'
+        'захисту'
+    -- тобто ПОВНИЙ рядок терміну відрядження (окреме поле, у якого свій
+    regex) приклеювався до мети як частина значення, з провенансом `matched`.
+    Дужкової примітки між ними на цьому бланку немає взагалі.
+
+    Патерн, а не літерал: межу утворює саме СТАЛА частина чужого рядка
+    ("Термін відрядження"), а змінна (дати, кількість днів) до неї не
+    належить. Той самий інваріант, що вже несе `_is_printed_label_note`,
+    тільки оголошений схемою, бо він специфічний для бланка."""
+    return [re.compile(p, re.IGNORECASE)
+            for p in (field.get("value_starts_after") or [])]
+
+
+def _value_lines_after_label_note(lines, extra_boundaries=()):
+    """Значення починається ПІСЛЯ останньої друкованої примітки-лейбла (або
+    оголошеної схемою межі, див. compile_value_boundaries) серед рядків-
+    кандидатів, а не з першого рядка блоку.
 
     Це той самий інваріант бланка, на якому вже стоїть _sandwich_value
     ("текст між найближчою попередньою ')' і початком лейбла"), лише
@@ -384,7 +411,8 @@ def _value_lines_after_label_note(lines):
     межа перед ним."""
     last_note = None
     for k, line in enumerate(lines):
-        if _is_printed_label_note(line):
+        if (_is_printed_label_note(line)
+                or any(p.search(line) for p in extra_boundaries)):
             last_note = k
     if last_note is None or last_note + 1 >= len(lines):
         return lines
@@ -431,9 +459,11 @@ def _extend_to_anchor(blocks, i, start_j, value_lines, anchor):
     Зупинка на друкованій примітці-лейблі (_is_printed_label_note) --
     обов'язкова: примітка закриває ПОПЕРЕДНЄ поле, тож значення нашого поля
     почалось після неї за побудовою бланка. Без цієї зупинки документ, де
-    якір надрукований в іншому роді ("звільненА" в жіночому проти
-    "звільнений" у схемі), не знаходив би якір і набирав би назад чужі поля
-    -- заміряно на LEAVE-001.
+    якір узагалі не знаходиться, набирав би назад чужі поля -- заміряно на
+    LEAVE-001, де якір надрукований в іншому роді ("звільненА" в жіночому
+    проти "звільнений" у схемі). САМ рід тепер обробляється (anchor_in_line /
+    prefix_match_length), але зупинка лишається: вона потрібна для будь-якого
+    ІНШОГО якоря, якого в документі просто немає.
 
     Працює зі СПИСКОМ рядків і ЯВНИМ start_j (індексом рядка, з якого
     кандидат починається в блоці i), а не з готовим рядком-кандидатом:
@@ -444,8 +474,7 @@ def _extend_to_anchor(blocks, i, start_j, value_lines, anchor):
     обставинами (виданий замість анульованого квитка № 157)')."""
     if not anchor:
         return value_lines
-    low_anchor = anchor.lower()
-    if any(phrase_in_text(line.lower(), low_anchor) for line in value_lines):
+    if any(anchor_in_line(line, anchor) for line in value_lines):
         return value_lines
     prefix = []
     for n, line in enumerate(_lines_backwards(blocks, i, start_j)):
@@ -455,7 +484,7 @@ def _extend_to_anchor(blocks, i, start_j, value_lines, anchor):
         merged = prefix + value_lines
         if len("\n".join(merged)) > OVERSIZED_CANDIDATE_CHARS:
             break
-        if phrase_in_text(line.lower(), low_anchor):
+        if anchor_in_line(line, anchor):
             return merged
     return value_lines
 
@@ -484,13 +513,16 @@ def _extend_across_block_boundary(blocks, label_block_i, candidate):
     return candidate
 
 
-def find_block_before_label(blocks, label_substring, denylist=None, anchor=None):
+def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
+                            boundaries=()):
     """blocks: результат group_blocks_into_lines() -- список
     {"lines": [...], "bbox": (...)|None}.
 
     anchor -- необов'язковий літерал ЛІВОЇ МЕЖІ значення (на практиці
     `strip_prefix` зі схеми); див. _extend_to_anchor. None -> поведінка як
     була.
+    boundaries -- скомпільовані патерни `value_starts_after` зі схеми
+    (compile_value_boundaries); () -> поведінка як була.
     Повертає (значення_або_None, причина), причина:
     matched | no_label | ambiguous_label | denylisted |
     oversized_block_suspect.
@@ -607,7 +639,7 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None)
                 unresolved_hit = True
                 continue
 
-        value_lines = _value_lines_after_label_note(src_lines)
+        value_lines = _value_lines_after_label_note(src_lines, boundaries)
         extended = _extend_to_anchor(blocks, src_i,
                                      len(src_lines) - len(value_lines),
                                      value_lines, anchor)
@@ -645,6 +677,100 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None)
     return candidate, "matched"
 
 
+# --- Валідація значення, прийнятого за версткою бланка -------------------
+#
+# Проблема (known-weak-spots.md, "[ВІДКРИТО 12.08.2026]"): щойно
+# find_block_before_label казала "matched", extract_document приймала значення
+# БЕЗУМОВНО і НЕ додавала поле в global_gaps -- тобто LLM-фолбек до нього не
+# доходив ніколи, бо маршрутизація дивилась лише на `raw is None`. Реальний
+# випадок: `"звільнена(військове звання, прізвище..."` як номер військової
+# частини. Баг зі `strip_prefix` за родом (prefix_match_length вище) -- з того
+# самого класу.
+#
+# Що тут перевіряється, і чому саме це:
+# - 54% значень з провенансом `matched` -- це `text`/`object_ref`, де ТИПОВА
+#   перевірка неможлива в принципі (research-round-2026-08-13.md, 1.2). Тому
+#   основна перевірка НЕ типова, а «чи це взагалі значення, а не друкований
+#   текст самого бланка»: якщо в кандидаті стоїть лейбл, оголошений цією ж
+#   схемою (або заголовок бланка), значення взяте не з того місця. Ця
+#   перевірка працює на будь-якому типі;
+# - типова перевірка додається лише для `date`/`number` -- єдиних типів, де
+#   вона не тавтологічна й де комбінація `matched` + `normalized=None` була
+#   можлива й нічим не позначена.
+#
+# ЖОДНА з перевірок не викидає дані: значення йде в provenance разом із
+# причиною (raw_text у build_record), а поле стає прогалиною й отримує другий
+# шанс через LLM.
+
+# Скільки перших слів лейбла утворюють "голову", за якою його впізнають у
+# кандидаті. Ціле лейбла шукати недостатньо: OCR/верстка обрізають примітку
+# ("(військове звання, прізвище..." без "ім'я та по батькові"), і саме
+# обрізаний хвіст був у виміряному випадку. Три слова -- бо саме на трьох
+# перших словах жоден лейбл двох наявних схем не збігається з жодним реальним
+# значенням поля (перевірено прогоном по всіх чотирьох корпусах).
+LABEL_HEAD_TOKENS = 3
+# Коротка "голова" (одне-два слова) занадто загальна: "дата повернення" чи
+# "мета відрядження" можуть законно стояти в описі. Порогом відсікаємо їх.
+MIN_LABEL_HEAD_CHARS = 16
+# Типи, для яких типова перевірка додає інформацію. text/object_ref свідомо
+# НЕ входять (перевіряти нічого), category теж: там роль перевірки виконує
+# довідник, і "термін не розпізнано" вже видно в provenance.
+TYPE_CHECKED_TYPES = ("date", "number")
+
+
+def schema_label_heads(schema: dict) -> tuple:
+    """«Голови» друкованих лейблів і заголовків, оголошених САМОЮ схемою.
+
+    Джерело -- сама схема, а не окремий список у коді: новий шаблон = новий
+    YAML лишається правдою, і перевірка автоматично знає лейбли нового бланка.
+    """
+    phrases = []
+    for field in schema.get("fields") or []:
+        if field.get("label_before"):
+            phrases.append(field["label_before"])
+    ident = schema.get("identification") or {}
+    phrases.extend(ident.get("title") or [])
+    phrases.extend(ident.get("anchors") or [])
+
+    heads = set()
+    for phrase in phrases:
+        tokens = normalize_ws(phrase).lower().split()
+        head = " ".join(tokens[:LABEL_HEAD_TOKENS])
+        if len(head) >= MIN_LABEL_HEAD_CHARS:
+            heads.add(head)
+    return tuple(sorted(heads))
+
+
+def validate_block_value(field: dict, raw, label_heads=()):
+    """(значення, причина) для значення, яке find_block_before_label щойно
+    оголосила `matched`.
+
+    Причини відхилення (значення -> None, поле -> global_gaps):
+      blank_value          -- лишився placeholder/порожньо після зрізання;
+      printed_label_in_value -- у кандидаті стоїть лейбл/заголовок цього ж
+                                бланка, тобто взято не значення, а верстку;
+      type_mismatch        -- поле оголошене date/number, а з кандидата не
+                              виходить ні дати, ні числа.
+    """
+    if raw is None:
+        return None, "no_value"
+    text = raw if isinstance(raw, str) else str(raw)
+    if not text.strip() or is_placeholder(text, field_placeholder_tokens(field)):
+        return None, "blank_value"
+
+    low = text.lower()
+    for head in label_heads:
+        if phrase_in_text(low, head):
+            return None, "printed_label_in_value"
+
+    if field.get("type") in TYPE_CHECKED_TYPES:
+        value, confirmed_empty = normalize_field(field, text, {})
+        if value is None and not confirmed_empty:
+            return None, "type_mismatch"
+
+    return text, "matched"
+
+
 def first_block_starting_with(blocks, prefix):
     """Регістронезалежно: OCR/автор бланка не гарантує той самий регістр,
     що схема написала в `starts_with` (напр. "Видано" проти "видано" на
@@ -653,13 +779,94 @@ def first_block_starting_with(blocks, prefix):
     return next((b for b in blocks if b.strip().lower().startswith(low_prefix)), None)
 
 
+_WORD_RE = re.compile(r"\S+")
+
+
+def _lexeme_key(phrase: str) -> str:
+    """Лема фрази в нижньому регістрі -- ключ, ОДНАКОВИЙ для всіх словоформ
+    ("звільнений" / "звільнена" / "звільнені" -> "звільнений";
+    "відрядженому до" / "відрядженій до" -> "відряджений до").
+
+    Без морфології (pymorphy3 недоступний -- lemmatize_phrase повертає None)
+    ключем стає сам текст, тобто порівняння деградує до літерального, як було
+    до цієї зміни. Це свідома деградація, а не тихий збій: гірший результат
+    той самий, що й раніше, і його видно через `no_morphology` в provenance
+    полів ПІБ того ж документа."""
+    text = normalize_ws(phrase).lower()
+    return (lemmatize_phrase(text) or text).strip()
+
+
+def prefix_match_length(text, prefix):
+    """Довжина початкового фрагмента `text`, який є `prefix` -- або ТОЧНИМ
+    літералом, або ІНШОЮ СЛОВОФОРМОЮ того самого виразу. None, якщо `text` з
+    префікса не починається.
+
+    Навіщо словоформи: `strip_prefix` у схемі -- це ОДНА форма, а бланк друкує
+    форму за статтю військовослужбовця. `schemas/leave_ticket.yaml:84` оголошує
+    "звільнений", а LEAVE-001 (жінка) має надруковане "звільнена"
+    (`надруковано.RELEASED`), тому чисто літеральне зрізання лишало рід у
+    значенні основного факту: `підстава` = "звільнена щорічна основна
+    відпустка за 2026 рік" замість "щорічна основна відпустка за 2026 рік".
+    Це і була єдина помилка корпусу leave/pdf (1 з 176). Клас той самий у
+    посвідченні про відрядження: "відрядженому до" (чол.) проти "відрядженій
+    до" (жін.) перед лейблом "(пункти призначень)".
+
+    Довжина, а не сам рядок: зрізати треба СТІЛЬКИ, скільки фізично займає
+    форма в документі, а не len(prefix) зі схеми -- "звільнена" на символ
+    коротша за "звільнений", і арифметика по схемному літералу з'їла б першу
+    літеру значення.
+
+    Кількість токенів беремо з ПРЕФІКСА: порівнюється рівно стільки перших
+    слів тексту, скільки їх у схемному літералі, тому багатослівний префікс
+    не може випадково захопити початок значення."""
+    if not text or not prefix:
+        return None
+    if text.lower().startswith(prefix.lower()):
+        return len(prefix)
+    token_count = len(prefix.split())
+    if not token_count:
+        return None
+    words = []
+    for m in _WORD_RE.finditer(text):
+        words.append(m)
+        if len(words) == token_count:
+            break
+    if len(words) < token_count:
+        return None
+    end = words[-1].end()
+    if _lexeme_key(text[:end]) == _lexeme_key(prefix):
+        return end
+    return None
+
+
+def anchor_in_line(line, anchor) -> bool:
+    """Чи стоїть `anchor` у цьому рядку -- літерально або іншою словоформою.
+
+    Той самий матчер, що й у prefix_match_length, тільки не з початку рядка:
+    `_extend_to_anchor` шукає якір у рядках НАЗАД, і він мусив знаходити ті
+    самі форми, які потім зріже strip_literal_prefix. Поки ці дві перевірки
+    розходились, документ із якорем в іншому роді або не набирав початок
+    значення взагалі, або набирав його й не міг зрізати."""
+    if not line or not anchor:
+        return False
+    if phrase_in_text(line.lower(), anchor.lower()):
+        return True
+    return any(prefix_match_length(line[m.start():], anchor) is not None
+               for m in _WORD_RE.finditer(line))
+
+
 def strip_literal_prefix(text, prefix):
-    """Знімає ЛІТЕРАЛЬНИЙ префікс-рядок, якщо він є на початку (регістр
-    ігнорується). НЕ str.lstrip(prefix) -- lstrip прибирає будь-які символи
-    з НАБОРУ символів префікса, а не сам рядок."""
-    if text and text.strip().lower().startswith(prefix.lower()):
-        return text.strip()[len(prefix):].strip()
-    return text
+    """Знімає префікс-рядок, якщо він є на початку (регістр ігнорується, інша
+    словоформа того самого виразу приймається -- див. prefix_match_length).
+    НЕ str.lstrip(prefix) -- lstrip прибирає будь-які символи з НАБОРУ
+    символів префікса, а не сам рядок."""
+    if not text or not prefix:
+        return text
+    stripped = text.strip()
+    matched = prefix_match_length(stripped, prefix)
+    if matched is None:
+        return text
+    return stripped[matched:].strip()
 
 
 def _find_rank_run(tokens, rank_alias_lookup):
@@ -872,6 +1079,78 @@ def extract_field_regex(field_def, text: str):
     return None, "no_value"
 
 
+# --- Заземлення значення, згенерованого моделлю --------------------------
+#
+# Найдорожчий заміряний випадок (LEAVE-011): модель віддала `днів = 17`, хоча
+# підрядка "17" у документі немає взагалі (1255 символів), а поле на бланку
+# порожнє. `початок`/`кінець`/`повернення` модель чесно лишила None, і вони
+# пішли в прогалини -- а вигаданий `днів` НЕ пішов, бо значення є, тип
+# сходиться, і жодна перевірка не питала, чи воно взагалі з ЦЬОГО документа.
+#
+# Витяг -- це вибір фрагмента документа, не генерація. Тому значення, якого в
+# документі немає, -- не значення, а здогадка, і місце йому в прогалинах.
+# Перевіряються лише типи, де "є в документі" визначається однозначно:
+# - number: число мусить бути в документі ЦИФРОЮ або ПРОПИСОМ (на бланку
+#   відпускного кількість днів надрукована ЛИШЕ прописом -- "тринадцять", --
+#   тому підрядковий пошук "13" тут дав би хибне відхилення);
+# - text / object_ref: значення мусить бути підрядком документа після
+#   зведення пробілів.
+# НЕ перевіряються:
+# - category: grammar обмежує вивід КОДОМ довідника ("soldier"), якого в
+#   українському тексті документа не буває за побудовою;
+# - date: модель повертає {day,month,year} окремими частинами, і місяць
+#   буває і словом, і числом -- перевірка тут або тавтологічна, або хибна.
+#   Дати натомість закриті перевіркою узгодженості в build_record.
+GROUNDED_TYPES = ("number", "text", "object_ref")
+
+_INT_RE = re.compile(r"\d+")
+
+
+def attested_numbers(text: str) -> set:
+    """Числа, ЯВНО присутні в документі -- цифрами або українським прописом
+    (включно зі складеними: "двадцять сім"). Використовується, щоб відрізнити
+    прочитане число від вигаданого."""
+    found = set()
+    if not text:
+        return found
+    normalized = fix_numeric_homoglyphs(normalize_ws(text))
+    for m in _INT_RE.finditer(normalized):
+        found.add(int(m.group()))
+    tokens = re.split(r"[^\w'’ʼ-]+", normalized.lower())
+    for k, token in enumerate(tokens):
+        first = number_word_value(token)
+        if first is None:
+            continue
+        found.add(first)
+        second = number_word_value(tokens[k + 1]) if k + 1 < len(tokens) else None
+        if second is not None:
+            found.add(first + second)
+    return found
+
+
+def ground_llm_value(field: dict, value, document_text: str):
+    """(значення, причина) для значення, отриманого від моделі.
+
+    None + `ungrounded_llm_value` означає "в документі цього немає" -- поле
+    лишається прогалиною, і це видно, замість тихого правдоподібного числа.
+    Значення не губиться: причина йде в provenance, а сире значення --
+    в unresolved_values (build_record).
+    """
+    if value is None or field.get("type") not in GROUNDED_TYPES:
+        return value, None
+    if field.get("type") == "number":
+        number = number_from_words(value)
+        if number is None:
+            return None, "ungrounded_llm_value"
+        return (value, None) if number in attested_numbers(document_text) \
+            else (None, "ungrounded_llm_value")
+    text = normalize_ws(str(value)).lower()
+    if not text:
+        return value, None
+    return (value, None) if text in normalize_ws(document_text).lower() \
+        else (None, "ungrounded_llm_value")
+
+
 def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries: dict,
                       llm_extract_batch=None, title_phrases=None,
                       batch_size=4, self_consistency_n=1):
@@ -890,6 +1169,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     grouped_blocks = group_blocks_into_lines(ocr_blocks)
     flat_blocks = flatten_blocks(ocr_blocks)
     denylist = {p.strip().lower() for p in (title_phrases or [])}
+    label_heads = schema_label_heads(schema)
+    fields_by_name = {f["name"]: f for f in schema["fields"]}
     results = {}
     localized_gaps, global_gaps, hints = [], [], {}
 
@@ -931,7 +1212,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
         elif mode == "block_before_label":
             raw, label_reason = find_block_before_label(
                 grouped_blocks, field["label_before"], denylist,
-                anchor=field.get("strip_prefix"))
+                anchor=field.get("strip_prefix"),
+                boundaries=compile_value_boundaries(field))
             if raw is not None and field.get("strip_prefix"):
                 raw = strip_literal_prefix(raw, field["strip_prefix"])
             if raw is None:
@@ -950,7 +1232,16 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 results[name] = (None, label_reason)
                 global_gaps.append(name)
             else:
-                results[name] = (raw, "matched")
+                # "matched" від верстки бланка більше НЕ приймається
+                # беззастережно: див. validate_block_value. Відхилений
+                # кандидат іде в global_gaps, тобто отримує той самий другий
+                # шанс через LLM, що й поле, для якого лейбл не знайшовся --
+                # і з тієї самої причини не отримує підказки (відхилений
+                # кандидат -- це якраз НЕПРАВИЛЬНИЙ текст).
+                value, value_reason = validate_block_value(field, raw, label_heads)
+                results[name] = (value, value_reason)
+                if value is None:
+                    global_gaps.append(name)
 
         elif mode == "first_block_matching":
             raw = first_block_starting_with(flat_blocks, field["starts_with"])
@@ -965,11 +1256,16 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
         elif mode == "regex":
             value, reason = extract_field_regex(field, ocr_text)
             results[name] = (value, reason)
-            if value is None:
+            if value is None and field.get("llm_fallback") is not False:
                 # Regex -- найкрихкіший режим (паттерн пишеться під конкретну
                 # верстку бланка), тож саме він найбільше потребує фолбеку.
                 # Раніше regex-поля в прогалини не додавались узагалі --
                 # найкрихкіший шлях був єдиним без страховки.
+                #
+                # `llm_fallback: false` -- свідома відмова від фолбеку для поля,
+                # ВІДСУТНІСТЬ якого є нормою (позначка скасування документа:
+                # 58 з 60 документів набору її не мають). Питати модель про таке
+                # поле означає просити вигадати значення, а не прочитати його.
                 global_gaps.append(name)
 
         elif mode == "derived_from":
@@ -999,11 +1295,22 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
             voted, split = majority_vote([s.get(name) for s in samples if isinstance(s, dict)])
             if voted is None:
                 results[name] = (None, "no_value")
-            else:
-                # llm_split_vote -- голоси розділились навпіл, переможець
-                # обраний фактично випадково; для рев'юера це має виглядати
-                # інакше, ніж одноголосний результат.
-                results[name] = (voted, "llm_split_vote" if split else "llm")
+                continue
+            # Заземлення ДО прийняття значення: значення, якого в документі
+            # немає, -- це здогадка, не витяг (див. ground_llm_value).
+            # Контекст перевірки -- ПОВНИЙ текст документа, а не context_text
+            # групи: для локалізованої прогалини контекст -- лише фрагмент, і
+            # правильне значення з іншого місця документа хибно вважалось би
+            # вигаданим.
+            grounded, ungrounded_reason = ground_llm_value(
+                fields_by_name.get(name, {}), voted, ocr_text)
+            if grounded is None:
+                results[name] = (None, ungrounded_reason)
+                continue
+            # llm_split_vote -- голоси розділились навпіл, переможець
+            # обраний фактично випадково; для рев'юера це має виглядати
+            # інакше, ніж одноголосний результат.
+            results[name] = (voted, "llm_split_vote" if split else "llm")
 
     # Локалізовані прогалини: контекст -- лише знайдений фрагмент. Групуємо за
     # САМОЮ підказкою, а не просто по batch_size: інакше поля з РІЗНИМИ

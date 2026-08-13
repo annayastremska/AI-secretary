@@ -12,6 +12,7 @@ context/project-expectations.md розд. 4:
                        чого неможливо ні таргетувати 5%-аудит, ні перерахувати
                        документи після виправлення схеми
 """
+import datetime
 import re
 
 from pipeline.extraction.extract import (
@@ -22,6 +23,7 @@ from pipeline.extraction.extract import (
 )
 from pipeline.normalization.normalize import (
     detect_name_case,
+    field_placeholder_tokens,
     normalize_field,
     normalize_nominative_case,
     is_placeholder,
@@ -98,6 +100,105 @@ DERIVE_FUNCS = {
 }
 
 
+# --- Узгодженість залежних полів -----------------------------------------
+#
+# Клас, а не окремий випадок. Заміряний тригер (LEAVE-011): модель віддала
+# `днів = 17` при порожньому полі на бланку; `початок`/`кінець`/`повернення`
+# чесно лишились None і пішли в прогалини, а `днів` -- ні. У БД пішов би
+# внутрішньо суперечливий запис -- ТРИВАЛІСТЬ БЕЗ ДАТ -- без жодного маркера,
+# і саме відсутність маркера дорожча за саму галюцинацію.
+#
+# Які ще поля логічно залежать від інших (перевірено по обох схемах і по
+# всьому еталонному набору, 30 документів):
+#   duration_days   = leave_end_date_planned - leave_start_date + 1  (16/16)
+#   deployment_days = deployment_end_date - deployment_start_date + 1 (14/14)
+#   actual_return_date >= leave_end_date_planned                      (16/16)
+#   leave_start_date   >= document_date                               (16/16)
+#   deployment_start_date >= document_date                            (14/14)
+#   basis_order_date   <= document_date                               (14/14)
+# Реалізовані два правила, яких досить, щоб покрити всі перелічені:
+#   days_span_inclusive -- РІВНІСТЬ (кількість днів включно з обома кінцями);
+#   not_before          -- ПОРЯДОК двох дат.
+# Перелік закритий навмисно, як NAME_PART_ROLES: правило -- це код, а не
+# вільний вираз у YAML, інакше опечатка в схемі дала б тихо вимкнену перевірку.
+#
+# Два різні результати, і різниця принципова:
+#   consistency_error       -- обидва боки відомі й СУПЕРЕЧАТЬ один одному;
+#   unverifiable_dependency -- бік, від якого значення залежить, відсутній,
+#                              тобто значення НЕМА ЧИМ підтвердити. Саме цей
+#                              випадок і був німим.
+# В обох поле стає невирішеним (значення зберігається, не губиться), тобто
+# критичне поле не дасть confirmed, а некритичне буде видно в unknown_fields
+# і в record["consistency_problems"].
+
+def _days_span_inclusive(values):
+    """Скільки днів у діапазоні, включно з обома кінцями (як рахує бланк:
+    "з 10 по 22 травня" -- терміном на 13 днів, не 12)."""
+    start, end = values.get("start"), values.get("end")
+    if not start or not end:
+        return None
+    d0, d1 = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+    return abs((d1 - d0).days) + 1
+
+
+CONSISTENCY_RULES = {
+    # rule -> (обов'язкові посилання, функція очікуваного значення | None)
+    "days_span_inclusive": (("start", "end"), _days_span_inclusive),
+    "not_before": (("not_before",), None),
+}
+
+
+def check_consistency(rule: dict, own_value, resolved_values):
+    """(проблема_або_None, деталі). rule -- блок `consistency:` поля схеми."""
+    name = (rule or {}).get("rule")
+    spec = CONSISTENCY_RULES.get(name)
+    if spec is None:
+        # Невідоме правило -- це ПОМИЛКА СХЕМИ, і вона мусить бути видна, а не
+        # означати "перевірки немає" (валідатор схем ловить це раніше).
+        return "unknown_consistency_rule", name
+    refs, expected_fn = spec
+    if own_value is None:
+        # Немає ЧОГО перевіряти: поле й так уже прогалина й уже в
+        # unknown_fields. Перевірка ДО читання посилань навмисно -- інакше
+        # порожнє поле отримувало б ще й `unverifiable_dependency` і
+        # дублювало сигнал, який уже є.
+        return None, None
+    values = {}
+    for ref in refs:
+        target_field = rule.get(ref)
+        if not target_field:
+            return "unknown_consistency_rule", f"{name}: немає посилання '{ref}'"
+        values[ref] = resolved_values.get(target_field)
+        if values[ref] is None:
+            return "unverifiable_dependency", target_field
+    if name == "not_before":
+        other = values["not_before"]
+        try:
+            if datetime.date.fromisoformat(str(own_value)) < datetime.date.fromisoformat(str(other)):
+                return "consistency_error", f"{own_value} < {rule['not_before']}={other}"
+        except ValueError:
+            return None, None
+        return None, None
+    try:
+        expected = expected_fn(values)
+    except (TypeError, ValueError):
+        return None, None
+    if expected is None or int(own_value) == expected:
+        return None, None
+    return "consistency_error", f"{own_value} != {expected}"
+
+
+_DOC_NUMBER_RE = re.compile(r'^[\w/\-]+$')
+
+
+def _looks_like_document_number(value) -> bool:
+    """Чи витягнуте значення -- НОМЕР документа, а не словесна позначка.
+    Розділяє два різні за дією випадки: "знайди документ № 157" проти
+    "знайди попередній квиток цієї людини"."""
+    text = str(value).strip()
+    return bool(text) and bool(_DOC_NUMBER_RE.match(text)) and any(c.isdigit() for c in text)
+
+
 def field_criticality(field: dict) -> str:
     """critical | optional. Явний criticality у схемі має приоритет над
     правилом за db_target -- щоб офіцери могли донастроїти окремі поля, не
@@ -130,6 +231,11 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
 
     unknown_fields, unknown_critical_fields = [], []
     confirmed_empty_fields, not_implemented_fields = [], []
+    # Значення полів, які ВИРІШИЛИСЬ -- єдине, чим можна підтверджувати
+    # залежне поле. Невирішене значення нічого не підтверджує за визначенням.
+    resolved_values = {}
+    consistency_problems = {}
+    document_links = []
 
     # Відмінок ПІБ визначається ОДИН раз на документ, за по батькові: його
     # форми найхарактерніші ("Едуардович" проти "Едуардовича"), і без цієї
@@ -322,7 +428,7 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
                 raw_text = raw_value.strip()
             elif (reason or "").startswith("rank_not_in_dictionary:"):
                 raw_text = reason.split(":", 1)[1].strip() or None
-            if raw_text and not is_placeholder(raw_text):
+            if raw_text and not is_placeholder(raw_text, field_placeholder_tokens(field)):
                 unresolved_values[name] = raw_text
                 field_provenance[name]["raw_text"] = raw_text
 
@@ -332,6 +438,60 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
             unknown_fields.append(name)
             if criticality == "critical":
                 unknown_critical_fields.append(name)
+        else:
+            resolved_values[name] = normalized
+
+        # Зв'язок документ -> документ. Збирається окремим ключем, а не
+        # ховається в additional_info: завантажувач споживача additional_info
+        # не читає взагалі (у facts немає JSON-колонки), а таблиці зв'язків, до
+        # якої це належить, у їхній схемі ще немає. Тому значення мусить бути
+        # на видноті -- інакше погоджене рішення (architecture-proposal.md,
+        # розд. 2 п.4) втратиться другий раз.
+        if field.get("link_type") and normalized is not None:
+            document_links.append({
+                "link_type": field["link_type"],
+                # Номер скасованого документа, якщо він надрукований. None ->
+                # позначка є, номера немає (LEAVE-014: "перервана, відкликаний
+                # з відпустки"), тобто пару шукають за особою й датами.
+                "target_document_number": (str(normalized)
+                                           if field.get("type") != "text"
+                                           or _looks_like_document_number(normalized)
+                                           else None),
+                "source_field": name,
+                "evidence": str(normalized),
+                "method": reason,
+            })
+
+    # Узгодженість ЗАЛЕЖНИХ полів -- окремим проходом, бо перевірка потребує
+    # значень ІНШИХ полів, а вони готові лише після циклу.
+    for field in schema["fields"]:
+        rule = field.get("consistency")
+        if not rule:
+            continue
+        name = field["name"]
+        if name in confirmed_empty_fields:
+            # Документ ПРЯМО каже, що значення немає -- перевіряти нічого.
+            continue
+        problem, detail = check_consistency(rule, resolved_values.get(name),
+                                            resolved_values)
+        if problem is None:
+            continue
+        consistency_problems[name] = f"{problem}: {detail}"
+        field_provenance.setdefault(name, {})["consistency"] = problem
+        field_provenance[name]["consistency_detail"] = detail
+        # Значення лишається у виході (його видно людині), але поле більше не
+        # вважається вирішеним -- саме цього маркера й не було.
+        if field_provenance[name].get("resolved"):
+            field_provenance[name]["resolved"] = False
+        resolved_values.pop(name, None)
+        if name not in unknown_fields:
+            unknown_fields.append(name)
+        if field_criticality(field) == "critical" and name not in unknown_critical_fields:
+            unknown_critical_fields.append(name)
+        # Похідний факт (`dimension:`) з непідтвердженого значення не йде в
+        # базу -- та сама умова, що в циклі вище (`not unresolved`), лише
+        # застосована після того, як стала відома залежність.
+        extra_facts = [f for f in extra_facts if f.get("source_field") != name]
 
     # Узгодженість діапазону. Реальний тригер: "з 28 грудня по 6 січня 2026 р."
     # -- рік із кінця діапазону приписувався початку, і виходило
@@ -397,6 +557,17 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
         "confirmed_empty_fields": confirmed_empty_fields,
         "not_implemented_fields": not_implemented_fields,
         "date_range_error": date_range_error,
+        # {поле: "consistency_error: ..." | "unverifiable_dependency: ..."} --
+        # значення, яке суперечить іншим полям документа або не має чим
+        # підтвердитись (напр. тривалість відпустки без дат початку й кінця).
+        "consistency_problems": consistency_problems,
+        # [{link_type, target_document_number, source_field, evidence, method}]
+        # -- ознака скасування/зміни ІНШОГО документа, витягнута з тексту
+        # цього. Порожній список = ознаки в документі немає (норма).
+        # Зіставити пару звідси НЕМОЖЛИВО: скасований документ жодної ознаки
+        # не містить, тож закриття старого факту -- це запит по всіх
+        # документах, тобто таблиця зв'язків на боці БД.
+        "document_links": document_links,
         "extra_subjects": extra_subjects,
         "unresolved_values": unresolved_values,
     }

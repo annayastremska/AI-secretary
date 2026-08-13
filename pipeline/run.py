@@ -202,6 +202,13 @@ def blank_meta(**overrides) -> dict:
         "confirmed_empty_fields": [],
         "not_implemented_fields": [],
         "date_range_error": None,
+        # {поле: причина} -- значення суперечить іншим полям документа або не
+        # має чим підтвердитись (тривалість без дат). Ключ є завжди, як і
+        # решта: споживач читає його напряму.
+        "consistency_problems": {},
+        # Ознака, що ЦЕЙ документ скасовує/змінює інший (див.
+        # build_record["document_links"]). Порожній список -- норма.
+        "document_links": [],
         # Сирий текст полів, значення яких у документі Є, але не
         # зіставилось із довідником (напр. звання поза словником).
         "unresolved_values": {},
@@ -428,6 +435,8 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             confirmed_empty_fields=record["confirmed_empty_fields"],
             not_implemented_fields=record["not_implemented_fields"],
             date_range_error=record["date_range_error"],
+            consistency_problems=record["consistency_problems"],
+            document_links=record["document_links"],
             unresolved_values=record["unresolved_values"],
             warnings=warnings,
         )

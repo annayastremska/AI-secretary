@@ -13,7 +13,7 @@ UKR_MONTHS = {
 MIN_PLAUSIBLE_YEAR = 1900
 MAX_PLAUSIBLE_YEAR = 2100
 
-PLACEHOLDER_TOKENS = {
+PLACEHOLDER_TOKENS = frozenset({
     "redacted", "???", "",
     "не заповнено", "не вказано", "не зазначено", "не видано", "не видавались",
     "відсутнє", "відсутній", "відсутня", "немає",
@@ -21,7 +21,44 @@ PLACEHOLDER_TOKENS = {
     # без номера (документ/наказ без номера). Раніше не входили в перелік --
     # такі значення проходили як реальний текст замість чесної прогалини.
     "н/д", "б/н",
-}
+})
+
+# Перелік вище -- ДЕФОЛТ, не істина про всі бланки, і два його токени
+# ("немає", "відсутній") є змістовними значеннями в іншому документі: у книзі
+# обліку техніки «несправності: немає» означає "техніка справна", а ми
+# перетворювали це на null (known-weak-spots.md, 2.4). Прибрати їх глобально
+# НЕ МОЖНА -- на порожньому бланку відпускного квитка правило працює саме
+# правильно, і саме на них воно й ловить незаповнене поле.
+#
+# Тому перелік налаштовується зі СХЕМИ, двома ключами (обидва -- і на рівні
+# схеми, і на рівні окремого поля; поле важить більше):
+#   placeholder_tokens:        повна ЗАМІНА дефолту;
+#   placeholder_tokens_except: токени, ВИКЛЮЧЕНІ з дефолту, тобто такі, що в
+#                              цьому бланку/полі є реальним значенням.
+# Схемний рівень розкладається по полях один раз, при завантаженні схеми
+# (identification.load_schemas), щоб normalize_field -- який бачить лише
+# field_def -- не потребував доступу до всієї схеми.
+PLACEHOLDER_TOKENS_KEY = "placeholder_tokens"
+PLACEHOLDER_TOKENS_EXCEPT_KEY = "placeholder_tokens_except"
+
+
+def resolve_placeholder_tokens(explicit=None, excluded=None) -> frozenset:
+    """Ефективний перелік токенів-заповнювачів. Обидва аргументи None ->
+    рівно PLACEHOLDER_TOKENS (побайтово попередня поведінка)."""
+    base = frozenset(str(t).strip().lower() for t in explicit) \
+        if explicit is not None else PLACEHOLDER_TOKENS
+    if excluded:
+        base = base - {str(t).strip().lower() for t in excluded}
+    return base
+
+
+def field_placeholder_tokens(field_def) -> frozenset:
+    """Перелік для конкретного поля -- те, що в нього поклав
+    identification.load_schemas (або сама схема, якщо поле оголосило ключі
+    напряму)."""
+    field_def = field_def or {}
+    return resolve_placeholder_tokens(field_def.get(PLACEHOLDER_TOKENS_KEY),
+                                      field_def.get(PLACEHOLDER_TOKENS_EXCEPT_KEY))
 
 # Незаповнене поле бланка часто лишається як ряд підкреслень/рисок/лапок
 # без жодного символу тексту (напр. "____________" чи "«____» ____ 20___ р.",
@@ -174,15 +211,21 @@ def fix_declared_numeric(value):
     return _fix_date_part(value, allow_month_name=True)
 
 
-def is_placeholder(raw_text) -> bool:
+def is_placeholder(raw_text, tokens=None) -> bool:
     """Surya позначає порожнє/нерозбірливе місце в джерелі як [REDACTED] --
     підтверджено повторюваним у попередніх тестах, не галюцинація. Також
     ловить типові "тут мало бути значення" маркери бланка: голі підкреслення/
-    риски й українські фрази "не заповнено"/"не вказано" тощо."""
+    риски й українські фрази "не заповнено"/"не вказано" тощо.
+
+    tokens -- перелік токенів-заповнювачів для ЦЬОГО поля
+    (field_placeholder_tokens); None -> дефолтний PLACEHOLDER_TOKENS.
+    Графічний маркер (_BLANK_FILL_RE: голі підкреслення/риски/лапки) НЕ
+    налаштовується й перевіряється завжди: це не слово документа, а порожнє
+    місце на бланку, і жодне поле не може мати його реальним значенням."""
     if raw_text is None:
         return False
     cleaned = raw_text.strip().strip("[]")
-    if cleaned.lower() in PLACEHOLDER_TOKENS:
+    if cleaned.lower() in (PLACEHOLDER_TOKENS if tokens is None else tokens):
         return True
     return bool(cleaned) and bool(_BLANK_FILL_RE.match(cleaned))
 
@@ -233,10 +276,10 @@ def normalize_date(day, month, year):
         return None
 
 
-def parse_date_from_text(raw_text):
+def parse_date_from_text(raw_text, tokens=None):
     """Для полів, витягнутих не регексом-з-групами, а сирим блоком тексту
     (напр. block_before_label) -- шукає дату прямо в довільному рядку."""
-    if not raw_text or is_placeholder(raw_text):
+    if not raw_text or is_placeholder(raw_text, tokens):
         return None
     low = raw_text.lower()
     for pattern in _DATE_PATTERNS:
@@ -283,6 +326,20 @@ UKR_NUMBER_WORDS = {
     "дев'ятнадцять": 19, "двадцять": 20, "тридцять": 30,
 }
 _APOSTROPHES = "’‘`´"
+
+
+def number_word_value(token):
+    """Значення ОДНОГО числівника прописом, або None. Апострофи зводяться до
+    одного, бо в документах вони бувають різні (’ ‘ ` ´) -- та сама
+    нормалізація, що й у number_from_words, винесена окремо, щоб перевірка
+    "чи це число взагалі є в документі" (extract.attested_numbers) не
+    дублювала перелік слів."""
+    if not isinstance(token, str):
+        return None
+    text = token.lower().strip()
+    for ch in _APOSTROPHES:
+        text = text.replace(ch, "'")
+    return UKR_NUMBER_WORDS.get(text)
 
 
 def number_from_words(raw_value):
@@ -347,19 +404,19 @@ def lookup_alias(candidate, alias_lookup: dict):
     return alias_lookup.get(lemma) if lemma else None
 
 
-def match_dictionary(raw_text, alias_lookup: dict):
+def match_dictionary(raw_text, alias_lookup: dict, tokens=None):
     """Точний рядковий збіг після нормалізації. Незнайдений термін -> рядок-
     маркер, не None і не 0 (розділ 3.4 ТЗ: нуль не можна відрізнити від
     "записів немає"). Суфікс "за NNNN рік" відсікається окремим правилом,
     з допуском коми/крапки після нього."""
-    if not raw_text or is_placeholder(raw_text):
+    if not raw_text or is_placeholder(raw_text, tokens):
         return None
     normalized = re.sub(r"\s*за\s*\d{4}\s*рік\s*[,.;]?\s*$", "", raw_text.strip().lower())
     hit = lookup_alias(normalized, alias_lookup)
     return {"code": hit[0], "label": hit[1]} if hit else "термін не розпізнано"
 
 
-def resolve_category(value, alias_lookup: dict):
+def resolve_category(value, alias_lookup: dict, tokens=None):
     """Приводить категоріальне значення до єдиної форми {"code","label"},
     звідки б воно не прийшло. Три можливі входи:
     - вже {"code","label"} -- детермінований шлях через довідник;
@@ -370,7 +427,7 @@ def resolve_category(value, alias_lookup: dict):
     рядок, залежно від того, який шлях спрацював (підтверджено тестом)."""
     if isinstance(value, dict) and "code" in value:
         return value
-    if value is None or is_placeholder(value):
+    if value is None or is_placeholder(value, tokens):
         return None
     text = str(value).strip()
     if not text:
@@ -378,7 +435,7 @@ def resolve_category(value, alias_lookup: dict):
     code_to_label = {code: label for code, label in alias_lookup.values()}
     if text in code_to_label:
         return {"code": text, "label": code_to_label[text]}
-    return match_dictionary(text, alias_lookup)
+    return match_dictionary(text, alias_lookup, tokens)
 
 
 def build_alias_lookup(dictionary: dict) -> dict:
@@ -535,7 +592,7 @@ def normalize_nominative_case(raw_name, role=None, case_hint=None):
     return _restore_case(token, inflected.word), "normalized"
 
 
-def normalize_null_if_sentinel(raw_text, sentinel: str):
+def normalize_null_if_sentinel(raw_text, sentinel: str, tokens=None):
     """Повертає (значення, чи_підтверджено_порожнє). Розрізняє "документ
     прямо каже, що цього немає" від "не вдалося прочитати" -- обидва інакше
     дали б однаковий None і згубили цю різницю.
@@ -544,13 +601,19 @@ def normalize_null_if_sentinel(raw_text, sentinel: str):
     реальне значення повертало True (тобто "підтверджено порожнє"), а сам
     сентинел до цієї функції взагалі не доходив, бо його першим перехоплював
     is_placeholder -- ті самі фрази є в PLACEHOLDER_TOKENS. Тому сентинел
-    тепер перевіряється ПЕРШИМ, до перевірки на placeholder."""
+    тепер перевіряється ПЕРШИМ, до перевірки на placeholder.
+
+    Ця залежність від переліку лишається й після того, як перелік став
+    налаштовуваним (`placeholder_tokens_except` у схемі): схема МОЖЕ вийняти
+    "не видавались" з переліку, і тоді порядок перестане мати значення, але
+    покладатися на це не можна -- порядок тут і є гарантією, незалежною від
+    налаштування."""
     if raw_text is None:
         return None, False
     text = str(raw_text).strip()
     if sentinel and text.lower() == sentinel.strip().lower():
         return None, True          # документ прямо каже "не видавались"
-    if not text or is_placeholder(text):
+    if not text or is_placeholder(text, tokens):
         return None, False         # не вдалося прочитати
     return text, False             # реальне значення
 
@@ -562,13 +625,14 @@ def normalize_field(field_def: dict, raw_value, dictionaries: dict):
     """
     field_type = field_def.get("type")
     normalization = field_def.get("normalization")
+    tokens = field_placeholder_tokens(field_def)
 
     if raw_value is None:
         return None, False
 
     if field_type == "category":
         lookup = dictionaries.get(field_def["category"], {})
-        return resolve_category(raw_value, lookup), False
+        return resolve_category(raw_value, lookup, tokens), False
 
     if field_type == "number":
         # number_from_words, а не to_int_or_none: приймає і цифру, і пропис.
@@ -579,12 +643,12 @@ def normalize_field(field_def: dict, raw_value, dictionaries: dict):
         if isinstance(raw_value, dict):
             return normalize_date(raw_value.get("day"), raw_value.get("month"), raw_value.get("year")), False
         if isinstance(raw_value, str):
-            parsed = parse_date_from_text(raw_value)
+            parsed = parse_date_from_text(raw_value, tokens)
             return (normalize_date(**parsed) if parsed else None), False
         return None, False
 
     if normalization == "nominative_case":
-        if is_placeholder(raw_value):
+        if is_placeholder(raw_value, tokens):
             return None, False
         # Статус морфології тут відкидається: поля ПІБ ідуть через окрему
         # гілку в build_record, яка його зберігає в provenance. Ця гілка --
@@ -593,7 +657,7 @@ def normalize_field(field_def: dict, raw_value, dictionaries: dict):
         return value, False
 
     if normalization == "null_if_not_issued":
-        return normalize_null_if_sentinel(raw_value, field_def.get("not_issued_sentinel", ""))
+        return normalize_null_if_sentinel(raw_value, field_def.get("not_issued_sentinel", ""), tokens)
 
     # text / object_ref за замовчуванням -- як є, лише відсіюючи placeholder
-    return (None if is_placeholder(raw_value) else raw_value), False
+    return (None if is_placeholder(raw_value, tokens) else raw_value), False

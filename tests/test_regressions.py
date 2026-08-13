@@ -21,21 +21,43 @@ sys.path.insert(0, _PROJECT_ROOT)
 from pipeline.build_record import build_record
 from pipeline.classification.classify import classify_domain_rules, phrase_in_text
 from pipeline.extraction.extract import (
+    attested_numbers,
+    compile_value_boundaries,
+    extract_field_regex,
     find_block_before_label,
+    ground_llm_value,
     group_blocks_into_lines,
     majority_vote,
     parse_rank_and_name,
+    schema_label_heads,
+    strip_literal_prefix,
+    validate_block_value,
 )
 from pipeline.config import _merge
+from pipeline.identification import load_schemas
 from pipeline.normalization.normalize import (
     build_alias_lookup,
     detect_name_case,
+    field_placeholder_tokens,
     is_placeholder,
     normalize_date,
+    normalize_field,
     normalize_nominative_case,
     normalize_null_if_sentinel,
     parse_date_from_text,
 )
+
+_SCHEMAS = None
+
+
+def _schema_by_template(template):
+    """Справжня схема з schemas/ -- тести на витяг зв'язків і на regex-и
+    підстави мусять читати ТОЙ САМИЙ YAML, що й пайплайн, інакше вони
+    перевіряють свою копію правил, а не правила."""
+    global _SCHEMAS
+    if _SCHEMAS is None:
+        _SCHEMAS = load_schemas(os.path.join(_PROJECT_ROOT, "schemas"))
+    return next(s for s in _SCHEMAS if s["template"] == template)
 
 RANK_LOOKUP = {"рядовий": ("soldier", "Солдат"), "підполковник": ("lt_colonel", "Підполковник")}
 
@@ -150,6 +172,75 @@ def test_value_split_across_blocks_by_wrapped_paren():
     result = find_block_before_label(
         blocks, "найменування військової частини, установи, організації")
     assert result == ("Центральна база зберігання майна (в/ч Т3011)", "matched")
+
+
+def test_strip_prefix_knows_gender():
+    """`strip_prefix` зі схеми -- ОДНА форма, а бланк друкує форму за статтю.
+    Було: schemas/leave_ticket.yaml:84 оголошує "звільнений", LEAVE-001 (жінка)
+    має надруковане "звільнена", і в значенні ОСНОВНОГО факту лишався рід:
+    "звільнена щорічна основна відпустка за 2026 рік". Провенанс -- `matched`.
+
+    Вхід -- справжні рядки блоку 3-4 з LEAVE-001.pdf (PyMuPDF складає п'ять
+    полів бланка в один блок)."""
+    blocks = group_blocks_into_lines([
+        "№ 102    від 09.05.2026\n"
+        "рядовий ЛЕМЕШКО Соломія Романівна\n"
+        "(військове звання, прізвище, ім’я та по батькові)\n"
+        "звільнена\n"
+        "щорічна основна відпустка за 2026 рік\n"
+        "(вид відпустки та найменування населеного пункту,",
+    ])
+    raw, reason = find_block_before_label(
+        blocks, "вид відпустки та найменування населеного пункту",
+        anchor="звільнений")
+    assert reason == "matched", reason
+    assert strip_literal_prefix(raw, "звільнений") == \
+        "щорічна основна відпустка за 2026 рік", raw
+    # Чоловіча форма (LEAVE-013) -- та сама поведінка, точний літерал.
+    assert strip_literal_prefix("звільнений\nвідпустка для лікування",
+                                "звільнений") == "відпустка для лікування"
+    # Двослівний префікс за статтю: "відрядженому до" / "відрядженій до"
+    # (schemas/deployment_certificate.yaml, destination_points).
+    assert strip_literal_prefix("відрядженій до\nм. Вінниця",
+                                "відрядженому до") == "м. Вінниця"
+    # Слово, що НЕ є формою префікса, не зрізається.
+    assert strip_literal_prefix("зобов’язаний прибути", "звільнений") == \
+        "зобов’язаний прибути"
+
+
+def test_destination_and_purpose_are_deterministic():
+    """`destination_points` (основний факт!) і `purpose` мали `extraction: llm`,
+    тобто без моделі не витягувались ЗА ПОБУДОВОЮ: 28 з 28 промахів корпусу
+    deployment і `confirmed: 0 з 14`. На бланку це поля з лейблами.
+
+    Вхід -- справжні блоки TRIP-001.docx (жіноча форма "відрядженій до") і
+    справжній злитий блок TRIP-001.pdf, де PyMuPDF приклеїв рядок терміну
+    відрядження до мети."""
+    docx_blocks = group_blocks_into_lines([
+        "відрядженій до", "м. Вінниця", "(пункти призначень)",
+        "Центральна база зберігання майна (в/ч Т3011)",
+        "(найменування військової частини, установи, організації)",
+        "Термін відрядження “2” днів   з “21” травня 2026 р. по “22” травня 2026 р.",
+        "отримання засобів індивідуального захисту", "(мета відрядження)",
+    ])
+    dest = find_block_before_label(docx_blocks, "пункти призначень",
+                                   anchor="відрядженому до")
+    assert dest[1] == "matched"
+    assert strip_literal_prefix(dest[0], "відрядженому до") == "м. Вінниця"
+
+    # PDF: термін відрядження і мета в ОДНОМУ блоці, дужкової примітки між
+    # ними немає -- межу оголошує схема через value_starts_after.
+    pdf_blocks = group_blocks_into_lines([
+        "Термін відрядження “2” днів   з “21” травня 2026 р. по “22” травня 2026 р.\n"
+        "отримання засобів індивідуального\nзахисту\n(мета відрядження)",
+    ])
+    boundaries = compile_value_boundaries({"value_starts_after": [r'Термін\s+відрядження']})
+    assert find_block_before_label(pdf_blocks, "мета відрядження") == (
+        "Термін відрядження “2” днів   з “21” травня 2026 р. по “22” травня 2026 р.\n"
+        "отримання засобів індивідуального\nзахисту", "matched")
+    assert find_block_before_label(pdf_blocks, "мета відрядження",
+                                    boundaries=boundaries) == (
+        "отримання засобів індивідуального\nзахисту", "matched")
 
 
 def test_date_range_inconsistency_blocks_confirmed():
@@ -578,6 +669,226 @@ def test_homoglyph_tolerant_pattern_expansion():
     assert homoglyph_tolerant_pattern(r'abc(?P<v>[а-я]+)')[1] is False
     # \d усередині [...] лишається як є.
     assert homoglyph_tolerant_pattern(r'[\d\w]+')[0] == r'[\d\w]+'
+
+
+def test_matched_from_layout_is_validated():
+    """`matched` від block_before_label приймався БЕЗУМОВНО і не потрапляв у
+    global_gaps, тобто LLM-фолбек до нього не доходив ніколи.
+
+    Вхід -- справжні блоки LEAVE-011.pdf, де поле `actual_return_date`
+    (порожнє на бланку) отримувало кандидатом НАЗВУ ЧАСТИНИ з друкованою
+    приміткою під нею, і лише випадкова невдача нормалізації дати рятувала
+    запис від назви частини в полі дати."""
+    schema = {
+        "template": "leave_ticket", "fact_type": "leave",
+        "identification": {"title": ["відпускний квиток"], "anchors": ["додаток 30"]},
+        "fields": [
+            {"name": "unit_to_report", "type": "object_ref",
+             "extraction": "block_before_label",
+             "label_before": "найменування військової частини або населеного пункту"},
+            {"name": "actual_return_date", "type": "date",
+             "extraction": "block_before_label", "label_before": "дата повернення",
+             "normalization": "iso_date"},
+        ],
+    }
+    heads = schema_label_heads(schema)
+    date_field = schema["fields"][1]
+    # 1. Кандидат -- назва частини з приміткою: у ньому стоїть лейбл цього ж
+    #    бланка, тобто взято верстку, не значення.
+    assert validate_block_value(
+        date_field,
+        "військова частина А0000\n(найменування військової частини або населеного пункту)",
+        heads) == (None, "printed_label_in_value")
+    # 2. Порожній слот дати на бланку -- не дата.
+    assert validate_block_value(date_field, "“”  20 р.", heads) == (None, "type_mismatch")
+    # 3. Справжня дата (LEAVE-013) проходить без змін.
+    assert validate_block_value(date_field, "“22” травня 2026 р.", heads) == (
+        "“22” травня 2026 р.", "matched")
+    # 4. Справжнє значення текстового поля з дужками НЕ відхиляється
+    #    (TRIP-004: "Центральна база зберігання майна (в/ч Т3011)").
+    text_field = {"name": "destination_org", "type": "object_ref"}
+    assert validate_block_value(
+        text_field, "Центральна база зберігання майна (в/ч Т3011)", heads)[1] == "matched"
+
+
+def test_llm_value_absent_from_document_is_a_gap():
+    """LEAVE-011: модель віддала `днів = 17`, підрядка "17" у документі немає
+    взагалі, поле на бланку порожнє -- і це НЕ потрапляло в прогалини, на
+    відміну від дат, які модель чесно лишила None.
+
+    Текст -- справжній фрагмент LEAVE-011 (кількість днів на бланку не
+    надрукована ні цифрою, ні прописом)."""
+    document = ("Відпускний квиток\n№ 143    від 07.05.2026\n"
+                "звільнений\nвідпустка у зв’язку з навчанням\nм. Хмельницький\n"
+                "терміном на\n(кількість днів прописом)\nз “”  20 р.  по “”  20 р.\n"
+                "Для проїзду видано військові перевізні документи за №\n6114/26")
+    days = {"name": "duration_days", "type": "number"}
+    assert ground_llm_value(days, 17, document) == (None, "ungrounded_llm_value")
+    # Число, надруковане в документі ЦИФРОЮ, проходить.
+    assert ground_llm_value(days, 143, document) == (143, None)
+    # Число, надруковане ЛИШЕ ПРОПИСОМ (реальний випадок бланка: "тринадцять"),
+    # теж мусить проходити -- інакше правило відхиляло б правильні значення.
+    assert 13 in attested_numbers("терміном на\nтринадцять\n(кількість днів прописом)")
+    assert ground_llm_value(days, 13, "терміном на тринадцять днів") == (13, None)
+    # Текстове поле: значення мусить бути підрядком документа.
+    place = {"name": "destination_place", "type": "text"}
+    assert ground_llm_value(place, "м. Хмельницький", document) == ("м. Хмельницький", None)
+    assert ground_llm_value(place, "м. Одеса", document) == (None, "ungrounded_llm_value")
+
+
+def test_duration_without_dates_is_marked():
+    """Найдорожче в LEAVE-011 не сама галюцинація, а те, що запис "тривалість
+    без дат" ішов у БД без ЖОДНОГО маркера. Значення з документа тут узяті
+    справжні (номер 143, дата видачі 07.05.2026), дати відпустки на бланку
+    порожні."""
+    schema = {
+        "template": "leave_ticket", "fact_type": "leave",
+        "fields": [
+            {"name": "leave_type_and_destination", "type": "text",
+             "extraction": "block_before_label", "label_before": "x",
+             "db_target": "fact_value"},
+            {"name": "leave_start_date", "type": "date", "extraction": "regex",
+             "db_target": "fact_date_start"},
+            {"name": "leave_end_date_planned", "type": "date", "extraction": "regex",
+             "db_target": "fact_date_end"},
+            {"name": "duration_days", "type": "number", "extraction": "regex",
+             "dimension": "leave_days", "db_target": "additional_info",
+             "consistency": {"rule": "days_span_inclusive",
+                             "start": "leave_start_date",
+                             "end": "leave_end_date_planned"}},
+        ],
+    }
+    no_dates = {
+        "leave_type_and_destination": ("відпустка у зв’язку з навчанням", "matched"),
+        "leave_start_date": (None, "no_value"),
+        "leave_end_date_planned": (None, "no_value"),
+        "duration_days": (11, "llm"),
+    }
+    record = build_record(schema, no_dates, {})
+    assert record["consistency_problems"]["duration_days"] == \
+        "unverifiable_dependency: leave_start_date"
+    assert record["field_provenance"]["duration_days"]["resolved"] is False
+    assert "duration_days" in record["unknown_fields"]
+    # Похідний факт з непідтвердженого значення в базу не йде.
+    assert [f for f in record["facts"] if f["fact_type"] == "leave_days"] == []
+
+    # Дати є, але кількість днів їм суперечить -> consistency_error.
+    wrong = dict(no_dates,
+                 leave_start_date=({"day": "10", "month": "05", "year": "2026"}, "matched"),
+                 leave_end_date_planned=({"day": "22", "month": "05", "year": "2026"}, "matched"),
+                 duration_days=(17, "llm"))
+    record = build_record(schema, wrong, {})
+    assert record["consistency_problems"]["duration_days"] == "consistency_error: 17 != 13"
+
+    # Правильне значення (LEAVE-001: з 10 по 22 травня = 13 днів) проходить,
+    # і факт leave_days доходить до БД.
+    ok = dict(wrong, duration_days=(13, "matched"))
+    record = build_record(schema, ok, {})
+    assert record["consistency_problems"] == {}
+    assert [f["value_code"] for f in record["facts"] if f["fact_type"] == "leave_days"] == ["13"]
+
+
+def test_cancelling_document_is_extractable_but_pair_is_not():
+    """Три пари еталона: ЧИННИЙ документ пари справді несе ознаку скасування,
+    а СКАСОВАНИЙ -- ні (він не може знати, що його скасують). Тому наш бік може
+    віддати лише ознаку, а закрити старий факт без таблиці зв'язків
+    документ->документ (architecture-proposal.md розд. 2 п.4) неможливо.
+
+    Рядки -- справжні (`надруковано.LEAVE_TYPE` / `PURPOSE` еталона)."""
+    leave = _schema_by_template("leave_ticket")
+    trip = _schema_by_template("deployment_certificate")
+
+    def links(schema, text):
+        raw = {f["name"]: extract_field_regex(f, text) for f in schema["fields"]
+               if f.get("extraction") == "regex"}
+        return build_record(schema, raw, {})["document_links"]
+
+    # LEAVE-016 -- є НОМЕР скасованого квитка.
+    got = links(leave, "відпустка за сімейними обставинами "
+                       "(виданий замість анульованого квитка № 157)")
+    assert "157" in [x["target_document_number"] for x in got], got
+    # LEAVE-014 -- позначка є, номера НЕМА: пару шукають за особою й датами.
+    got = links(leave, "відпустка для лікування після хвороби згідно з висновком "
+                       "ВЛК (перервана, відкликаний з відпустки)")
+    assert got and all(x["target_document_number"] is None for x in got), got
+    # TRIP-014 -- є НОМЕР.
+    got = links(trip, "проходження курсу підвищення кваліфікації "
+                      "(переоформлено замість посвідчення № 254)")
+    assert "254" in [x["target_document_number"] for x in got], got
+    # СКАСОВАНИЙ документ пари (LEAVE-013 / TRIP-013) не має жодної ознаки.
+    assert links(leave, "відпустка для лікування після хвороби згідно з "
+                        "висновком ВЛК") == []
+    assert links(trip, "проходження курсу підвищення кваліфікації") == []
+
+
+def test_basis_order_regex_matches_real_blank():
+    """`basis_order_date`/`basis_order_number` вимагали літерально "наказ від",
+    а бланк друкує "наказ КОМАНДИРА ВІЙСЬКОВОЇ ЧАСТИНИ А0000 від ...". Обидва
+    поля мають `dimension:`, тобто йдуть у БД окремими фактами, і обидва давали
+    0/14 -- невидимо, бо їх немає в data/eval/field-mapping.yaml.
+
+    Рядки -- справжні `надруковано.ORDER_BASIS` (TRIP-001 і TRIP-012 з
+    гомоглифами)."""
+    trip = _schema_by_template("deployment_certificate")
+    by_name = {f["name"]: f for f in trip["fields"]}
+    line = ("Підстава відрядження: наказ командира військової частини А0000 "
+            "від 19.05.2026 № 345")
+    assert extract_field_regex(by_name["basis_order_date"], line)[0] == \
+        {"day": "19", "month": "05", "year": "2026"}
+    assert extract_field_regex(by_name["basis_order_number"], line)[0] == "345"
+    noisy = ("Підстава відрядження: наказ командира військової частини АОООО "
+             "від Об.О5.2О2б № З9б")
+    assert extract_field_regex(by_name["basis_order_date"], noisy)[0] == \
+        {"day": "06", "month": "05", "year": "2026"}
+
+
+def test_placeholder_tokens_are_configurable_from_schema():
+    """`немає`/`відсутній` -- змістовні значення в книзі обліку техніки
+    ("несправності: немає" = техніка справна), і ми робили з них null. Прибрати
+    глобально не можна: на ПОРОЖНЬОМУ бланку відпускного це правило працює
+    правильно."""
+    # Дефолт незмінний.
+    assert is_placeholder("немає") and is_placeholder("відсутній")
+    equipment_field = {"name": "faults", "type": "text",
+                       "placeholder_tokens_except": ["немає", "відсутній"]}
+    tokens = field_placeholder_tokens(equipment_field)
+    assert not is_placeholder("немає", tokens)
+    assert normalize_field(equipment_field, "немає", {}) == ("немає", False)
+    # Решта переліку для цього ж поля лишається чинною...
+    assert is_placeholder("не заповнено", tokens)
+    # ...і графічний маркер порожнього бланка теж (він не налаштовується).
+    assert is_placeholder("____________", tokens)
+    # Повна заміна переліку.
+    only = {"name": "x", "type": "text", "placeholder_tokens": ["н/д"]}
+    assert is_placeholder("н/д", field_placeholder_tokens(only))
+    assert not is_placeholder("немає", field_placeholder_tokens(only))
+
+
+def test_empty_blank_is_still_empty_after_token_change():
+    """Порожній бланк відпускного мусить лишатись порожнім: саме на ньому
+    перелік токенів працює правильно. Рядки -- справжні з
+    data/samples/leave/відпускний_шаблон.docx і з LEAVE-011 (вада
+    empty_fields)."""
+    leave = _schema_by_template("leave_ticket")
+    by_name = {f["name"]: f for f in leave["fields"]}
+    for blank in ("____________", "—", "«»", "  --  "):
+        assert is_placeholder(blank), blank
+    # НОВЕ (13.08.2026): коментар до _BLANK_FILL_RE (normalize.py) обіцяє, що
+    # правило ловить і «____» ____ 20___ р.» -- не ловить: у рядку лишаються
+    # надруковані "20" і "р.", а клас символів патерна цифр і літер не містить.
+    # Тобто НЕ ЗАПОВНЕНИЙ слот дати на цьому бланку placeholder-ом не
+    # вважається взагалі, і від хибного значення його рятує лише те, що дата
+    # з нього не парситься. Фіксуємо ФАКТИЧНУ поведінку, щоб розбіжність не
+    # читалась як працююча перевірка.
+    for not_caught in ("«____» ____ 20___ р.", "“”  20 р."):
+        assert not is_placeholder(not_caught), not_caught
+        assert normalize_field({"name": "d", "type": "date"}, not_caught, {}) == (None, False)
+    # Порожній слот дати на бланку -> None, не дата.
+    assert normalize_field(by_name["actual_return_date"], "“”  20 р.", {}) == (None, False)
+    # Сентинел лишається сентинелом (не плутається з placeholder) -- LEAVE-015.
+    assert normalize_field(by_name["travel_document_number"], "не видавались", {}) == (None, True)
+    # ...а реальний номер лишається значенням -- LEAVE-016.
+    assert normalize_field(by_name["travel_document_number"], "7367/26", {}) == ("7367/26", False)
 
 
 def _run_all():
