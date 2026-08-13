@@ -6,6 +6,12 @@ template: leave_ticket
 domain: leave
 fact_type: leave   # -> dictionaries/fact_type_registry.yaml (validity_model: ranged)
 
+# ВИД СУБ'ЄКТА цього бланка. Це ОГОЛОШЕННЯ схеми, а не висновок з тексту, і
+# саме тому воно старше за мапінг «домен -> вид» (pipeline/subject_kind.py).
+# person: відпускний квиток -- запис про одну конкретну особу.
+# Закритий перелік = рядки object_kinds у БД + "none" (суб'єкта немає).
+subject_kind: person
+
 # Як упізнати саме цей бланк -- щоб схему вибирав пайплайн, а не людина
 # вручну (див. pipeline/identification.py). Фрази взяті з реального тексту
 # шаблону data/samples/leave/відпускний_шаблон.docx.

@@ -938,6 +938,183 @@ def test_procedural_domain_wins_over_topical_score():
     assert classify_domain_rules(blank, domains)[0] != "normative"
 
 
+# --- ВИД СУБ'ЄКТА документа (subject_kind) --------------------------------
+# Порядок рівнів і кожна межа окремо. Це не "покриття нового модуля": кожен
+# тест нижче фіксує рішення, яке легко зняти рефакторингом і не помітити --
+# наслідок побачили б лише в чужій базі (фантомний об'єкт у `objects`, звідки
+# завантажувач не має шляху видалення).
+
+
+def test_subject_kind_schema_beats_domain_map():
+    """Схема СТАРША за мапінг домену: вона прямо оголошує, що описує, а домен
+    -- це підрахунок ключових фраз, здатний із оголошенням не збігтися.
+    Найлегше зламати саме цей порядок (порахувати домен «про всяк випадок»),
+    тому мапінг тут навмисно суперечить схемі."""
+    from pipeline.subject_kind import resolve_subject_kind
+    got = resolve_subject_kind(
+        schema={"template": "t", "domain": "leave", "subject_kind": "person"},
+        domain="leave", domains={"leave": {"subject_kind": "equipment"}})
+    assert got == {"kind": "person", "source": "schema", "reason": None}
+
+
+def test_subject_kind_from_domain_map_when_no_schema():
+    from pipeline.subject_kind import resolve_subject_kind
+    got = resolve_subject_kind(schema=None, domain="equipment",
+                               domains={"equipment": {"subject_kind": "equipment"}})
+    assert got["kind"] == "equipment" and got["source"] == "domain_map"
+
+
+def test_normative_domain_has_no_subject_and_creates_no_object():
+    """Причина, чому мапінгу потрібне значення "none". Реальний документ:
+    Інструкція з діловодства -- домен `normative`, суб'єкта немає взагалі.
+    Без "none" мапінг вигадав би їй вид, і в реєстрі назавжди осів би
+    фантомний об'єкт (шляху видалення в завантажувачі БД немає).
+    Мапінг читається з YAML, не з коду -- тому тест читає САМ ФАЙЛ."""
+    from pipeline.classification.classify import load_domain_keyphrases
+    from pipeline.subject_kind import creates_object, resolve_subject_kind
+    domains = load_domain_keyphrases(
+        os.path.join(_PROJECT_ROOT, "dictionaries", "domain_keyphrases.yaml"))
+    got = resolve_subject_kind(schema=None, domain="normative", domains=domains)
+    assert got["kind"] == "none"
+    assert creates_object(got["kind"]) is False
+    # І навпаки: домен з реальним видом об'єкт створює.
+    assert creates_object(resolve_subject_kind(
+        schema=None, domain="leave", domains=domains)["kind"]) is True
+
+
+def test_every_domain_and_schema_declares_subject_kind():
+    """Мапінг мусить покривати ВСІ домени, а обидві робочі схеми -- оголошувати
+    вид явно. Інакше документ отримує 'unknown', об'єкт не створюється, і це
+    видно лише в черзі рев'ю через тиждень."""
+    from pipeline.classification.classify import load_domain_keyphrases
+    from pipeline.identification import load_schemas
+    from pipeline.subject_kind import (
+        DECLARABLE_SUBJECT_KINDS, domain_subject_kind_problems)
+    domains = load_domain_keyphrases(
+        os.path.join(_PROJECT_ROOT, "dictionaries", "domain_keyphrases.yaml"))
+    assert domain_subject_kind_problems(domains) == []
+    for schema in load_schemas(os.path.join(_PROJECT_ROOT, "schemas")):
+        assert schema.get("subject_kind") in DECLARABLE_SUBJECT_KINDS, schema["template"]
+
+
+def test_subject_kind_unknown_when_domain_has_no_mapping():
+    """Домен визначено, мапінгу для нього НЕМА -> 'unknown' з причиною, і LLM
+    НЕ питають: на це питання мусить відповідати рядок у YAML, а відповідь
+    моделі лише замаскувала б прогалину в довіднику -- причому тихо, бо вид
+    виглядав би визначеним."""
+    from pipeline.subject_kind import resolve_subject_kind
+    calls = []
+
+    def never(prompt, choices):
+        calls.append(prompt)
+        return "person"
+
+    got = resolve_subject_kind(schema=None, domain="staffing",
+                               domains={"staffing": {"title": []}},
+                               llm_choose=never, text="текст")
+    assert got["kind"] == "unknown"
+    assert got["reason"] == "domain_without_subject_kind:staffing"
+    assert calls == []
+
+
+def test_subject_kind_llm_branch_is_closed_enum_with_unknown():
+    """Рівень 3 (домену немає): вибір ЗАКРИТИЙ і містить 'unknown'. Вільна
+    відповідь створила б вид, якого в `object_kinds` немає, і смітила б у
+    `objects.kind_id` (NOT NULL); без 'unknown' модель, обмежена лише
+    реальними видами, змушена вибрати щось навіть коли суб'єкта немає."""
+    from pipeline.subject_kind import (
+        KNOWN_SUBJECT_KINDS, LLM_SUBJECT_CHOICES, resolve_subject_kind)
+    seen = {}
+
+    def fake_choose(prompt, choices):
+        seen["choices"] = choices
+        return "equipment"
+
+    got = resolve_subject_kind(schema=None, domain=None, domains={},
+                              llm_choose=fake_choose, text="книга обліку техніки")
+    assert got == {"kind": "equipment", "source": "llm", "reason": None}
+    assert seen["choices"] == list(LLM_SUBJECT_CHOICES)
+    assert "unknown" in seen["choices"] and "none" in seen["choices"]
+    assert set(KNOWN_SUBJECT_KINDS) <= set(seen["choices"])
+    # Модель поза переліком (grammar збоїв не виключає) -> не пускаємо у вихід.
+    assert resolve_subject_kind(schema=None, domain=None, domains={},
+                                llm_choose=lambda p, c: "будинок",
+                                text="x")["kind"] == "unknown"
+
+
+def test_subject_kind_no_llm_no_domain_gives_unknown_not_crash():
+    """Модель не підключена (за замовчуванням) -- вихід існує завжди."""
+    from pipeline.subject_kind import resolve_subject_kind
+    got = resolve_subject_kind(schema=None, domain=None, domains={})
+    assert got["kind"] == "unknown" and got["reason"] == "no_schema_no_domain"
+
+
+def test_validator_rejects_unknown_subject_kind():
+    """Так само, як невідомі part / db_target / type / dimension: значення
+    відповідає рядку чужої таблиці `object_kinds`, а `objects.kind_id` --
+    NOT NULL, тож опечатка інакше не проявилась би НІДЕ на нашому боці.
+    'unknown' оголосити НЕ можна: це не оголошення, а його відсутність."""
+    from pipeline.identification import validate_schema
+    base = {"template": "bad", "fact_type": "leave",
+            "fields": [{"name": "v", "type": "text", "db_target": "fact_value",
+                        "extraction": "regex", "regex_variants": [{"pattern": "x"}]}]}
+    for bad in ("persons", "unknown", "human"):
+        problems = validate_schema(dict(base, subject_kind=bad),
+                                   known_fact_types={"leave"})
+        assert any(sev == "error" and f"subject_kind '{bad}'" in msg
+                   for sev, msg in problems), bad
+    # Відсутність -- ПОПЕРЕДЖЕННЯ, не помилка: помилка виключила б схему з
+    # набору (run.py:build_resources), тобто всі документи цього шаблону пішли
+    # б в unresolved через один відсутній рядок YAML, тоді як робочий фолбек
+    # (мапінг домену) є.
+    problems = validate_schema(base, known_fact_types={"leave"})
+    assert any(sev == "warning" and "немає subject_kind" in msg
+               for sev, msg in problems)
+    assert not any(sev == "error" and "subject_kind" in msg for sev, msg in problems)
+
+
+def test_dictionary_validator_rejects_unknown_subject_kind():
+    """Те саме для мапінгу домену: сміттєве значення в YAML інакше пройшло б
+    у вихід рядком, бо на нашому боці воно не ламає нічого."""
+    from pipeline.subject_kind import domain_subject_kind_problems
+    problems = domain_subject_kind_problems({"d": {"subject_kind": "людина"}})
+    assert any(sev == "error" and "людина" in msg for sev, msg in problems)
+    # ...і воно НЕ доходить до виходу навіть якщо валідатор проігнорували.
+    from pipeline.subject_kind import resolve_subject_kind
+    got = resolve_subject_kind(schema=None, domain="d",
+                               domains={"d": {"subject_kind": "людина"}})
+    assert got["kind"] == "unknown"
+    assert got["reason"] == "invalid_subject_kind_in_dictionary:людина"
+
+
+def test_subject_kind_gate_is_separate_axis_from_person_complete():
+    """`creates_object` і `person_complete` -- РІЗНІ питання, і кон'юнкцією їх
+    робити не можна: у техніки прізвища немає за визначенням, тому
+    `person_complete: false` для неї норма, а не перешкода створенню об'єкта.
+    Завантажувач БД мусить читати обидва ключі окремо."""
+    from pipeline.run import _person_identity
+    from pipeline.subject_kind import creates_object
+    equipment_subject = _person_identity({})
+    assert equipment_subject["person_complete"] is False
+    assert creates_object("equipment") is True
+    assert creates_object(None) is False
+
+
+def test_blank_meta_always_carries_subject_kind_keys():
+    """Форма шапки однакова для ВСІХ статусів: у дублікаті й у записі про
+    нечитабельний файл ключі мусять бути, інакше завантажувач падає KeyError
+    (це вже траплялось -- саме тому blank_meta існує). null тут означає "до
+    питання не дійшли", і це НЕ те саме, що 'unknown' ("питали, відповіді
+    немає")."""
+    from pipeline.run import blank_meta
+    meta = blank_meta(status="duplicate")
+    for key in ("subject_kind", "subject_kind_source", "subject_kind_reason",
+                "create_subject_object"):
+        assert key in meta, key
+    assert meta["subject_kind"] is None
+    assert meta["create_subject_object"] is False
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):

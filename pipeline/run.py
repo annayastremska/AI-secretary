@@ -40,6 +40,12 @@ from pipeline.ingestion.ingest import (
 )
 from pipeline.normalization.normalize import build_alias_lookup
 from pipeline.storage.local_store import LocalDocumentStore
+from pipeline.subject_kind import (
+    UNKNOWN_SUBJECT,
+    creates_object,
+    domain_subject_kind_problems,
+    resolve_subject_kind,
+)
 
 SUPPORTED_EXTS = DOCX_EXTS + PDF_EXTS + IMAGE_EXTS
 
@@ -120,6 +126,15 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
     keyphrases_path = os.path.join(paths["dictionaries_dir"], "domain_keyphrases.yaml")
     if os.path.exists(keyphrases_path):
         res["domains"] = load_domain_keyphrases(keyphrases_path)
+        # Мапінг «домен -> вид суб'єкта» перевіряється ТУТ, разом зі схемами, і
+        # з тієї самої причини: невідоме значення в YAML інакше не проявляється
+        # ніде на нашому боці -- вид пройшов би у вихід рядком і осів у
+        # `objects.kind_id` (NOT NULL, зіставляється з чужою таблицею).
+        # На відміну від схеми, домен виключити з набору неможливо (він не
+        # об'єкт, а рядок довідника), тому сміттєве значення відсікається на
+        # виході: resolve_subject_kind повертає замість нього 'unknown'.
+        for severity, message in domain_subject_kind_problems(res["domains"]):
+            res["warnings"].append(f"довідник домену: {message}")
 
     llm_cfg = cfg["llm"]
     if llm_cfg.get("enabled") and not force_no_llm:
@@ -187,6 +202,26 @@ def blank_meta(**overrides) -> dict:
         "uploaded_at": None,
         "domain": None,
         "template": None,
+        # ВИД СУБ'ЄКТА документа -> object_kinds.code у БД-споживача.
+        # person | equipment | task | unit -- створюємо об'єкт;
+        # none    -- суб'єкта в документі НЕМА (нормативний документ);
+        # unknown -- визначити не вдалося;
+        # null    -- до питання не дійшли взагалі (дублікат, нечитабельний
+        #            файл). null і "unknown" -- РІЗНІ речі: перше означає, що
+        #            питання не ставилось, друге -- що ставилось і без відповіді.
+        "subject_kind": None,
+        # schema | domain_map | llm | null -- ЧИМ визначено вид. Та сама
+        # цінність, що в `identification.source`: оголошення схеми й здогадка
+        # моделі не однакові за надійністю, і в базі це має бути видно.
+        "subject_kind_source": None,
+        # Причина, чому вид не вийшло визначити надійніше (напр.
+        # domain_without_subject_kind:staffing). null = вид оголошено.
+        "subject_kind_reason": None,
+        # ГЕЙТ: чи створювати об'єкт у реєстрі `objects`. false для
+        # none/unknown/null. Окрема вісь від `subject.person_complete`
+        # (див. pipeline/subject_kind.py:creates_object) -- завантажувач
+        # мусить перевіряти обидва ключі, а не один.
+        "create_subject_object": False,
         "identification": None,
         "storage_key": None,
         "reason": None,
@@ -216,6 +251,27 @@ def blank_meta(**overrides) -> dict:
     }
     meta.update(overrides)
     return meta
+
+
+def _subject_kind_llm(res: dict, cfg: dict):
+    """ТОЧКА РОЗШИРЕННЯ під рівень 3 визначення виду суб'єкта (LLM із закритим
+    enum). Повертає `llm.choose` або None.
+
+    Прикріплена до ОКРЕМОГО прапорця `llm.subject_kind`, вимкненого за
+    замовчуванням (pipeline/config.py), а не до загального `llm.enabled` --
+    свідомо. Причина: рівень 3 запускається саме на документах, для яких немає
+    ні схеми, ні впізнаного домену, тобто на найдовших і найчужіших текстах
+    батчу (Інструкція з діловодства -- 402898 символів), і кожен такий документ
+    додає повний виклик моделі до прогону, який зараз обходиться без неї
+    (посвідчення -- 0 викликів, відпускні -- 2 на 16). Увімкнути це має бути
+    окремим свідомим рішенням із власним заміром, а не побічним наслідком
+    `--llm`. Сам виклик у subject_kind.resolve_subject_kind уже реалізований і
+    обмежений LLM_SUBJECT_CHOICES.
+    """
+    llm = res.get("llm")
+    if llm is None or not cfg["llm"].get("subject_kind", False):
+        return None
+    return llm.choose
 
 
 def _person_identity(subject: dict) -> dict:
@@ -343,11 +399,24 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
                  "runner_up": ident.get("runner_up"), "reason": None}
 
     if ident["schema"] is None:
+        # Схеми немає -> рівні 2 і 3: мапінг «домен -> вид», далі (якщо ввімкнено
+        # окремим прапорцем) модель. Саме тут значення `none` окупається:
+        # нормативна інструкція отримує домен `normative`, вид `none` і
+        # `create_subject_object: false` -- тобто фантомний об'єкт у реєстрі не
+        # створюється, і його не доведеться видаляти (шляху видалення в
+        # завантажувачі БД немає).
+        kind_info = resolve_subject_kind(
+            schema=None, domain=ident.get("domain"), domains=res.get("domains"),
+            llm_choose=_subject_kind_llm(res, cfg), text=text)
         meta = dict(base_meta, status="unresolved", domain=ident.get("domain"),
                     source_kind=source_kind,
                     review_queue="unknown_type", review_reason="unresolved",
                     warnings=list(ingest_warnings),
                     reason=ident.get("reason") or "шаблон не визначено",
+                    subject_kind=kind_info["kind"],
+                    subject_kind_source=kind_info["source"],
+                    subject_kind_reason=kind_info["reason"],
+                    create_subject_object=creates_object(kind_info["kind"]),
                     identification={"scores": ident.get("scores"), "source": None})
         _persist(meta, text, res)
         return meta
@@ -405,6 +474,34 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             # тобто такий запис не вставиться, а не "вставиться неповним".
             warnings.append("неповний ПІБ (немає прізвища або імені) -- "
                             "вставка в people у БД-споживача не пройде")
+
+        # ВИД СУБ'ЄКТА, рівень 1: оголошення самої схеми. Домен передається як
+        # фолбек для схеми, що `subject_kind:` не оголосила (валідатор про це
+        # попереджає на завантаженні). Модель тут не потрібна за визначенням --
+        # схема вже є.
+        kind_info = resolve_subject_kind(schema=schema, domain=ident.get("domain"),
+                                         domains=res.get("domains"))
+        subject_kind = kind_info["kind"]
+        create_object = creates_object(subject_kind)
+        # ГЕЙТ «немає виду -> немає об'єкта». Два випадки, і дія людини різна:
+        #   none    -- ВІДПОВІДЬ: суб'єкта немає. Об'єкт не створюється, але
+        #              статус документа не псується: примусове рев'ю тут
+        #              означало б, що кожен нормативний документ назавжди
+        #              висить у черзі без жодної дії, яку людина може зробити.
+        #   unknown -- відповіді НЕМА (схема без оголошення + домен без
+        #              мапінгу). Об'єкт не створюється І документ не може бути
+        #              confirmed: ми не знаємо, ЩО описує документ, тобто до
+        #              полів дивитись ще рано. Це той самий клас, що
+        #              template_by_llm, тому й черга та сама -- unknown_type.
+        unknown_kind = subject_kind == UNKNOWN_SUBJECT
+        if not create_object:
+            warnings.append(
+                f"вид суб'єкта '{subject_kind}' -- об'єкт у реєстрі БД НЕ "
+                f"створюється (create_subject_object: false)"
+                + (f"; причина: {kind_info['reason']}" if kind_info["reason"] else ""))
+        if unknown_kind:
+            confirmed = False
+
         audit_sampled = confirmed and _sampled_for_audit(file_hash, cfg["review"].get("sample_rate", 20))
         status = "confirmed" if confirmed else "needs_review"
 
@@ -419,15 +516,25 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             # Позначка для черги ручного аудиту: навіть повністю впевнені записи
             # вибірково перевіряються, інакше рівень помилки системи невідомий
             # (architecture-proposal.md розд. 3).
+            # Порядок причин = порядок первинності: невпізнаний ШАБЛОН старший
+            # за невідомий вид суб'єкта (вид беруть зі схеми, тож коли під
+            # питанням сама схема, вид під питанням похідно).
             review_reason=("template_by_llm" if template_by_llm else
-                           ("random_audit" if audit_sampled else
-                            (None if confirmed else "needs_review"))),
+                           ("unknown_subject_kind" if unknown_kind else
+                            ("random_audit" if audit_sampled else
+                             (None if confirmed else "needs_review")))),
             # Шаблон від моделі -> у черзі це саме "тип документа під питанням"
             # (unknown_type), а не "факт непідтверджений": рев'юер має спершу
-            # сказати, ЩО це за бланк, і лише потім дивитись на поля.
-            review_queue=("unknown_type" if template_by_llm
+            # сказати, ЩО це за бланк, і лише потім дивитись на поля. Невідомий
+            # вид суб'єкта -- те саме питання іншими словами ("про КОГО це"),
+            # тому та сама черга, а не unconfirmed_fact.
+            review_queue=("unknown_type" if (template_by_llm or unknown_kind)
                           else _review_queue_type(status, source_kind, audit_sampled)),
             subject=subject,
+            subject_kind=subject_kind,
+            subject_kind_source=kind_info["source"],
+            subject_kind_reason=kind_info["reason"],
+            create_subject_object=create_object,
             facts=record["facts"],
             field_provenance=record["field_provenance"],
             unknown_fields=record["unknown_fields"],

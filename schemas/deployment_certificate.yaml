@@ -4,6 +4,13 @@ template: deployment_certificate
 domain: deployment
 fact_type: deployment_location   # -> dictionaries/fact_type_registry.yaml (validity_model: ranged)
 
+# ВИД СУБ'ЄКТА цього бланка. Оголошення схеми, старше за мапінг
+# «домен -> вид» (pipeline/subject_kind.py). person: посвідчення про
+# відрядження -- запис про одну конкретну особу, яку відряджають.
+# `destination_org` / `unit_to_report` (registry: military_unit) -- це НЕ
+# суб'єкт документа, а місце/адресат; вид суб'єкта в документі один.
+subject_kind: person
+
 # Як упізнати саме цей бланк -- щоб схему вибирав пайплайн, а не людина
 # вручну (див. pipeline/identification.py). Усі фрази взяті з реального
 # OCR-виводу заповненого документа, не вигадані.

@@ -22,6 +22,7 @@ from pipeline.classification.classify import classify_domain_rules, phrase_in_te
 from pipeline.extraction.extract import NAME_PART_ROLES, field_part, name_group_key
 from pipeline.normalization.normalize import (
     PLACEHOLDER_TOKENS_EXCEPT_KEY, PLACEHOLDER_TOKENS_KEY)
+from pipeline.subject_kind import DECLARABLE_SUBJECT_KINDS, UNKNOWN_SUBJECT
 
 TITLE_WEIGHT = 5     # заголовок бланка -- найсильніший сигнал
 ANCHOR_WEIGHT = 2    # характерні лейбли/номер додатка -- підтверджувальні
@@ -110,6 +111,27 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
     elif known_fact_types is not None and fact_type not in known_fact_types:
         err(f"fact_type '{fact_type}' не зареєстрований у "
             f"dictionaries/fact_type_registry.yaml")
+
+    # ВИД СУБ'ЄКТА -- закритий перелік, як part / db_target / type / dimension,
+    # і рівно з тієї самої причини: кожне значення відповідає рядку в чужій
+    # таблиці (`object_kinds`), а `objects.kind_id` -- NOT NULL. Опечатка в
+    # `subject_kind:` без цієї перевірки не проявилась би НІДЕ на нашому боці:
+    # вид просто пройшов би у вихід рядком і осів у базі.
+    subject_kind = schema.get("subject_kind")
+    if subject_kind is not None and subject_kind not in DECLARABLE_SUBJECT_KINDS:
+        err(f"невідомий subject_kind '{subject_kind}' (допустимі: "
+            f"{list(DECLARABLE_SUBJECT_KINDS)}) -- вид пішов би у вихід рядком і "
+            "далі в objects.kind_id, якого в object_kinds немає")
+    elif subject_kind is None:
+        # Попередження, а не помилка -- НЕ поблажливість, а різниця в наслідках.
+        # Помилка виключає схему з набору (run.py:build_resources), тобто ВСІ
+        # документи цього шаблону пішли б в unresolved через відсутній один
+        # рядок YAML. А відсутнє оголошення має робочий фолбек: мапінг
+        # «домен -> вид» (`domain:` схема оголошує завжди). Тихо це не
+        # проходить: попередження тут + `subject_kind_reason` у кожному записі.
+        warn("немає subject_kind -- вид суб'єкта визначатиметься мапінгом "
+             "домену; якщо мапінгу для цього домену теж немає, кожен документ "
+             f"отримає '{UNKNOWN_SUBJECT}' і об'єкт у БД не створиться")
 
     seen_names = set()
     targets = set()
