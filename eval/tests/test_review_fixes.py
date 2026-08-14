@@ -198,6 +198,25 @@ def test_current_mapping_covers_all_active_fields():
     assert problems == [], problems
 
 
+# --- R-A1-09: інжест більше не викидає адресу клітинки таблиці ---------------
+
+def test_docx_table_cells_carry_their_address():
+    """(таблиця, рядок, стовпець) були фізично в руках walk_tables і
+    відкидались blocks.append(text) -- багаторядкова таблиця (книга обліку)
+    ставала нерозбірною за побудовою."""
+    from pipeline.ingestion.ingest import extract_docx_blocks
+    text, blocks = extract_docx_blocks(_LEAVE_DOCX)
+    cells = [b for b in blocks if isinstance(b, dict) and "table" in b]
+    assert cells, "клітинки таблиць мусять нести адресу"
+    for cell in cells:
+        assert isinstance(cell["table"], int)
+        assert isinstance(cell["row"], int)
+        assert isinstance(cell["col"], int)
+        assert cell["text"].strip()
+    # текст документа не змінився: join віддає ті самі рядки
+    assert all((b if isinstance(b, str) else b["text"]) in text for b in blocks)
+
+
 # --- R-A1-08: константи родини бланків перевизначаються схемою --------------
 
 def test_extraction_limits_are_schema_tunable():

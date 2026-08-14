@@ -76,15 +76,29 @@ def extract_docx_blocks(path: str):
     # "ДЛЯ СЛУЖБОВОГО КОРИСТУВАННЯ" у клітинці поруч із номером примірника
     # -- реальна верстка офіційних листів), не лише в тілі документа.
     seen_ids, seen_refs = set(), []
+    # Наскрізний лічильник таблиць документа: клітинка мусить знати СВОЮ
+    # адресу (таблиця, рядок, стовпець), інакше багаторядкова таблиця
+    # (книга обліку) нерозбірна за побудовою (R-A1-09: індекси були фізично
+    # в руках і відкидались рядком blocks.append(text)).
+    table_seq = [0]
 
     def walk_tables(tables):
         """Рекурсивно, бо таблиця може лежати ВСЕРЕДИНІ клітинки іншої
         таблиці (у бланках це звичайна річ), а `doc.tables` віддає лише
         верхній рівень -- вкладені раніше не читались узагалі й мовчки
-        випадали з екстракції."""
+        випадали з екстракції.
+
+        Клітинка йде БЛОКОМ-СЛОВНИКОМ з адресою {table, row, col} -- увесь
+        код нижче за течією вже вміє блоки-словники (шлях Surya/PDF), тож
+        для екстракції це той самий текст, а адреса більше не викидається
+        (R-A1-09). Абзаци лишаються рядками -- у них адреси немає.
+        Об'єднана клітинка після дедуплікації несе адресу ПЕРШОГО входження
+        (найлівіша колонка сітки під нею)."""
         for table in tables:
-            for row in table.rows:
-                for cell in row.cells:
+            t_index = table_seq[0]
+            table_seq[0] += 1
+            for r_index, row in enumerate(table.rows):
+                for c_index, cell in enumerate(row.cells):
                     tc = cell._tc
                     if id(tc) in seen_ids:
                         continue
@@ -92,7 +106,9 @@ def extract_docx_blocks(path: str):
                     seen_refs.append(tc)
                     text = cell.text.strip()
                     if text:
-                        blocks.append(text)
+                        blocks.append({"text": text, "bbox": None,
+                                       "table": t_index, "row": r_index,
+                                       "col": c_index})
                     if cell.tables:
                         walk_tables(cell.tables)
 
@@ -137,7 +153,8 @@ def extract_docx_blocks(path: str):
             blocks.append(text)
 
     walk_tables(doc.tables)
-    return "\n".join(blocks), blocks
+    # join_block_texts, а не "\n".join: блоки-клітинки тепер словники.
+    return join_block_texts(blocks), blocks
 
 
 def sort_blocks_by_geometry(blocks):
