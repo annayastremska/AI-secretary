@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-secretary — технічна архітектура</title>
+<style>
+:root{
+  --bg:#fbfbfa; --fg:#1a1a18; --muted:#6b6b64; --line:#e2e0da;
+  --card:#fff; --code:#f4f3ef;
+  --anya:#c2410c; --anya-bg:#fff4ed;
+  --andriy:#0369a1; --andriy-bg:#eef7fd;
+  --answer:#15803d; --answer-bg:#eefaf1;
+  --shared:#7c3aed; --shared-bg:#f5f0ff;
+  --ok:#15803d; --warn:#b45309; --no:#b91c1c;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#16161a; --fg:#ececeb; --muted:#9a9a95; --line:#2f2f36;
+    --card:#1e1e23; --code:#232329;
+    --anya:#fb923c; --anya-bg:#2a1a11;
+    --andriy:#60a5fa; --andriy-bg:#111f2c;
+    --answer:#4ade80; --answer-bg:#0f2318;
+    --shared:#c4b5fd; --shared-bg:#1e1830;
+    --ok:#4ade80; --warn:#fbbf24; --no:#f87171;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#16161a; --fg:#ececeb; --muted:#9a9a95; --line:#2f2f36;
+  --card:#1e1e23; --code:#232329;
+  --anya:#fb923c; --anya-bg:#2a1a11;
+  --andriy:#60a5fa; --andriy-bg:#111f2c;
+  --answer:#4ade80; --answer-bg:#0f2318;
+  --shared:#c4b5fd; --shared-bg:#1e1830;
+  --ok:#4ade80; --warn:#fbbf24; --no:#f87171;
+}
+:root[data-theme="light"]{
+  --bg:#fbfbfa; --fg:#1a1a18; --muted:#6b6b64; --line:#e2e0da;
+  --card:#fff; --code:#f4f3ef;
+  --anya:#c2410c; --anya-bg:#fff4ed;
+  --andriy:#0369a1; --andriy-bg:#eef7fd;
+  --answer:#15803d; --answer-bg:#eefaf1;
+  --shared:#7c3aed; --shared-bg:#f5f0ff;
+  --ok:#15803d; --warn:#b45309; --no:#b91c1c;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:36px 20px 90px}
+header{border-bottom:2px solid var(--fg); padding-bottom:18px; margin-bottom:26px}
+h1{font-size:29px; line-height:1.2; margin:0 0 8px; letter-spacing:-.02em}
+.sub{color:var(--muted); font-size:15px; margin:0}
+h2{
+  font-size:21px; margin:46px 0 14px; padding-top:22px;
+  border-top:1px solid var(--line); letter-spacing:-.01em;
+}
+h2:first-of-type{border-top:none; padding-top:0}
+h3{font-size:16px; margin:26px 0 8px}
+p{margin:0 0 12px}
+code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.86em;
+  background:var(--code); padding:1px 5px; border-radius:4px;
+}
+.scroll{overflow-x:auto; margin:16px 0; border:1px solid var(--line); border-radius:8px}
+table{width:100%; border-collapse:collapse; font-size:14px; min-width:600px}
+th{
+  text-align:left; padding:9px 12px; background:var(--code);
+  font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+  border-bottom:1px solid var(--line); white-space:nowrap;
+}
+td{padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+tr:last-child td{border-bottom:none}
+.b{
+  display:inline-block; font-size:11px; font-weight:700; padding:2px 7px;
+  border-radius:4px; white-space:nowrap; letter-spacing:.02em;
+}
+.b-ok{color:var(--ok); background:var(--answer-bg)}
+.b-warn{color:var(--warn); background:var(--anya-bg)}
+.b-no{color:var(--no); background:rgba(185,28,28,.1)}
+.note{
+  background:var(--card); border:1px solid var(--line); border-left:4px solid var(--warn);
+  border-radius:8px; padding:13px 17px; margin:18px 0; font-size:15px;
+}
+.note strong{color:var(--warn)}
+.key{
+  background:var(--card); border:1px solid var(--line); border-left:4px solid var(--answer);
+  border-radius:8px; padding:13px 17px; margin:18px 0; font-size:15px;
+}
+pre{
+  background:var(--code); border:1px solid var(--line); border-radius:8px;
+  padding:14px 16px; overflow-x:auto; font-size:12.5px; line-height:1.5;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin:14px 0;
+}
+ol,ul{margin:0 0 12px; padding-left:20px}
+li{margin-bottom:5px}
+.muted{color:var(--muted)}
+footer{margin-top:52px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:13px}
+
+.diagram{margin:22px 0; border:1px solid var(--line); border-radius:10px; background:var(--card); padding:10px; overflow-x:auto}
+.diagram svg{display:block; min-width:920px; width:100%; height:auto}
+.d-band{fill:var(--muted); font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase}
+.d-t{fill:var(--fg); font-size:13px; font-weight:600}
+.d-s{fill:var(--muted); font-size:11px}
+.d-m{fill:var(--muted); font-size:10.5px; font-family:ui-monospace,Menlo,monospace}
+.d-box{fill:var(--card); stroke:var(--line); stroke-width:1.5}
+.d-anya{fill:var(--anya-bg); stroke:var(--anya); stroke-width:1.5}
+.d-andriy{fill:var(--andriy-bg); stroke:var(--andriy); stroke-width:1.5}
+.d-kolya{fill:var(--shared-bg); stroke:var(--shared); stroke-width:1.5}
+.d-green{fill:var(--answer-bg); stroke:var(--answer); stroke-width:1.5}
+.d-group{fill:none; stroke:var(--line); stroke-width:1.5; stroke-dasharray:5 4}
+.d-arrow{stroke:var(--muted); stroke-width:1.6; fill:none}
+.d-owner{font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>AI-secretary — технічна архітектура</h1>
+  <p class="sub">Проєкт №21 · KSE Agentic AI Summer School · чернетка на звірку, 13.08.2026</p>
+</header>
+
+<p>Шар відповіді над паперовим документообігом частини. Документи розбираються в структуровані
+факти, чат відповідає на зведені запитання за секунди. Документообіг ми не замінюємо.</p>
+
+<div class="key">
+  <p style="margin:0"><strong>Головне технічне рішення:</strong> текст будь-якої відповіді складає
+  код за шаблоном. Модель робить рівно два виклики — обирає дорогу і витягає параметри, обидва
+  зі строгою JSON-схемою. <strong>Дані з бази в модель не потрапляють взагалі</strong> — модель
+  бачить тільки текст питання. Тому вигадати цифру, ПІБ або цитату вона фізично не може.</p>
+</div>
+
+<h2>Схема</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 1020 700" role="img" aria-label="Схема системи">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <text class="d-band" x="20" y="40">1 · документ → факт</text>
+
+  <rect class="d-box" x="20" y="95" width="140" height="55" rx="8"/>
+  <text class="d-t" x="90" y="118" text-anchor="middle">Скан / фото</text>
+  <text class="d-t" x="90" y="135" text-anchor="middle">документа</text>
+
+  <g class="d-arrow" color="var(--muted)" stroke="currentColor">
+    <path d="M162,122 H176" marker-end="url(#ah)"/>
+    <path d="M652,122 H676" marker-end="url(#ah)"/>
+  </g>
+
+  <rect class="d-group" x="180" y="60" width="470" height="130" rx="10"/>
+  <text class="d-owner" x="192" y="82" fill="var(--anya)">pipeline — розбір документа</text>
+  <rect class="d-anya" x="188" y="100" width="108" height="76" rx="7"/>
+  <text class="d-t" x="242" y="126" text-anchor="middle">OCR</text>
+  <text class="d-m" x="242" y="144" text-anchor="middle">Surya</text>
+  <rect class="d-anya" x="306" y="100" width="108" height="76" rx="7"/>
+  <text class="d-t" x="360" y="126" text-anchor="middle">Класифікація</text>
+  <text class="d-s" x="360" y="144" text-anchor="middle">тип документа</text>
+  <rect class="d-anya" x="424" y="100" width="108" height="76" rx="7"/>
+  <text class="d-t" x="478" y="126" text-anchor="middle">Витяг полів</text>
+  <text class="d-m" x="478" y="144" text-anchor="middle">regex + MamayLM</text>
+  <rect class="d-anya" x="542" y="100" width="108" height="76" rx="7"/>
+  <text class="d-t" x="596" y="126" text-anchor="middle">Нормалізація</text>
+  <text class="d-s" x="596" y="144" text-anchor="middle">дати, довідники</text>
+
+  <rect class="d-group" x="678" y="60" width="182" height="130" rx="10"/>
+  <text class="d-owner" x="690" y="82" fill="var(--andriy)">сховище</text>
+  <rect class="d-andriy" x="686" y="98" width="166" height="38" rx="7"/>
+  <text class="d-t" x="769" y="122" text-anchor="middle">Postgres — факти</text>
+  <rect class="d-andriy" x="686" y="142" width="166" height="38" rx="7"/>
+  <text class="d-t" x="769" y="166" text-anchor="middle">MinIO — файли</text>
+
+  <text class="d-s" x="20" y="212">Кожен факт іде з позначкою «підтверджений / чернетка». Чернетка в підрахунки не входить.</text>
+
+  <text class="d-band" x="20" y="248">2 · нормативні джерела</text>
+
+  <rect class="d-box" x="20" y="264" width="140" height="58" rx="8"/>
+  <text class="d-t" x="90" y="288" text-anchor="middle">Публічні</text>
+  <text class="d-t" x="90" y="305" text-anchor="middle">нормативні акти</text>
+
+  <g class="d-arrow" color="var(--muted)" stroke="currentColor">
+    <path d="M162,293 H176" marker-end="url(#ah)"/>
+    <path d="M652,293 H676" marker-end="url(#ah)"/>
+  </g>
+
+  <rect class="d-kolya" x="180" y="264" width="470" height="58" rx="8"/>
+  <text class="d-t" x="415" y="288" text-anchor="middle">knowledge-base — база нормативних розділів</text>
+  <text class="d-s" x="415" y="306" text-anchor="middle">одиниця індексації — розділ, не весь документ</text>
+
+  <rect class="d-andriy" x="678" y="264" width="182" height="58" rx="8"/>
+  <text class="d-t" x="769" y="286" text-anchor="middle">Пошук</text>
+  <text class="d-m" x="769" y="304" text-anchor="middle">Postgres FTS → вектори</text>
+
+  <text class="d-band" x="20" y="360">3 · питання → відповідь</text>
+
+  <rect class="d-box" x="20" y="455" width="140" height="58" rx="8"/>
+  <text class="d-t" x="90" y="489" text-anchor="middle">Питання</text>
+
+  <g class="d-arrow" color="var(--muted)" stroke="currentColor">
+    <path d="M162,484 H176" marker-end="url(#ah)"/>
+    <path d="M332,484 H346 V409 H358" marker-end="url(#ah)"/>
+    <path d="M332,484 H358" marker-end="url(#ah)"/>
+    <path d="M332,484 H346 V583 H358" marker-end="url(#ah)"/>
+    <path d="M612,409 H656" marker-end="url(#ah)"/>
+    <path d="M612,501 H656" marker-end="url(#ah)"/>
+    <path d="M612,583 H656" marker-end="url(#ah)"/>
+  </g>
+
+  <rect class="d-green" x="180" y="432" width="150" height="104" rx="8"/>
+  <text class="d-t" x="255" y="458" text-anchor="middle">Маршрутизація</text>
+  <text class="d-s" x="255" y="476" text-anchor="middle">2 виклики моделі</text>
+  <text class="d-m" x="255" y="493" text-anchor="middle">JSON schema, T=0</text>
+  <text class="d-s" x="255" y="512" text-anchor="middle">модель недоступна</text>
+  <text class="d-s" x="255" y="527" text-anchor="middle">→ правила</text>
+
+  <rect class="d-box" x="360" y="370" width="250" height="78" rx="8"/>
+  <text class="d-t" x="378" y="394">Дорога А · підрахунок</text>
+  <text class="d-s" x="378" y="412">5 intent → 7 функцій до бази</text>
+  <text class="d-s" x="378" y="430">SQL пише код, не модель</text>
+
+  <rect class="d-box" x="360" y="462" width="250" height="78" rx="8"/>
+  <text class="d-t" x="378" y="486">Дорога Б · нормативка</text>
+  <text class="d-s" x="378" y="504">пошук розділу за запитом</text>
+  <text class="d-s" x="378" y="522">цитуємо розділ, не фрагмент</text>
+
+  <rect class="d-box" x="360" y="554" width="250" height="58" rx="8"/>
+  <text class="d-t" x="378" y="578">Відмова</text>
+  <text class="d-s" x="378" y="596">із названою причиною</text>
+
+  <rect class="d-green" x="658" y="370" width="342" height="78" rx="8"/>
+  <text class="d-t" x="676" y="394">Цифра + склад відповіді</text>
+  <text class="d-s" x="676" y="412">дата зрізу · знаменник · непідтверджені ·</text>
+  <text class="d-s" x="676" y="430">№ документа і файл-джерело в кожному рядку</text>
+
+  <rect class="d-green" x="658" y="462" width="342" height="78" rx="8"/>
+  <text class="d-t" x="676" y="486">Цитата + джерело</text>
+  <text class="d-s" x="676" y="504">документ · номер розділу · чинність ·</text>
+  <text class="d-s" x="676" y="522">посилання на офіційну публікацію</text>
+
+  <rect class="d-green" x="658" y="554" width="342" height="58" rx="8"/>
+  <text class="d-t" x="676" y="578">«Не знайшла»</text>
+  <text class="d-s" x="676" y="596">відмова замість вигаданої цифри</text>
+
+  <text class="d-s" x="20" y="648">У модель іде тільки текст питання. Рядки бази, ПІБ і тексти документів у модель не передаються — відповідь збирає код із шаблонів.</text>
+</svg>
+</div>
+
+<h2>Моделі й компоненти</h2>
+
+<div class="scroll">
+<table>
+<tr><th>Що</th><th>Зараз</th><th>Робоча версія</th></tr>
+<tr>
+  <td><strong>Розпізнавання тексту</strong></td>
+  <td><code>Surya</code> — обрано і протестовано <span class="b b-warn">ПЕРЕВІРИТИ</span></td>
+  <td>той самий, локально</td>
+</tr>
+<tr>
+  <td><strong>Класифікація типу, витяг полів</strong></td>
+  <td>правила (regex) + модель</td>
+  <td><code>MamayLM-Gemma-3-12B</code> через Ollama, локально</td>
+</tr>
+<tr>
+  <td><strong>Маршрутизація питання</strong></td>
+  <td><code>google/gemini-2.5-flash</code> через OpenRouter — тимчасово, поки немає заліза</td>
+  <td><code>MamayLM-Gemma-3-12B</code> через Ollama, локально <span class="b b-warn">ПЕРЕВІРИТИ</span></td>
+</tr>
+<tr>
+  <td><strong>Пошук по нормативці</strong></td>
+  <td>підрахунок збігів слів на стенді</td>
+  <td>повнотекстовий пошук Postgres (FTS)</td>
+</tr>
+<tr>
+  <td><strong>Пошук по змісту</strong> — вмикаємо тільки якщо FTS не витягне</td>
+  <td>рішення свідомо відкладене</td>
+  <td><code>snowflake-arctic-embed-l-v2.0</code> · Apache 2.0 · 1024-dim · контекст 8192 · pgvector.<br>
+      План Б для CPU: <code>multilingual-e5-small</code>. Reranker: <code>bge-reranker-v2-m3</code></td>
+</tr>
+<tr>
+  <td><strong>Факти</strong></td>
+  <td>SQLite на стенді</td>
+  <td>Postgres</td>
+</tr>
+<tr>
+  <td><strong>Файли документів</strong></td>
+  <td>—</td>
+  <td>MinIO</td>
+</tr>
+<tr>
+  <td><strong>Вікно чата</strong></td>
+  <td>Gradio, один файл, запуск локально</td>
+  <td>те саме — демо показує механізм, не інтерфейс</td>
+</tr>
+</table>
+</div>
+
+<div class="note">
+  <p style="margin:0"><strong>Вимога, з якої виходили:</strong> контур повністю self-hosted, без
+  хмарних API. Прод — один сервер з однією відеокартою, дев-машина зараз без GPU.
+  Стенд чата тимчасово ходить у зовнішній OpenRouter, щоб не блокувати розробку —
+  у робочій версії цього немає.</p>
+</div>
+
+<h2>Шар відповіді: як чат обробляє питання</h2>
+
+<p>Питання проходить чотири кроки. На кожному видно, що робить модель, а що код.</p>
+
+<pre>питання
+ ├─ 1. МАРШРУТ        модель, json_schema strict, temperature 0
+ │     → route ∈ {підрахунок · довідник · цитата · діагностика · відмова}
+ │     → clarify_question | null
+ ├─ 2. ПАРАМЕТРИ      модель, json_schema strict, temperature 0
+ │     → intent ∈ {хто_відсутній · хто_повертається · документи_людини ·
+ │                 документ_за_номером · зведення_по_підрозділах}
+ │     → date | subdivision | name | doc_number   (кожне може бути null)
+ ├─ 3. ДАНІ           код: intent → одна з 7 функцій до бази
+ └─ 4. ТЕКСТ          код: шаблонний рядок + футер (дорога, джерело, зріз)</pre>
+
+<h3>Модель дає структуру, не текст</h3>
+
+<p>Обидва виклики йдуть зі строгою JSON-схемою (<code>strict: true</code>, <code>additionalProperties:
+false</code>) і <code>temperature 0</code>. Модель не може повернути нічого, крім значення з
+переліку. Далі код працює вже з чистими полями.</p>
+
+<h3>Коли модель недоступна — працюють правила</h3>
+
+<p>Той самий маршрут і ті самі параметри дістаються без моделі, і в інтерфейсі видно позначку
+«маршрут обрано правилами». Що вміють правила:</p>
+
+<div class="scroll">
+<table>
+<tr><th>Поле</th><th>Як дістається без моделі</th></tr>
+<tr><td><code>date</code></td><td>тільки <code>РРРР-ММ-ДД</code>. Словесну дату («15 травня») правила не розбирають — система задає одне уточнювальне питання. Якщо дати немає і після нього — чесна відмова, дефолтну дату не підставляємо</td></tr>
+<tr><td><code>doc_number</code></td><td>шаблон <code>№NNN</code>. Кириличну «О» замість нуля (шум OCR) лишає як є, не «виправляє»</td></tr>
+<tr><td><code>subdivision</code></td><td>нормалізація відмінків: «2-ї механізованої роти» → «2-га механізована рота»</td></tr>
+<tr><td><code>name</code></td><td>слово з великої літери звіряється з базою; відмінок зрізається до основи («Цісика» → «Цісик» → «Ціси»), поки не знайдеться збіг у реєстрі або в документах</td></tr>
+</table>
+</div>
+
+<p>Порядок перебору доріг у правилах: діагностика → довідник → цитата → підрахунок → відмова.
+Виняток: явна ознака підрахунку (№ документа або дата) перемагає ключові слова інших доріг —
+інакше «Хто у відпустці за квитком №301» пішло б у довідник через слово «відпустка».</p>
+
+<h3>Що система дописує до кожної відповіді</h3>
+
+<div class="scroll">
+<table>
+<tr><th>Елемент</th><th>Навіщо</th></tr>
+<tr><td><strong>Дата зрізу</strong></td><td>станом на коли цифра</td></tr>
+<tr><td><strong>Знаменник</strong></td><td>12 із скількох</td></tr>
+<tr><td><strong>Скільки непідтверджених</strong></td><td>записів без <code>service_id</code>: людини немає в реєстрі, у розбивці по підрозділах вона не видно</td></tr>
+<tr><td><strong>Джерело</strong></td><td>№ документа і файл, з якого його взято — у кожному рядку</td></tr>
+<tr><td><strong>Дорога</strong></td><td>якою гілкою пішло питання — видно, чому відповідь саме така</td></tr>
+</table>
+</div>
+
+<h3>Дефекти даних система називає, а не приховує</h3>
+
+<ul>
+<li>порожні поля перелічуються прямо у відповіді: «з документа їх встановити не можна, нічого не підставляємо»</li>
+<li>дата завершення раніше за дату початку — показуємо як є з позначкою «суперечність у документі»</li>
+<li>скасований документ — «документ не діє, скасований документом №…»</li>
+<li>два документи з одним номером — обидва, вибір чинного за людиною</li>
+<li>ПІБ у документі не звівся з реєстром — рядок іде з позначкою «не підтверджено реєстром»</li>
+</ul>
+
+<h2>Дорога А: стик чата з базою</h2>
+
+<p>Чат не пише SQL. Він зве сім функцій. Що всередині — SQLite на стенді, Postgres у робочій
+версії — чат не знає. Перемикання: один рядок імпорту.</p>
+
+<div class="scroll">
+<table>
+<tr><th>Функція</th><th>Аргументи</th><th>Повертає</th></tr>
+<tr><td><code>find_people</code></td><td><code>subdivision, name</code></td><td>рядки реєстру</td></tr>
+<tr><td><code>absences_on_date</code></td><td><code>date, subdivision, doc_type</code></td><td>хто поза частиною в цей день; тільки чинні документи з обома датами</td></tr>
+<tr><td><code>returning_on_date</code></td><td><code>date, subdivision</code></td><td>у кого <code>date_to</code> = ця дата</td></tr>
+<tr><td><code>absences_for_person</code></td><td><code>name_or_service_id, only_active</code></td><td>усі документи людини, зокрема скасовані</td></tr>
+<tr><td><code>document_by_number</code></td><td><code>doc_number</code></td><td><strong>список</strong> — номер може повторюватись</td></tr>
+<tr><td><code>count_absent_by_subdivision</code></td><td><code>date</code></td><td><code>{subdivision, absent, total}</code> — рядок добової довідки</td></tr>
+<tr><td><code>search_reference</code></td><td><code>query, limit</code></td><td>розділи нормативки зі <code>score</code></td></tr>
+</table>
+</div>
+
+<h3>Шість правил стику</h3>
+
+<ol>
+<li>Функція повертає дані, не готовий текст</li>
+<li>Нічого не знайшли — порожній список. Не помилка, не <code>null</code></li>
+<li>Дати скрізь <code>РРРР-ММ-ДД</code>, рядком, на вході й на виході</li>
+<li>Кожен рядок про документ несе своє джерело: номер і файл, або назва і розділ</li>
+<li>Порожнє поле лишається порожнім — це саме те, що система має назвати вголос</li>
+<li>Коли документів з одним номером два, функція віддає обидва. Який чинний — вирішує шар відповіді</li>
+</ol>
+
+<h2>Дорога Б: нормативка</h2>
+
+<ul>
+<li><strong>Одиниця індексації — розділ документа</strong>, не весь документ. Інакше у відповідь їде три сторінки замість абзацу</li>
+<li><strong>Тільки публічні акти</strong> — закони, постанови, накази, опубліковані на офіційних сайтах. Внутрішні документи частини у базу знань не кладемо</li>
+<li><strong>Немає посилання на офіційну публікацію — немає джерела.</strong> Переказати норму «по пам'яті моделі» не можна: цитата без джерела гірша за відмову</li>
+<li><strong>Спершу FTS, вектори — тільки за потреби.</strong> Рішення про ембеддер прийняте, але не впроваджене: наступний крок — виміряти FTS на реальному корпусі, а не вмикати вектори наперед</li>
+</ul>
+
+<h2>Дані: жорсткі правила</h2>
+
+<ul>
+<li>У репозиторії <strong>немає жодного реального документа частини</strong> — тільки синтетика й шаблони</li>
+<li>Синтетика — це не анонімізований реальний документ. У реального з замазаним прізвищем лишаються дати, номери, формулювання. Кладемо тільки повністю вигадане</li>
+<li>Дампи бази в репозиторій не їдуть: <code>dumps/</code>, <code>*.dump</code>, <code>backup*.sql</code> заблоковані</li>
+</ul>
+
+<h2>Стан компонентів</h2>
+
+<div class="scroll">
+<table>
+<tr><th>Компонент</th><th>Стан</th><th>Деталі</th></tr>
+<tr><td>Вікно чата</td><td><span class="b b-ok">працює</span></td><td>Gradio, локальний запуск</td></tr>
+<tr><td>Маршрутизація</td><td><span class="b b-ok">працює</span></td><td>два виклики моделі + повний запасний варіант на правилах</td></tr>
+<tr><td>Дорога А</td><td><span class="b b-ok">працює</span></td><td>усі сім функцій, SQLite, синтетичні дані</td></tr>
+<tr><td>Дорога Б</td><td><span class="b b-warn">частково</span></td><td>механізм пошуку працює, справжніх нормативних текстів ще немає</td></tr>
+<tr><td>Розбір документів</td><td><span class="b b-warn">в роботі</span></td><td>кроки обрані, наскрізного проходу ще немає <span class="b b-warn">ПЕРЕВІРИТИ</span></td></tr>
+<tr><td>Postgres + MinIO</td><td><span class="b b-warn">в роботі</span></td><td>ті самі сім функцій на Postgres <span class="b b-warn">ПЕРЕВІРИТИ</span></td></tr>
+</table>
+</div>
+
+<h2>Що входить у друге демо</h2>
+
+<p>Один тип документа — рапорт на відпустку — проходить увесь ланцюг наскрізь: вхід → розбір →
+база → відповідь у чаті. Корпус для перевірки містить цей самий тип у кількох варіантах
+оформлення. Решта типів — після.</p>
+
+<h2>Два питання, які без вашого рішення не закриються</h2>
+
+<div class="scroll">
+<table>
+<tr><th>Питання</th><th>Чого бракує в даних</th><th>Що потрібно від вас</th></tr>
+<tr>
+  <td>«Хто ще не повернувся станом на <em>дату</em>?»</td>
+  <td>відмітки про фактичне повернення немає — є тільки планова дата</td>
+  <td>де фіксується факт повернення, або рішення її заводити</td>
+</tr>
+<tr>
+  <td>«Чи можна відпустити ще одного з <em>підрозділу</em>?»</td>
+  <td>немає норми одночасної відсутності</td>
+  <td>назвати норму або правило, за яким це вирішується</td>
+</tr>
+</table>
+</div>
+
+<p>Зараз на перше питання система відповідає із застереженням про межу даних, на друге —
+відмовою з названою причиною.</p>
+
+<footer>
+  Проєкт №21 · KSE Agentic AI Summer School 2026 · 13.08.2026<br>
+  Позначки <span class="b b-warn">ПЕРЕВІРИТИ</span> — не звірене з командою, зняти до відправки.
+</footer>
+
+</div>
+</body>
+</html>
