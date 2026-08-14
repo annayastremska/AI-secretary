@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
+  CREATE DATABASE ${APP_DB_NAME};
+  CREATE ROLE ${APP_DB_USER} LOGIN PASSWORD '${APP_DB_PASSWORD}';
+  CREATE ROLE ${READONLY_DB_USER} LOGIN PASSWORD '${READONLY_DB_PASSWORD}';
+  ALTER DATABASE ${APP_DB_NAME} OWNER TO ${APP_DB_USER};
+EOSQL
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${APP_DB_NAME}" <<-EOSQL
+  GRANT CONNECT ON DATABASE ${APP_DB_NAME} TO ${READONLY_DB_USER};
+  GRANT USAGE ON SCHEMA public TO ${READONLY_DB_USER};
+  ALTER DEFAULT PRIVILEGES FOR ROLE ${APP_DB_USER} IN SCHEMA public
+    GRANT SELECT ON TABLES TO ${READONLY_DB_USER};
+EOSQL
+
+# Окрема БД для метаданих Airflow (LocalExecutor) — не той самий кластер даних milidoc,
+# щоб задачі оркестрації не змішувались зі схемою фактологічного конвеєра.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
+  CREATE DATABASE ${AIRFLOW_DB_NAME};
+  CREATE ROLE ${AIRFLOW_DB_USER} LOGIN PASSWORD '${AIRFLOW_DB_PASSWORD}';
+  ALTER DATABASE ${AIRFLOW_DB_NAME} OWNER TO ${AIRFLOW_DB_USER};
+EOSQL
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${AIRFLOW_DB_NAME}" <<-EOSQL
+  GRANT ALL ON SCHEMA public TO ${AIRFLOW_DB_USER};
+EOSQL

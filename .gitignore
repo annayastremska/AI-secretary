@@ -121,3 +121,11 @@ data/eval/reports/
 
 # Файли-замки Word: відкритий .docx створює поруч ~$-копію.
 ~$*
+
+# db (Андрій): важкий ML-стек окремим venv (torch/transformers конфліктували
+# б з легким .venv для БД), і локальні дані контейнерів (bind-mount, не
+# частина коду -- генеруються docker compose up).
+.venv-ml/
+airflow/logs/
+data/postgres/
+data/minio/
