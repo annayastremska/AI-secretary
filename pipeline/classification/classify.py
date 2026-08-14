@@ -116,10 +116,29 @@ def classify_domain_rules(text: str, domains: dict):
     # `kind: procedural` оголошується в самому довіднику, не в коді, тому
     # новий процедурний домен -- це рядок у YAML.
     for domain, phrases in (domains or {}).items():
-        if (phrases or {}).get("kind") != "procedural":
+        phrases = phrases or {}
+        if phrases.get("kind") != "procedural":
             continue
-        if _count_phrase_hits(low, (phrases or {}).get("title", [])):
+        if _count_phrase_hits(low, phrases.get("title", [])):
             return domain, {domain: "procedural_title_match"}
+        # Другий шлях -- для документів, чийого ЗАГОЛОВКА ми не знаємо (не лише
+        # інструкції: правила, порядки, положення, методичні рекомендації,
+        # навчальні тексти). Спрацьовує лише коли ОБИДВІ умови разом.
+        #
+        # Довжина тут ПІДПОРА, а не правило, і це принципово: заміряно, що
+        # інструкції дають 402898 і 76125 символів проти 1375-2103 у бланків,
+        # тобто сигнал сильний. Але сама по собі довжина хибна -- книга
+        # штатно-посадового обліку теж буде довгою й НЕ є нормативною. Тому
+        # довжина лише ДОПУСКАЄ перевірку, а вирішують фрази, причому кілька
+        # РІЗНИХ: одна випадкова ("загальні положення" у витягу) вироку не дає.
+        fallback = phrases.get("procedural_fallback") or {}
+        min_hits = fallback.get("min_body_hits")
+        min_chars = fallback.get("min_chars")
+        if min_hits and min_chars and len(low) >= min_chars:
+            hits = _count_phrase_hits(low, phrases.get("body", []))
+            if hits >= min_hits:
+                return domain, {domain: f"procedural_fallback:{hits}_фраз_"
+                                        f"{len(low)}_символів"}
 
     scores = {}
     for domain, phrases in domains.items():

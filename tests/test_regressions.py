@@ -1115,6 +1115,33 @@ def test_blank_meta_always_carries_subject_kind_keys():
     assert meta["create_subject_object"] is False
 
 
+def test_procedural_fallback_needs_both_length_and_phrases():
+    """Нормативний документ, чийого ЗАГОЛОВКА ми не знаємо, ловиться другим
+    шляхом -- але лише коли довжина Й кілька різних фраз разом.
+
+    Довжина сама по собі хибна як ознака: книга штатно-посадового обліку теж
+    довга й НЕ нормативна. Тому тест перевіряє обидві межі -- і що довгий
+    документ без процедурних фраз процедурним НЕ стає.
+    """
+    domains = {
+        "normative": {"kind": "procedural", "title": ["інструкція з діловодства"],
+                      "body": ["ці правила", "набирає чинності", "визначає порядок"],
+                      "procedural_fallback": {"min_body_hits": 2, "min_chars": 20000}},
+        "staffing": {"title": ["обліку особового складу"], "body": ["особовий склад"]},
+    }
+    padding = "текст " * 5000            # ~30000 символів
+    # дві РІЗНІ процедурні фрази + довжина -> процедурний
+    assert classify_domain_rules(
+        "Ці правила набирає чинності. " + padding, domains)[0] == "normative"
+    # ОДНА фраза при тій самій довжині -> ні (випадковий збіг не дає вироку)
+    assert classify_domain_rules("Ці правила. " + padding, domains)[0] != "normative"
+    # довгий документ БЕЗ процедурних фраз -> ні (це і є книга обліку)
+    assert classify_domain_rules(
+        "Обліку особового складу. Особовий склад. " + padding, domains)[0] == "staffing"
+    # ті самі дві фрази, але документ КОРОТКИЙ -> ні (витяг, не звід правил)
+    assert classify_domain_rules("Ці правила набирає чинності.", domains)[0] != "normative"
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):
