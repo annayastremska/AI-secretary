@@ -59,3 +59,53 @@ def test_status_check_enters_denominator():
     row = evaluate_record(_meta("needs_review", [True]), {"id": "X-001"}, {}, None)
     assert row["fields_total"] >= 1
     assert row["fields_ok"] < row["fields_total"]
+
+
+# --- R-A1-01 + R-A2-01: фінальний confirmed мусить їхати у facts -----------
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_LEAVE_DOCX = os.path.join(_PROJECT_ROOT, "data", "eval", "samples", "leave",
+                           "synthetic-2026-05", "docx", "LEAVE-001.docx")
+
+
+def _run_with_llm_template_source(monkeypatch):
+    """Репро b2 (repro_01): справжній process_file з підміною РІВНО одного
+    вердикту -- identify_template каже, що шаблон обрала МОДЕЛЬ."""
+    import pipeline.run as run_mod
+    from pipeline.config import load_config
+
+    cfg = load_config(os.path.join(_PROJECT_ROOT, "config.yaml"))
+    res = run_mod.build_resources(cfg, force_no_llm=True)
+    res["store"] = None
+
+    real_identify = run_mod.identify_template
+
+    def fake_identify(*args, **kwargs):
+        ident = real_identify(*args, **kwargs)
+        ident["source"] = "llm"
+        return ident
+
+    monkeypatch.setattr(run_mod, "identify_template", fake_identify)
+    return run_mod.process_file(_LEAVE_DOCX, res, cfg)
+
+
+def test_needs_review_gate_writes_back_into_facts(monkeypatch):
+    """Гейт (template_by_llm) гасив лише локальну змінну confirmed, а
+    facts[*].confirmed лишалися True -- споживач, що фільтрує за
+    facts.confirmed, брав needs_review-документ у підрахунки."""
+    meta = _run_with_llm_template_source(monkeypatch)
+    assert meta["status"] == "needs_review"
+    assert meta["review_reason"] == "template_by_llm"
+    assert meta["facts"], "факти мусять зберегтися (значення не губимо)"
+    assert all(f["confirmed"] is False for f in meta["facts"]), \
+        [f["confirmed"] for f in meta["facts"]]
+
+
+def test_instrument_catches_the_writeback_break(monkeypatch):
+    """Зв'язка з R-A2-02: якби write-back знову зник, прилад мусить це
+    покарати. Імітуємо регресію вручну й перевіряємо, що чисельник падає."""
+    meta = _run_with_llm_template_source(monkeypatch)
+    meta["facts"][0]["confirmed"] = True  # регресія: чернетка знову «факт»
+    row = evaluate_record(meta, {"id": "X-001"}, {}, None)
+    bad = [c for c in row["checks"] if c["key"] == "чернетка_не_факт"]
+    assert bad and bad[0]["ok"] is False

@@ -86,6 +86,12 @@ note: суб-теза A2-01 про foreign_edition — unproven: на єдино
   Схеми, у якої ВСІ критичні поля з `label_before`, у репо не існує, тому цю
   гілку я відтворити не можу. Корінь у неї той самий, і виправлення (запис
   фінального confirmed у facts) закриває її разом з рештою.
+outcome: fixed — run.py після всіх гейтів (template_by_llm / чужа редакція /
+  unknown_kind) пише фінальний confirmed назад у КОЖЕН fact. Тест на тишу
+  (репро repro_01, monkeypatch ident.source="llm"):
+  eval/tests/test_review_fixes.py::test_needs_review_gate_writes_back_into_facts.
+  ДО: needs_review + facts=[True]*8; ПІСЛЯ: needs_review + facts=[False]*8.
+  Корпуси: leave docx/pdf 192/192, deployment docx/pdf 169/169, тестів 159.
 ```
 
 ```

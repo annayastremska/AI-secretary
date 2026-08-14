@@ -554,6 +554,18 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         if unknown_kind:
             confirmed = False
 
+        # ФІНАЛЬНИЙ вердикт confirmed їде НАЗАД у facts (R-A1-01 + R-A2-01).
+        # Гейти вище (template_by_llm, чужа редакція бланка, unknown_kind)
+        # гасили лише ЛОКАЛЬНУ змінну, а record["facts"][*].confirmed лишався
+        # таким, яким його зібрав build_record за критичними полями. Споживач
+        # фільтрує підрахунки за facts.confirmed, а не за meta.status -- тобто
+        # needs_review-документ ішов у підрахунки як підтверджений факт.
+        # Заміряно (b2-verdicts, repro_01): ident.source="llm" давав
+        # status=needs_review при facts=[True]*8.
+        if not confirmed:
+            for fact in record["facts"]:
+                fact["confirmed"] = False
+
         audit_sampled = confirmed and _sampled_for_audit(file_hash, cfg["review"].get("sample_rate", 20))
         status = "confirmed" if confirmed else "needs_review"
 
