@@ -198,6 +198,44 @@ def test_current_mapping_covers_all_active_fields():
     assert problems == [], problems
 
 
+# --- R-A1-05 + R-A2-09: мапа «тип -> template» має одне джерело --------------
+
+def test_doc_types_map_lives_in_mapping_not_in_code():
+    """Дві копії літерал-словника в evaluate.py не могли розійтись помітно.
+    Тепер джерело одне -- field-mapping.yaml, і невідомий тип еталона чи
+    неіснуючий шаблон -- помилка мапінгу."""
+    import copy
+    from eval.evaluate import check_mapping
+    mapping = copy.deepcopy(_mapping())
+    assert "doc_types" in mapping
+    truth = {"X-001": {"id": "X-001", "тип": "невідомий бланк"}}
+    problems = check_mapping(mapping, _schemas(), truth)
+    assert any("невідомий бланк" in p for p in problems), problems
+    mapping["doc_types"]["чужий тип"] = "no_such_template"
+    problems = check_mapping(mapping, _schemas(), {})
+    assert any("no_such_template" in p for p in problems), problems
+
+
+def test_template_ok_uses_mapping_doc_types():
+    meta = _meta("confirmed", [True])
+    meta["template"] = "leave_ticket"
+    truth = {"id": "X-001", "тип": "відпускний квиток"}
+    row = evaluate_record(meta, truth, _mapping(), None)
+    assert row["template_ok"] is True
+    row = evaluate_record(meta, truth, {}, None)  # без мапи збіг неможливий
+    assert row["template_ok"] is False
+
+
+def test_doc_ids_come_from_ground_truth_keys():
+    """Регекс LEAVE|TRIP зашивав типи набору в код -- ID тепер виводиться з
+    ключів еталона."""
+    from eval.evaluate import doc_id_from_filename
+    known = ("LEAVE-001", "TRIP-011", "MED-007")
+    assert doc_id_from_filename("MED-007_скан.pdf", known) == "MED-007"
+    assert doc_id_from_filename("leave-001.docx", known) == "LEAVE-001"
+    assert doc_id_from_filename("невідомий.docx", known) is None
+
+
 # --- R-A1-09: інжест більше не викидає адресу клітинки таблиці ---------------
 
 def test_docx_table_cells_carry_their_address():

@@ -37,7 +37,10 @@ from pipeline.run import build_resources, process_file
 
 EVAL_DIR = os.path.join("data", "eval", "synthetic-2026-05")
 MAPPING_PATH = os.path.join("eval", "field-mapping.yaml")
-DOC_ID_RE = re.compile(r"((?:LEAVE|TRIP)-\d+)", re.I)
+# Ідентифікатор документа виводиться з САМОГО еталона (ключі per-document/),
+# а не з зашитого перерахування префіксів (R-A1-05 + R-A2-09: тут стояв
+# regex на LEAVE|TRIP -- новий тип документів вимагав би правки скрипта,
+# всупереч шапці field-mapping.yaml).
 
 # Аліаси звань -- щоб порівняння категорії приймало форму, надруковану в
 # документі, а не лише label з довідника.
@@ -49,9 +52,14 @@ UKR_MONTHS = {
 }
 
 
-def doc_id_from_filename(name: str):
-    m = DOC_ID_RE.search(name or "")
-    return m.group(1).upper() if m else None
+def doc_id_from_filename(name: str, known_ids):
+    """ID еталона, що міститься в назві файлу, або None. Джерело правди --
+    перелік ключів еталона, не префікси в коді."""
+    upper = (name or "").upper()
+    hits = [doc_id for doc_id in known_ids if doc_id.upper() in upper]
+    # Найдовший збіг: 'LEAVE-011' не має програти 'LEAVE-01', якщо такий
+    # колись з'явиться.
+    return max(hits, key=len) if hits else None
 
 
 def load_ground_truth(eval_dir: str = None) -> dict:
@@ -350,11 +358,24 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
     problems = []
     by_template = {s["template"]: s for s in schemas or []}
     printed_seen = collections.defaultdict(set)
-    tpl_of = {"відпускний квиток": "leave_ticket",
-              "посвідчення про відрядження": "deployment_certificate"}
+    # ЄДИНЕ джерело мапи «тип еталона -> template» -- сам мапінг (R-A1-05 +
+    # R-A2-09: доти той самий літерал-словник жив у ДВОХ місцях скрипта, і
+    # розбіжність між копіями не могла бути виявлена нічим).
+    tpl_of = mapping.get("doc_types") or {}
+    for doc_type, tpl in tpl_of.items():
+        if tpl not in by_template:
+            problems.append(f"doc_types.{doc_type}: шаблону '{tpl}' немає в "
+                            f"schemas/ -- template_ok завжди був би False")
+    unknown_types = set()
     for doc in (truth or {}).values():
-        tpl = tpl_of.get(doc.get("тип"))
-        printed_seen[tpl] |= set((doc.get("надруковано") or {}).keys())
+        doc_type = doc.get("тип")
+        if doc_type and doc_type not in tpl_of:
+            unknown_types.add(doc_type)
+        printed_seen[tpl_of.get(doc_type)] |= set((doc.get("надруковано") or {}).keys())
+    for doc_type in sorted(unknown_types):
+        problems.append(f"еталон має тип '{doc_type}', не оголошений у "
+                        f"doc_types мапінгу -- template_ok для таких "
+                        f"документів завжди False")
 
     # Ключ мапінгу, якого немає ні в `правильні_відповіді` жодного документа, ні
     # в `expected_printed`, порівняння ТИХО пропускає (`if key not in expected:
@@ -667,8 +688,8 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         "вада": truth.get("вада"),
         "чинний": truth.get("чинний"),
         "template": template,
-        "template_ok": (template == {"відпускний квиток": "leave_ticket",
-                                     "посвідчення про відрядження": "deployment_certificate"}
+        # Та сама мапа, що в check_mapping -- одне джерело (R-A1-05).
+        "template_ok": (template == (mapping.get("doc_types") or {})
                         .get(truth.get("тип"))),
         "status": meta.get("status"),
         # Причина, чому документ не дійшов до екстракції. Без неї звіт не
@@ -729,22 +750,26 @@ def main(argv=None):
     for p in map_problems:
         print(f"[МАПІНГ] {p}", file=sys.stderr)
 
+    known_ids = tuple(truth.keys())
     paths = sorted(glob.glob(os.path.join(args.input, "*")))
-    paths = [p for p in paths if os.path.isfile(p) and doc_id_from_filename(os.path.basename(p))]
+    paths = [p for p in paths
+             if os.path.isfile(p) and doc_id_from_filename(os.path.basename(p), known_ids)]
     if args.only:
         wanted = {s.strip().upper() for s in args.only.split(",") if s.strip()}
-        paths = [p for p in paths if doc_id_from_filename(os.path.basename(p)) in wanted]
+        paths = [p for p in paths
+                 if doc_id_from_filename(os.path.basename(p), known_ids) in wanted]
     if args.limit:
         paths = paths[:args.limit]
     if not paths:
-        print(f"У {args.input} немає файлів набору (LEAVE-*/TRIP-*)", file=sys.stderr)
+        print(f"У {args.input} немає файлів, чиї назви містять ID еталона "
+              f"(data/eval/synthetic-2026-05/per-document/)", file=sys.stderr)
         return 2
 
     print(f"LLM: {'вимкнено' if not res['llm'] else 'увімкнено'} | документів: {len(paths)}\n")
 
     results, unmatched = [], []
     for i, path in enumerate(paths, 1):
-        doc_id = doc_id_from_filename(os.path.basename(path))
+        doc_id = doc_id_from_filename(os.path.basename(path), known_ids)
         if doc_id not in truth:
             unmatched.append(os.path.basename(path))
             continue
