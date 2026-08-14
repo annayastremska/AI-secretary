@@ -424,6 +424,40 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
             problems.append(f"person.{key}: поля '{spec['field']}' немає ні в "
                             f"схемах, ні в subject -- тихий 0%")
         check_printed("person", key, spec, list(by_template))
+
+    # ЗВОРОТНИЙ ПРОХІД (R-A2-03): поле схеми, яке не міряє ЖОДЕН ключ мапінгу.
+    # Доти перевірки були лише прямі (від ключа мапінгу до схеми), тому 7 полів
+    # leave і 7 полів deployment не мірялись БЕЗ жодного попередження -- саме
+    # так поломка могла б жити місяцями (як basis_order_* у 5.6). Свідомо
+    # неміряне поле оголошується в розділі `unmeasured:` мапінгу З ПРИЧИНОЮ --
+    # рішення видно у файлі, а не в тиші.
+    acknowledged = mapping.get("unmeasured") or {}
+    person_measured = {spec["field"] for spec in (mapping.get("person") or {}).values()}
+    for schema in schemas or []:
+        tpl = schema.get("template")
+        specs = (mapping.get("templates") or {}).get(tpl) or {}
+        measured = {spec["field"] for spec in specs.values()} | person_measured
+        acked = acknowledged.get(tpl) or {}
+        names = {f.get("name") for f in schema.get("fields") or []}
+        for f in schema.get("fields") or []:
+            if f.get("priority") == "deferred" or f.get("extraction") is None:
+                continue
+            name = f.get("name")
+            if name in measured or name in acked:
+                continue
+            problems.append(f"{tpl}: поле схеми '{name}' не міряється жодним "
+                            f"ключем мапінгу й не оголошене в 'unmeasured' -- "
+                            f"його поломка буде невидима")
+        for name, why in acked.items():
+            if name not in names:
+                problems.append(f"unmeasured.{tpl}.{name}: такого поля немає "
+                                f"в схемі -- запис застарів")
+            elif name in measured:
+                problems.append(f"unmeasured.{tpl}.{name}: поле насправді "
+                                f"міряється -- приберіть з переліку")
+            elif not (why and str(why).strip()):
+                problems.append(f"unmeasured.{tpl}.{name}: без причини -- "
+                                f"оголошення мусить казати, ЧОМУ не міряється")
     return problems
 
 
@@ -442,8 +476,24 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
 
     checks = []
 
-    def add(key, field, kind, ours, exp, printed_keys=None):
+    def add(key, field, kind, ours, exp, printed_keys=None, printed_not_issued=None):
         state = printed_state(printed, printed_keys)
+        # СЕНТИНЕЛ «не видавались» (R-A2-03/R-A2-05): бланк ПРЯМО каже, що
+        # значення немає -- очікуване значення null, як і для порожнього поля.
+        # Сама фраза живе в мапінгу (printed_not_issued), не в коді.
+        if (printed_not_issued and state == "filled"
+                and all(str(printed[k]).strip().lower()
+                        == str(printed_not_issued).strip().lower()
+                        for k in (printed_keys or ()) if k in printed)):
+            ok = is_blank_value(ours)
+            checks.append({"key": key, "field": field, "compare": "null",
+                           "ok": ok, "surplus": False, "expected_blank": True,
+                           "printed_keys": list(printed_keys or ()),
+                           "printed_sentinel": printed_not_issued,
+                           "ours": compare(kind, ours, None)[1],
+                           "expected": None,
+                           "scenario_said": exp})
+            return
         if state == "blank":
             # ПОРОЖНЄ ПОЛЕ НА БЛАНКУ -> очікуване значення null (рішення Анни,
             # 13.08.2026). Раніше тут звірялось значення зі СЦЕНАРІЮ, якого на
@@ -522,7 +572,8 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
             continue
         field = spec["field"]
         ours = by_field.get(field, subject.get(field))
-        add(key, field, spec["compare"], ours, exp, printed_keys)
+        add(key, field, spec["compare"], ours, exp, printed_keys,
+            spec.get("printed_not_issued"))
 
     for key, spec in (mapping.get("person") or {}).items():
         if key in person:

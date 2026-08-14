@@ -154,6 +154,68 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-A2-03: зворотний прохід мапінгу -- неміряне поле не мовчить ----------
+
+def _mapping():
+    import io as _io
+    import yaml as _yaml
+    with _io.open(os.path.join(_PROJECT_ROOT, "eval", "field-mapping.yaml"),
+                  encoding="utf-8") as f:
+        return _yaml.safe_load(f)
+
+
+def _schemas():
+    from pipeline.identification import load_schemas
+    return load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas"))
+
+
+def test_unmapped_schema_field_is_reported():
+    """Поле схеми без ключа мапінгу й без запису в unmeasured -- помилка
+    мапінгу, а не тиша (саме так 7+7 полів не мірялись непомітно)."""
+    import copy
+    from eval.evaluate import check_mapping
+    mapping = copy.deepcopy(_mapping())
+    del mapping["unmeasured"]["leave_ticket"]["leave_year"]
+    problems = check_mapping(mapping, _schemas(), {})
+    assert any("leave_year" in p and "не міряється" in p for p in problems), problems
+
+
+def test_stale_unmeasured_entry_is_reported():
+    """Запис unmeasured для поля, якого немає в схемі, -- застарілий і видимий."""
+    import copy
+    from eval.evaluate import check_mapping
+    mapping = copy.deepcopy(_mapping())
+    mapping["unmeasured"]["leave_ticket"]["ghost_field"] = "причина"
+    problems = check_mapping(mapping, _schemas(), {})
+    assert any("ghost_field" in p for p in problems), problems
+
+
+def test_current_mapping_covers_all_active_fields():
+    """Поточний мапінг + unmeasured разом покривають УСІ активні поля обох
+    схем (з еталоном набору) -- нуль проблем зворотного проходу."""
+    from eval.evaluate import check_mapping, load_ground_truth
+    problems = check_mapping(_mapping(), _schemas(), load_ground_truth())
+    assert problems == [], problems
+
+
+def test_wrapped_sentinel_is_confirmed_empty_not_a_value():
+    """Знахідка нової перевірки «впд»: текстовий шар PDF розриває сентинел
+    («не \\nвидавались»), однорядковий патерн ловив лише «не», і воно їхало в
+    БД реальним значенням ВПД. Тест тримає обидва шари фіксу: багаторядковий
+    варіант патерна і пробіло-стійке порівняння сентинела."""
+    from pipeline.extraction.extract import extract_field_regex
+    from pipeline.normalization.normalize import normalize_null_if_sentinel
+
+    field = next(f for f in _leave_schema()["fields"]
+                 if f["name"] == "travel_document_number")
+    text = ("Для проїзду видано військові перевізні документи за №\n"
+            "не \nвидавались\n"
+            "Дійсний у разі пред’явлення документа, який засвідчує особу.\n")
+    value, reason = extract_field_regex(field, text)
+    assert reason == "matched"
+    assert normalize_null_if_sentinel(value, "не видавались") == (None, True), value
+
+
 # --- R-A1-04: --reprocess не лишає два живі записи на той самий вміст -------
 
 def test_reprocess_retires_previous_record(tmp_path):

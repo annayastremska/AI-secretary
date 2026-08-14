@@ -656,7 +656,11 @@ def normalize_null_if_sentinel(raw_text, sentinel: str, tokens=None):
     if raw_text is None:
         return None, False
     text = str(raw_text).strip()
-    if sentinel and text.lower() == sentinel.strip().lower():
+    # Пробіли зводяться перед порівнянням: текстовий шар PDF розриває значення
+    # переносом ("не \nвидавались"), і посимвольне порівняння не впізнавало
+    # сентинел саме там, де він найпотрібніший (заміряно, LEAVE-002.pdf).
+    folded = re.sub(r"\s+", " ", text).lower()
+    if sentinel and folded == re.sub(r"\s+", " ", sentinel.strip()).lower():
         return None, True          # документ прямо каже "не видавались"
     if not text or is_placeholder(text, tokens):
         return None, False         # не вдалося прочитати
