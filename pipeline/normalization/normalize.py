@@ -449,12 +449,18 @@ UNRESOLVED_TERM_MARKER = "термін не розпізнано"
 def match_dictionary(raw_text, alias_lookup: dict, tokens=None):
     """Точний рядковий збіг після нормалізації. Незнайдений термін -> рядок-
     маркер, не None і не 0 (розділ 3.4 ТЗ: нуль не можна відрізнити від
-    "записів немає"). Суфікс "за NNNN рік" відсікається окремим правилом,
-    з допуском коми/крапки після нього."""
+    "записів немає").
+
+    Правила про конкретні суфікси бланка тут НЕМАЄ навмисно (R-A2-08): тут
+    стояв re.sub на «за NNNN рік» -- знання однієї форми всередині
+    генеричного зіставлення, що діяло на КОЖНЕ category-поле будь-якої схеми.
+    Власник цього знання один -- дериватор extract_year_suffix у
+    build_record, оголошений схемою (derive: extract_year_suffix); якщо
+    category-полю колись знадобиться відсікати суфікс, це має стати
+    оголошенням у схемі, а не правилом у генеричному коді."""
     if not raw_text or is_placeholder(raw_text, tokens):
         return None
-    normalized = re.sub(r"\s*за\s*\d{4}\s*рік\s*[,.;]?\s*$", "", raw_text.strip().lower())
-    hit = lookup_alias(normalized, alias_lookup)
+    hit = lookup_alias(raw_text.strip().lower(), alias_lookup)
     return {"code": hit[0], "label": hit[1]} if hit else UNRESOLVED_TERM_MARKER
 
 
