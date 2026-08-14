@@ -234,6 +234,32 @@ def test_number_bounds_on_wrong_type_are_loud():
     assert any(sev == "error" and "max_value" in msg for sev, msg in problems), problems
 
 
+# --- R-A1-15 + R-A2-13: запис у сховище атомарний ----------------------------
+
+def test_store_save_is_atomic(tmp_path, monkeypatch):
+    """Обрив посеред запису не сміє лишати напівзаписаний .md: попередній
+    вміст мусить пережити невдалу спробу перезапису."""
+    from pipeline.storage.local_store import LocalDocumentStore
+    store = LocalDocumentStore(str(tmp_path))
+    key = "documents/leave/x.md"
+    store.save(key, "перша версія", file_hash="h1")
+    path = tmp_path / "documents" / "leave" / "x.md"
+    assert path.read_text(encoding="utf-8") == "перша версія"
+
+    def broken_replace(src, dst):
+        raise OSError("диск зник посеред запису")
+
+    monkeypatch.setattr(os, "replace", broken_replace)
+    try:
+        store.save(key, "обірваний перезапис")
+    except OSError:
+        pass
+    monkeypatch.undo()
+    assert path.read_text(encoding="utf-8") == "перша версія", \
+        "попередній вміст мусить бути цілим після обірваного запису"
+    assert not list(tmp_path.glob("**/*.tmp")), "tmp-хвости мусять прибиратись"
+
+
 # --- R-A1-13: archived_to доживає до збереженого запису ----------------------
 
 def test_archived_to_reaches_the_stored_record(tmp_path):

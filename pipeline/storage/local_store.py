@@ -102,8 +102,19 @@ class LocalDocumentStore:
     def save(self, key: str, content: str, file_hash: str = None) -> str:
         path = os.path.join(self.root, key.replace("/", os.sep))
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
+        # tmp + rename, а не прямий write (R-A1-15 + R-A2-13): обрив процесу
+        # посеред запису інакше лишав би НАПІВЗАПИСАНИЙ .md, який споживач
+        # прочитав би як обрізаний запис без жодного сигналу. os.replace
+        # атомарний у межах однієї файлової системи, tmp лежить поруч із
+        # цільовим файлом саме для цього.
+        tmp_path = path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
         if file_hash:
             os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
             with open(self.index_path, "a", encoding="utf-8") as f:
