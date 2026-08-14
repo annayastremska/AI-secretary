@@ -80,9 +80,8 @@ def _raw_block_text(block) -> str:
 
 def flatten_blocks(blocks):
     """Плаский список НЕПОРОЖНІХ рядків з усіх блоків, у порядку появи.
-    Використовується там, де межі блоків не важливі (напр.
-    first_block_starting_with). Для пошуку "значення перед лейблом" межі
-    БЛОКІВ важливі -- див. group_blocks_into_lines()."""
+    Використовується там, де межі блоків не важливі. Для пошуку "значення
+    перед лейблом" межі БЛОКІВ важливі -- див. group_blocks_into_lines()."""
     flat = []
     for block in blocks:
         for line in _raw_block_text(block).split("\n"):
@@ -1040,14 +1039,6 @@ def validate_regex_value(field: dict, raw, printed=()):
     return text, "matched"
 
 
-def first_block_starting_with(blocks, prefix):
-    """Регістронезалежно: OCR/автор бланка не гарантує той самий регістр,
-    що схема написала в `starts_with` (напр. "Видано" проти "видано" на
-    початку речення чи навпаки)."""
-    low_prefix = prefix.lower()
-    return next((b for b in blocks if b.strip().lower().startswith(low_prefix)), None)
-
-
 _WORD_RE = re.compile(r"\S+")
 
 
@@ -1460,20 +1451,18 @@ def ground_llm_value(field: dict, value, document_text: str, printed=()):
 #     `document_number`, 'з "DD" month YYYY' у датах). У чужій редакції такий
 #     патерн збігається з ПЕРШИМ, що схоже за формою -- напр. із номером
 #     ЗГАДАНОГО документа замість номера цього;
-#   * `first_block_matching` -- `starts_with` шукає перший блок із заданим
-#     початком, і в чужій верстці ним стає інший рядок;
 #   * `rank_and_name_tokenized` -- лейбл у нього є, але сам РОЗБІР рядка
 #     ("найдовший префікс токенів, що є званням; далі ВЕЛИКИМИ -- прізвище")
 #     від бланка не залежить узагалі, тож на рядку, який лейбл підібрав не з
 #     того місця, він однаково віддає правдоподібне ПІБ.
 #
-# Усі три віддають значення з провенансом `matched`, і документ через це міг
+# Обидва віддають значення з провенансом `matched`, і документ через це міг
 # стати `confirmed` -- тобто тихо підтверджена вигадка. Коли форма НЕ впізнана
 # (`form_recognized=False`, вердикт приходить готовим з `identify_template`),
 # значення цих режимів не приймаються на віру: поле йде в LLM на перевірку, а
 # сам детермінований результат зберігається як відкат і носить провенанс
 # `unverified_foreign_edition`, який видно в рев'ю.
-UNANCHORED_MODES = ("regex", "first_block_matching", "rank_and_name_tokenized")
+UNANCHORED_MODES = ("regex", "rank_and_name_tokenized")
 
 #: Провенанс значення, яке детермінований шлях знайшов, але підтвердити
 #: нічим: бланк не впізнаний, а режим позитивної опори не має. Значення НЕ
@@ -1631,22 +1620,6 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 results[name] = (value, value_reason)
                 if value is None:
                     global_gaps.append(name)
-
-        elif mode == "first_block_matching":
-            raw = first_block_starting_with(flat_blocks, field["starts_with"])
-            if raw and field.get("strip_prefix"):
-                raw = strip_literal_prefix(raw, field["strip_prefix"])
-            if raw:
-                # Той самий фільтр, що й на regex-шляху: `starts_with` на
-                # порожньому бланку збігається з друкованим заголовком форми
-                # так само легко, як на заповненому -- зі значенням.
-                value, reason = validate_regex_value(field, raw, printed)
-                results[name] = (value, reason)
-                if value is None:
-                    global_gaps.append(name)
-            else:
-                results[name] = (None, "no_value")
-                global_gaps.append(name)
 
         elif mode == "regex":
             value, reason = extract_field_regex(field, ocr_text)

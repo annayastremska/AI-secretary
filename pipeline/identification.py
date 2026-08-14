@@ -141,7 +141,6 @@ def blank_edition_verdict(text: str, schema: dict) -> dict:
 EXTRACTION_REQUIRED_KEYS = {
     "regex": ("regex_variants",),
     "block_before_label": ("label_before",),
-    "first_block_matching": ("starts_with",),
     "derived_from": ("derived_from", "derive"),
     "llm": (),
     # rank_and_name_tokenized свідомо БЕЗ обов'язкових ключів: лейбл несе лише

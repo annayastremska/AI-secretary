@@ -543,6 +543,12 @@ how_verified: grep 'first_block_matching|starts_with' по pipeline і eval:
   EXTRACTION_REQUIRED_KEYS.
 note: посилання A1 «identification.py:1432» помилкове — 1432 це extract.py
   (identification.py має 640 рядків). Суть претензії не змінюється.
+outcome: fixed (видалено) — режим first_block_matching прибрано цілком:
+  гілка extract_document, first_block_starting_with, запис в
+  EXTRACTION_REQUIRED_KEYS і UNANCHORED_MODES, згадки в коментарях. Жодна
+  схема його не оголошувала; невідомий режим у майбутній схемі — помилка
+  валідатора (уже існує). Корпуси: 224/224 ×2, 183/183 ×2 (жодна цифра не
+  змінилась), тестів 194.
 ```
 
 ```

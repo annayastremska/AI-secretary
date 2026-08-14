@@ -7,7 +7,7 @@
   * різак меж полів (`resegment_by_blank`) ріже не туди або не ріже взагалі;
   * негативна перевірка `is_printed_form_text` не відхиляє нічого;
   * режими без опори на друкований підпис поля (`regex`,
-    `first_block_matching`, `rank_and_name_tokenized`) віддають значення з
+    `rank_and_name_tokenized`) віддають значення з
     провенансом `matched`, і документ може стати `confirmed`.
 
 Що фіксують тести:
