@@ -22,6 +22,17 @@ _PHRASE_RE_CACHE = {}
 # ключем `min_score` на домені.
 DEFAULT_DOMAIN_MIN_SCORE = 2
 
+# Ваги ДОМЕННОГО скорингу (R-A1-14: були голими числами в формулі). Свідомо
+# НЕ ті самі, що TITLE_WEIGHT=5/ANCHOR_WEIGHT=2 в identification.py, і свідомо
+# не імпортовані звідти: два скорери відповідають на РІЗНІ питання (грубий
+# домен без схеми проти конкретного бланка за його власними анкорами) і
+# мусять працювати незалежно -- доменна класифікація існує саме для
+# документів, на яких шаблонна не спрацювала. Перетин фраз між
+# domain_keyphrases.yaml і anchors схем -- з тієї самої причини навмисний:
+# довідник доменів не має права залежати від наявності схеми.
+DOMAIN_TITLE_WEIGHT = 3
+DOMAIN_BODY_WEIGHT = 1
+
 # Пробіли, які в docx/OCR трапляються замість звичайного: нерозривний,
 # вузький нерозривний, тонкий, а також переноси рядків усередині заголовка,
 # розбитого OCR на два рядки.
@@ -159,7 +170,8 @@ def classify_domain_rules(text: str, domains: dict):
         phrases = phrases or {}
         title_hits = _count_phrase_hits(low, phrases.get("title", []))
         body_hits = _count_phrase_hits(low, phrases.get("body", []))
-        scores[domain] = title_hits * 3 + body_hits
+        scores[domain] = (title_hits * DOMAIN_TITLE_WEIGHT
+                          + body_hits * DOMAIN_BODY_WEIGHT)
 
     if not scores:
         return None, scores
