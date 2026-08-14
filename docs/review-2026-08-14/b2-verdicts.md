@@ -419,6 +419,14 @@ how_verified: прочитані рядки з цитатою + власний �
   oversized/label_head/name_format — нуль; при цьому min_score,
   llm_floor, min_blank_coverage схемою перевизначаються (identification.py:
   87 MIN_BLANK_COVERAGE_KEY, :525 min_score). Патерн існує й застосований не всюди.
+outcome: fixed — новий блок схеми `extraction_limits:` (закритий перелік
+  ключів: oversized_candidate_chars, label_head_tokens, min_label_head_chars)
+  перевизначає константи родини бланків; oversized протягнуто параметром
+  через find_block_before_label і всі внутрішні добирачі; validate_schema
+  еррорить невідомий ключ і нецілі значення. Дефолти без блоку — побайтово
+  колишня поведінка. Тести: 2 (в т.ч. репро «Звання» приймалась значенням
+  surname — зі зниженим порогом відхиляється).
+  Корпуси: 224/224 ×2, 183/183 ×2, тестів 187.
 ```
 
 ```

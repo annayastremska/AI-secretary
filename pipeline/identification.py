@@ -25,7 +25,13 @@ from pipeline.extraction.blank_form import (
     blank_template_path,
     printed_cutters,
 )
-from pipeline.extraction.extract import NAME_PART_ROLES, field_part, name_group_key
+from pipeline.extraction.extract import (
+    EXTRACTION_LIMITS_KEY,
+    KNOWN_EXTRACTION_LIMITS,
+    NAME_PART_ROLES,
+    field_part,
+    name_group_key,
+)
 from pipeline.normalization.normalize import (
     PLACEHOLDER_TOKENS_EXCEPT_KEY, PLACEHOLDER_TOKENS_KEY)
 from pipeline.subject_kind import DECLARABLE_SUBJECT_KINDS, UNKNOWN_SUBJECT
@@ -257,6 +263,24 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
     for key in sorted(DECLARED_BUT_UNREAD_SCHEMA_KEYS & set(schema)):
         warn(f"ключ схеми '{key}' не читається кодом -- "
              f"{UNREAD_KEY_CONSEQUENCE[key]}")
+
+    # Перевизначення констант родини бланків (R-A1-08) -- закритий перелік
+    # ключів, як усе в схемі: одруківка мусить бути помилкою, а не тихо
+    # проігнорованим налаштуванням.
+    limits = schema.get(EXTRACTION_LIMITS_KEY)
+    if limits is not None:
+        if not isinstance(limits, dict):
+            err(f"{EXTRACTION_LIMITS_KEY} мусить бути словником "
+                f"{{ключ: ціле}} (відомі ключі: {sorted(KNOWN_EXTRACTION_LIMITS)})")
+        else:
+            for key, value in limits.items():
+                if key not in KNOWN_EXTRACTION_LIMITS:
+                    err(f"{EXTRACTION_LIMITS_KEY}.{key}: невідомий ключ "
+                        f"(відомі: {sorted(KNOWN_EXTRACTION_LIMITS)}) -- "
+                        "налаштування мовчки не діяло б")
+                elif not isinstance(value, int) or value <= 0:
+                    err(f"{EXTRACTION_LIMITS_KEY}.{key}: мусить бути додатним "
+                        f"цілим, отримано {value!r}")
 
     # Оголошений blank_template, який не читається, раніше не давав ЖОДНОГО
     # повідомлення (R-A1-02): _read_lines неіснуючого шляху -> [], вердикт

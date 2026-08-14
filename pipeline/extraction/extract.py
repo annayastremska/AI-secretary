@@ -156,6 +156,27 @@ def _is_denylisted(candidate: str, denylist) -> bool:
 # лишаються в межах з великим запасом.
 OVERSIZED_CANDIDATE_CHARS = 200
 
+#: Ключ схеми для перевизначення констант РОДИНИ бланків (R-A1-08). Числа
+#: вище й нижче (OVERSIZED_CANDIDATE_CHARS, LABEL_HEAD_TOKENS,
+#: MIN_LABEL_HEAD_CHARS) виведені з ДВОХ наявних форм, а не з природи задачі:
+#: бланк із 6-символьною шапкою («Звання») чи легітимним значенням на 300
+#: символів мусив би правити код. Той самий патерн, що min_score / llm_floor /
+#: min_blank_coverage: дефолт у коді, перевизначення в YAML схеми.
+#:   extraction_limits:
+#:     oversized_candidate_chars: 300
+#:     label_head_tokens: 2
+#:     min_label_head_chars: 6
+EXTRACTION_LIMITS_KEY = "extraction_limits"
+#: Дозволені ключі блоку -- закритий перелік, як усе в схемі: одруківка має
+#: бути помилкою валідатора, а не тихо проігнорованим налаштуванням.
+KNOWN_EXTRACTION_LIMITS = ("oversized_candidate_chars", "label_head_tokens",
+                           "min_label_head_chars")
+
+
+def schema_extraction_limit(schema: dict, name: str, default: int) -> int:
+    value = ((schema or {}).get(EXTRACTION_LIMITS_KEY) or {}).get(name)
+    return default if value is None else value
+
 
 # Блок, чия висота НЕ ПОЯСНЮЄТЬСЯ кількістю рядків, які ми з нього бачимо,
 # найпевніше містить кілька логічних рядків/полів, злитих в один bbox без
@@ -311,7 +332,8 @@ def _geometric_candidate(blocks, label_i, h_med):
     return None
 
 
-def _sandwich_value(block_text: str, label_substring: str):
+def _sandwich_value(block_text: str, label_substring: str,
+                    oversized_chars=OVERSIZED_CANDIDATE_CHARS):
     """Значення, приклеєне до лейбла в ОДНОМУ суцільному OCR-тексті без
     роздільника -- бланк друкує "ЗНАЧЕННЯ(лейбл-примітка)" одним потоком, а
     Surya не завжди ставить `\\n` на межі поля -- research-round-2026-08-12.md,
@@ -346,7 +368,7 @@ def _sandwich_value(block_text: str, label_substring: str):
     if prev_close == -1:
         return None
     value = text[prev_close + 1:idx].rstrip("(").strip()
-    if not value or len(value) > OVERSIZED_CANDIDATE_CHARS or "(" in value:
+    if not value or len(value) > oversized_chars or "(" in value:
         return None
     return value
 
@@ -502,7 +524,8 @@ def _lines_backwards(blocks, i, j):
             yield line
 
 
-def _extend_to_anchor(blocks, i, start_j, value_lines, anchor):
+def _extend_to_anchor(blocks, i, start_j, value_lines, anchor,
+                      oversized_chars=OVERSIZED_CANDIDATE_CHARS):
     """`strip_prefix` зі схеми -- це не лише те, що треба ЗРІЗАТИ, а й
     оголошення ЛІВОЇ МЕЖІ значення: літерал, одразу після якого значення
     починається ("звільнений", "Видано"). Якщо його немає в кандидаті --
@@ -544,7 +567,7 @@ def _extend_to_anchor(blocks, i, start_j, value_lines, anchor):
             break
         prefix.insert(0, line)
         merged = prefix + value_lines
-        if len("\n".join(merged)) > OVERSIZED_CANDIDATE_CHARS:
+        if len("\n".join(merged)) > oversized_chars:
             break
         if anchor_in_line(line, anchor):
             return merged
@@ -584,7 +607,8 @@ MAX_PDF_WRAP_LOOKBACK_LINES = 3
 
 
 def _extend_across_pdf_wrap(blocks, src_i, start_j, value_lines,
-                            extra_boundaries=(), printed=()):
+                            extra_boundaries=(), printed=(),
+                            oversized_chars=OVERSIZED_CANDIDATE_CHARS):
     """Добирає ПОЧАТОК значення, який PyMuPDF відрізала межею блоку.
 
     Причина (розд. 5.7, заміряно 14.08.2026 на deployment/pdf). Блок
@@ -635,7 +659,7 @@ def _extend_across_pdf_wrap(blocks, src_i, start_j, value_lines,
         if (n >= MAX_PDF_WRAP_LOOKBACK_LINES
                 or _is_field_boundary_line(line, extra_boundaries, printed)):
             break
-        if len(" ".join([line] + prefix + value_lines)) > OVERSIZED_CANDIDATE_CHARS:
+        if len(" ".join([line] + prefix + value_lines)) > oversized_chars:
             break
         prefix.insert(0, line)
     if not prefix:
@@ -685,7 +709,8 @@ def _previous_value_block(blocks, label_i, label_index, order):
 
 
 def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
-                            boundaries=(), printed=(), order=None):
+                            boundaries=(), printed=(), order=None,
+                            oversized_chars=OVERSIZED_CANDIDATE_CHARS):
     """blocks: результат group_blocks_into_lines() -- список
     {"lines": [...], "bbox": (...)|None}.
 
@@ -777,7 +802,8 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
         sandwich_values = []
         for i, _ in mega_hits:
             block_text = "\n".join(blocks[i]["lines"])
-            value = _sandwich_value(block_text, label_substring)
+            value = _sandwich_value(block_text, label_substring,
+                                    oversized_chars=oversized_chars)
             if value is not None:
                 sandwich_values.append(value)
         distinct_sandwich = {v.strip() for v in sandwich_values}
@@ -822,7 +848,8 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
 
         value_lines = _value_lines_after_label_note(src_lines, boundaries, printed)
         start_j = len(src_lines) - len(value_lines)
-        extended = _extend_to_anchor(blocks, src_i, start_j, value_lines, anchor)
+        extended = _extend_to_anchor(blocks, src_i, start_j, value_lines, anchor,
+                                     oversized_chars=oversized_chars)
         if extended is not value_lines:
             # Якір уже встановив ліву межу значення. Добирати ще й
             # _extend_across_block_boundary НЕ МОЖНА: обидва механізми
@@ -844,7 +871,8 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
             # поля, а місцем переносу рядка -- див. _extend_across_pdf_wrap
             # (працює лише на текстовому шарі PDF).
             candidates.append("\n".join(_extend_across_pdf_wrap(
-                blocks, src_i, start_j, value_lines, boundaries, printed)))
+                blocks, src_i, start_j, value_lines, boundaries, printed,
+                oversized_chars=oversized_chars)))
 
     if not candidates:
         return None, "no_label"
@@ -857,7 +885,7 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
     candidate = candidates[0]
     if _is_denylisted(candidate, low_denylist):
         return None, "denylisted"
-    if len(candidate) > OVERSIZED_CANDIDATE_CHARS:
+    if len(candidate) > oversized_chars:
         return None, "oversized_block_suspect"
     return candidate, "matched"
 
@@ -917,11 +945,17 @@ def schema_label_heads(schema: dict) -> tuple:
     phrases.extend(ident.get("title") or [])
     phrases.extend(ident.get("anchors") or [])
 
+    # Дефолти виведені з двох наявних форм; бланк з іншою типографікою
+    # перевизначає їх у власному YAML (R-A1-08), а не в коді.
+    head_tokens = schema_extraction_limit(schema, "label_head_tokens",
+                                          LABEL_HEAD_TOKENS)
+    min_head_chars = schema_extraction_limit(schema, "min_label_head_chars",
+                                             MIN_LABEL_HEAD_CHARS)
     heads = set()
     for phrase in phrases:
         tokens = normalize_ws(phrase).lower().split()
-        head = " ".join(tokens[:LABEL_HEAD_TOKENS])
-        if len(head) >= MIN_LABEL_HEAD_CHARS:
+        head = " ".join(tokens[:head_tokens])
+        if len(head) >= min_head_chars:
             heads.add(head)
     return tuple(sorted(heads))
 
@@ -1248,6 +1282,8 @@ def resolve_name_groups(schema, grouped_blocks, denylist, dictionaries, printed=
     двигун кидав KeyError.
     """
     groups = {}
+    oversized_chars = schema_extraction_limit(
+        schema, "oversized_candidate_chars", OVERSIZED_CANDIDATE_CHARS)
     for field in schema["fields"]:
         if field.get("extraction") != "rank_and_name_tokenized":
             continue
@@ -1269,7 +1305,8 @@ def resolve_name_groups(schema, grouped_blocks, denylist, dictionaries, printed=
             continue
         raw_line, label_reason = find_block_before_label(grouped_blocks, label,
                                                          denylist, anchor=strip,
-                                                         printed=printed, order=order)
+                                                         printed=printed, order=order,
+                                                         oversized_chars=oversized_chars)
         if raw_line and strip:
             raw_line = strip_literal_prefix(raw_line, strip)
         rank_result, name_parts = parse_rank_and_name(raw_line, rank_lookup)
@@ -1503,6 +1540,10 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     # відносно лейбла" (див. find_block_before_label / printed_after_label).
     blank_order = printed_order(schema)
     fields_by_name = {f["name"]: f for f in schema["fields"]}
+    # Межа «кандидат завеликий для значення поля» -- дефолт коду або
+    # перевизначення цієї схеми (R-A1-08).
+    oversized_chars = schema_extraction_limit(
+        schema, "oversized_candidate_chars", OVERSIZED_CANDIDATE_CHARS)
     results = {}
     localized_gaps, global_gaps, hints = [], [], {}
 
@@ -1559,7 +1600,7 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 grouped_blocks, field["label_before"], denylist,
                 anchor=field.get("strip_prefix"),
                 boundaries=compile_value_boundaries(field), printed=printed,
-                order=blank_order)
+                order=blank_order, oversized_chars=oversized_chars)
             if raw is not None and field.get("strip_prefix"):
                 raw = strip_literal_prefix(raw, field["strip_prefix"])
             if raw is None:

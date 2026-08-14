@@ -198,6 +198,41 @@ def test_current_mapping_covers_all_active_fields():
     assert problems == [], problems
 
 
+# --- R-A1-08: константи родини бланків перевизначаються схемою --------------
+
+def test_extraction_limits_are_schema_tunable():
+    """Заміряний наслідок дефолтів: 6-символьна шапка «Звання» не входить у
+    label_heads за побудовою (MIN_LABEL_HEAD_CHARS=16), тож
+    validate_block_value приймав її значенням surname. Схема з іншою
+    типографікою тепер знижує поріг у СВОЄМУ YAML, не в коді."""
+    import copy
+    from pipeline.extraction.extract import schema_label_heads, validate_block_value
+    schema = copy.deepcopy(_leave_schema())
+    schema["fields"].append({"name": "x", "label_before": "Звання",
+                             "extraction": "block_before_label"})
+    # дефолти: коротка голова відсікається -> «Звання» приймається значенням
+    heads_default = schema_label_heads(schema)
+    assert all("звання" != h for h in heads_default)
+    # перевизначення схемою: голова з'являється, значення-лейбл відхиляється
+    schema["extraction_limits"] = {"label_head_tokens": 1,
+                                   "min_label_head_chars": 6}
+    heads_tuned = schema_label_heads(schema)
+    assert "звання" in heads_tuned
+    surname_field = next(f for f in schema["fields"] if f["name"] == "surname")
+    value, reason = validate_block_value(surname_field, "Звання", heads_tuned)
+    assert reason != "matched", (value, reason)
+
+
+def test_unknown_extraction_limit_key_is_loud():
+    import copy
+    from pipeline.identification import validate_schema
+    schema = copy.deepcopy(_leave_schema())
+    schema["extraction_limits"] = {"oversized_candidate_charz": 300}
+    problems = validate_schema(schema)
+    assert any(sev == "error" and "oversized_candidate_charz" in msg
+               for sev, msg in problems), problems
+
+
 # --- R-A1-10 + R-A2-12: «handwritten» вимагає доказу читання з пікселів -----
 
 def test_handwritten_queue_requires_ocr_evidence():
