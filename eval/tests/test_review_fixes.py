@@ -154,6 +154,43 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-A1-02: відсутній blank_template не сміє давати recognized:True -------
+
+def test_missing_blank_template_is_not_recognized():
+    """_read_lines неіснуючого шляху -> [], і вердикт давав recognized:True
+    при total:0 -- три захисти вимикались мовчки."""
+    import copy
+    from pipeline.identification import blank_edition_verdict
+    schema = copy.deepcopy(_leave_schema())
+    schema["blank_template"] = "data/eval/samples/leave/НЕМА.docx"
+    verdict = blank_edition_verdict("будь-який текст", schema)
+    assert verdict["recognized"] is False
+    assert verdict["reason"] == "blank_template_missing_or_empty"
+
+
+def test_missing_blank_template_is_a_schema_error():
+    """Валідатор мусить ловити битий шлях на завантаженні -- раніше різниця
+    з базовим прогоном була порожня (жодного error чи warning)."""
+    import copy
+    from pipeline.identification import validate_schema
+    schema = copy.deepcopy(_leave_schema())
+    schema["blank_template"] = "data/eval/samples/leave/НЕМА.docx"
+    problems = validate_schema(schema)
+    assert any(sev == "error" and "blank_template" in msg
+               for sev, msg in problems), problems
+
+
+def test_schema_without_blank_template_stays_inert():
+    """Схема БЕЗ ключа перевірки не отримує -- це оголошена межа, не дефект."""
+    import copy
+    from pipeline.identification import blank_edition_verdict, validate_schema
+    schema = copy.deepcopy(_leave_schema())
+    del schema["blank_template"]
+    verdict = blank_edition_verdict("текст", schema)
+    assert verdict["recognized"] is True and verdict["total"] == 0
+    assert not any("blank_template" in msg for _sev, msg in validate_schema(schema))
+
+
 # --- R-A1-06 + R-A2-05: значення `normalization:` валідуються ---------------
 
 def _leave_schema():

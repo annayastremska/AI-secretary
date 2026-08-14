@@ -19,7 +19,12 @@ import yaml
 
 from pipeline.build_record import CONSISTENCY_RULES, DERIVE_FUNCS
 from pipeline.classification.classify import classify_domain_rules, phrase_in_text
-from pipeline.extraction.blank_form import blank_line_coverage
+from pipeline.extraction.blank_form import (
+    BLANK_TEMPLATE_KEY,
+    blank_line_coverage,
+    blank_template_path,
+    printed_cutters,
+)
 from pipeline.extraction.extract import NAME_PART_ROLES, field_part, name_group_key
 from pipeline.normalization.normalize import (
     PLACEHOLDER_TOKENS_EXCEPT_KEY, PLACEHOLDER_TOKENS_KEY)
@@ -92,15 +97,26 @@ def blank_edition_verdict(text: str, schema: dict) -> dict:
 
     Повертає {found, total, coverage, threshold, recognized}.
 
-    `recognized: True` при `total == 0` -- НЕ поблажливість, а та сама межа, що
-    вже оголошена в докстрінгу `blank_form.py`: схема без `blank_template:` не
-    отримує перевірки взагалі. Новий бланк без оголошеного шаблону не має
-    почати мовчки не довіряти власним полям -- він має поводитись рівно так, як
-    поводився до цієї зміни.
+    `recognized: True` при `total == 0` БЕЗ оголошеного `blank_template:` --
+    НЕ поблажливість, а та сама межа, що вже оголошена в докстрінгу
+    `blank_form.py`: схема без `blank_template:` не отримує перевірки взагалі.
+    Новий бланк без оголошеного шаблону не має почати мовчки не довіряти
+    власним полям -- він має поводитись рівно так, як поводився до цієї зміни.
+
+    А ось ОГОЛОШЕНИЙ шаблон, з якого не читається жоден рядок (файл відсутній
+    або порожній) -- це вже НЕ «нема підстав не довіряти», а мовчазна втрата
+    трьох захистів одразу (резегментація фото, printed_form_text, вердикт
+    редакції). Заміряно (R-A1-02): раніше це давало `recognized: True` при
+    нулі доказів. Тепер -- `recognized: False` з окремою причиною; валідатор
+    схем ловить це ще раніше, на завантаженні.
     """
     found, total = blank_line_coverage(text, schema)
     threshold = ((schema.get("identification") or {})
                  .get(MIN_BLANK_COVERAGE_KEY, DEFAULT_MIN_BLANK_COVERAGE))
+    if total == 0 and schema.get(BLANK_TEMPLATE_KEY):
+        return {"found": 0, "total": 0, "coverage": 0.0, "threshold": threshold,
+                "recognized": False,
+                "reason": "blank_template_missing_or_empty"}
     coverage = (found / total) if total else None
     return {
         "found": found, "total": total, "coverage": coverage,
@@ -241,6 +257,23 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
     for key in sorted(DECLARED_BUT_UNREAD_SCHEMA_KEYS & set(schema)):
         warn(f"ключ схеми '{key}' не читається кодом -- "
              f"{UNREAD_KEY_CONSEQUENCE[key]}")
+
+    # Оголошений blank_template, який не читається, раніше не давав ЖОДНОГО
+    # повідомлення (R-A1-02): _read_lines неіснуючого шляху -> [], вердикт
+    # `recognized: True` при `total: 0` -- і мовчки вимикались одразу три
+    # захисти (резегментація фото 2.11a, printed_form_text 5.9, вердикт
+    # редакції розд. 8). Схема БЕЗ ключа перевірки не отримує навмисно --
+    # помилка лише для ОГОЛОШЕНОГО, але непрацездатного шляху.
+    if schema.get(BLANK_TEMPLATE_KEY):
+        blank_path = blank_template_path(schema)
+        if not os.path.exists(blank_path):
+            err(f"blank_template '{schema[BLANK_TEMPLATE_KEY]}' не існує -- "
+                "резегментація фото, перевірка друкованого тексту бланка й "
+                "вердикт редакції мовчки вимкнулись би")
+        elif not printed_cutters(schema):
+            err(f"blank_template '{schema[BLANK_TEMPLATE_KEY]}' не дає жодного "
+                "друкованого рядка (порожній або нечитабельний файл) -- "
+                "захисти за бланком не працювали б")
 
     seen_names = set()
     targets = set()
