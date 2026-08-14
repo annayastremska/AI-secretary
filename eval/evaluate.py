@@ -789,12 +789,11 @@ def main(argv=None):
 
     print(f"LLM: {'вимкнено' if not res['llm'] else 'увімкнено'} | документів: {len(paths)}\n")
 
-    results, unmatched = [], []
+    # Гілки «без еталона» тут більше немає: doc_id виводиться з КЛЮЧІВ
+    # еталона (R-A1-05), тож файл без еталона не проходить фільтр paths вище.
+    results = []
     for i, path in enumerate(paths, 1):
         doc_id = doc_id_from_filename(os.path.basename(path), known_ids)
-        if doc_id not in truth:
-            unmatched.append(os.path.basename(path))
-            continue
         meta = process_file(path, res, cfg)
         schema = next((s for s in res["schemas"] if s["template"] == meta.get("template")), None)
         row = evaluate_record(meta, truth[doc_id], mapping, schema)
@@ -943,8 +942,6 @@ def main(argv=None):
           "замінник мусить нести ознаку, документ без пари -- ні; закриття "
           "старого факту -- запит по всіх документах на боці БД)")
 
-    if unmatched:
-        print(f"\nбез еталона ({len(unmatched)}): {', '.join(unmatched[:5])}")
 
     if args.report:
         os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
