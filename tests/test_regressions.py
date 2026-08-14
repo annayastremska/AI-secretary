@@ -1176,6 +1176,38 @@ def test_rules_document_is_not_identified_as_the_blank_it_describes():
     assert result["reason"].startswith("procedural_document")
 
 
+def test_degraded_ocr_is_not_confused_with_unknown_document():
+    """Збій OCR і "невідомий тип документа" -- РІЗНІ речі, і тепер їх видно.
+
+    Заміряно 13-14.08.2026: у прогоні 16 фото документи 10-16 пішли в
+    `unresolved` з нулем полів, а той самий файл в ОКРЕМОМУ процесі розпізнався
+    (991 символ, 25 блоків, бал ідентифікації 15 при порозі 5). Тобто пакетний
+    прогін деградує після ~дев'яти файлів -- і не подавав жодного сигналу:
+    запис із порожнім розпізнаванням виглядав рівно як запис про документ
+    невідомого типу. На реальній папці це "половину оброблено, половину
+    втрачено", і людина цього не бачить.
+    """
+    from pipeline.config import load_config
+    from pipeline.run import build_resources, process_file
+    cfg = load_config(os.path.join(_PROJECT_ROOT, "config.yaml"))
+    res = build_resources(cfg, force_no_llm=True)
+    res["store"] = None
+    # заглушка замість Surya: імітує саме деградацію -- один крихітний блок
+    res["ocr"] = lambda path: [{"text": "абв", "bbox": (0, 0, 1, 1)}]
+    meta = process_file(
+        os.path.join(_PROJECT_ROOT, "data", "samples", "leave",
+                     "synthetic-2026-05", "png", "LEAVE-001.png"), res, cfg)
+
+    assert meta["status"] == "unresolved"
+    # вихід OCR -- ФАКТ у записі, а не здогадка з порогу
+    assert meta["ocr_blocks"] == 1 and meta["ocr_chars"] == 3
+    # причина прямо називає збій розпізнавання, а не "невідомий тип"
+    assert "збій розпізнавання" in meta["reason"]
+    assert "невідомий тип" in meta["reason"]
+    # і окреме попередження, яке видно у звіті прогону
+    assert any("підозріло мало" in w for w in meta["warnings"]), meta["warnings"]
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):

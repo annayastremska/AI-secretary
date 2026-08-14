@@ -246,6 +246,12 @@ def blank_meta(**overrides) -> dict:
         "document_links": [],
         # Сирий текст полів, значення яких у документі Є, але не
         # зіставилось із довідником (напр. звання поза словником).
+        # Вихід OCR як ФАКТ у кожному записі: скільки блоків і символів
+        # повернуло розпізнавання. Без цього деградацію OCR неможливо
+        # відрізнити від "документ невідомого типу" -- обидва давали
+        # unresolved без жодної різниці (заміряно: 7 з 16 фото, п. 2.18).
+        "ocr_blocks": None,
+        "ocr_chars": None,
         "unresolved_values": {},
         "warnings": [],
     }
@@ -374,6 +380,11 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         return meta
 
     source_kind = ingest_info.get("source_kind")
+    # У base_meta, а не в кінцевому meta: інакше запис про нерозпізнаний текст
+    # (гілка нижче) саме цієї інформації й не мав би -- а він її потребує
+    # найбільше.
+    base_meta["ocr_blocks"] = ingest_info.get("ocr_blocks")
+    base_meta["ocr_chars"] = ingest_info.get("ocr_chars")
 
     # Порожній/нечитабельний скан -- окремий випадок, а не "усі поля відсутні":
     # інакше він виглядав би як звичайний needs_review і губився серед них.
@@ -381,7 +392,12 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         meta = dict(base_meta, status="unresolved", source_kind=source_kind,
                     review_queue="unknown_type", review_reason="unresolved",
                     warnings=list(ingest_warnings),
-                    reason="текст не розпізнано (порожній або нечитабельний документ)")
+                    reason=("OCR не дав тексту: "
+                            f"{ingest_info.get('ocr_blocks')} блоків, "
+                            f"{ingest_info.get('ocr_chars')} символів -- "
+                            "збій розпізнавання, а не невідомий тип документа"
+                            if ingest_info.get("ocr_blocks") is not None
+                            else "текст не розпізнано (порожній або нечитабельний документ)"))
         _persist(meta, text, res)
         return meta
 
