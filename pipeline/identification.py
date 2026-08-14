@@ -188,10 +188,6 @@ TYPE_DISPATCHED_BEFORE_NORMALIZATION = {"category", "number", "date"}
 # docs/architecture/2026-08-14_multirow-tables-and-multiple-subjects.md розд. 5.
 DECLARED_BUT_UNREAD_FIELD_KEYS = {"multiple", "registry"}
 DECLARED_BUT_UNREAD_SCHEMA_KEYS = {"out_of_scope"}
-# Сумісність: назва вживалась як єдиний перелік. Лишаємо об'єднання, щоб
-# зовнішній читач (тест, скрипт) не зламався на перейменуванні.
-DECLARED_BUT_UNREAD_KEYS = (DECLARED_BUT_UNREAD_FIELD_KEYS
-                            | DECLARED_BUT_UNREAD_SCHEMA_KEYS)
 # Що саме станеться зі значенням, якщо ключ лишити оголошеним. Загальне «не
 # читається кодом» не давало автору схеми ЗРОБИТИ з попередження висновок:
 # `registry:` лишається оголошенням назавжди (реєстру як даних немає), а
