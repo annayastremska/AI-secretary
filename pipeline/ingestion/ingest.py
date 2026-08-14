@@ -27,6 +27,21 @@ MIN_PLAUSIBLE_OCR_CHARS = 200
 MIN_TEXT_CHARS_PER_PAGE = 40
 PDF_RENDER_DPI = 200
 
+#: Позначка ПОХОДЖЕННЯ блоку: текстовий шар PDF (`page.get_text("blocks")`).
+#: Потрібна тому, що "блок" у трьох джерел означає РІЗНЕ, і надійність межі
+#: блоку теж різна:
+#:   docx  -- абзац або клітинка, тобто справжня межа поля;
+#:   Surya -- область зображення (межі відновлює blank_form.resegment_by_blank);
+#:   PDF   -- ГРУПА послідовних рядків, яку PyMuPDF склеїла за близькістю.
+#: Останнє -- не абзац у жодному сенсі: один блок може містити кілька полів
+#: бланка підряд (звідси `value_starts_after` і `_value_lines_after_label_note`
+#: в extract.py), а ОДНЕ значення, розбите переносом рядка, може бути
+#: розкладене на два блоки (розд. 5.7, `position_and_workplace` на pdf).
+#: Тому саме на цьому шляху межа блоку НЕ є межею поля, і extract.py має право
+#: добирати хвіст значення через неї -- але тільки тут, щоб docx і фото
+#: лишались недоторканими за побудовою.
+PDF_TEXT_SOURCE = "pdf_text"
+
 
 def extract_docx_blocks(path: str):
     """Абзаци + клітинки таблиць як блоки, у порядку появи в документі.
@@ -234,7 +249,11 @@ def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
                             # сторінки рахують y з нуля (LEAVE-003.pdf,
                             # 2 сторінки). find_block_before_label/
                             # _geometric_candidate фільтрують за цим полем.
-                            page_blocks.append({"text": text, "bbox": (b[0], b[1], b[2], b[3]), "page": i})
+                            # `source` -- див. PDF_TEXT_SOURCE: блок цього
+                            # походження не є абзацом, тож його межа не є
+                            # межею поля.
+                            page_blocks.append({"text": text, "bbox": (b[0], b[1], b[2], b[3]),
+                                                "page": i, "source": PDF_TEXT_SOURCE})
                     blocks.extend(sort_blocks_by_geometry(page_blocks))
                     continue
 

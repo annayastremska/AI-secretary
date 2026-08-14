@@ -31,6 +31,11 @@ from pipeline.extraction.schema_grammar import build_json_schema_for_fields, chu
 from pipeline.extraction.blank_form import (
     is_printed_form_text, label_order_index, printed_after_label, printed_lines,
     printed_order, resegment_by_blank)
+# Імпортом, а не літералом "pdf_text": позначка походження блоку ставиться в
+# інжесті й читається тут, тож рядок мусить мати ОДНЕ джерело -- інакше
+# перейменування тихо вимкнуло б добір хвоста значення на pdf (той самий
+# висновок, що для UNVERIFIED_METHOD у build_record.py).
+from pipeline.ingestion.ingest import PDF_TEXT_SOURCE
 
 
 def majority_vote(values):
@@ -117,10 +122,15 @@ def group_blocks_into_lines(blocks):
         text = _raw_block_text(block)
         bbox = block.get("bbox") if isinstance(block, dict) else None
         page = block.get("page") if isinstance(block, dict) else None
+        # source -- походження блоку (ingest.PDF_TEXT_SOURCE або None). Несеться
+        # далі, бо від нього залежить, чи межа блоку є межею поля:
+        # див. _extend_across_pdf_wrap.
+        source = block.get("source") if isinstance(block, dict) else None
         result.append({
             "lines": [line.strip() for line in text.split("\n") if line.strip()],
             "bbox": bbox,
             "page": page,
+            "source": source,
         })
     return result
 
@@ -398,6 +408,26 @@ def compile_value_boundaries(field: dict):
             for p in (field.get("value_starts_after") or [])]
 
 
+def _is_field_boundary_line(line, extra_boundaries=(), printed=()) -> bool:
+    """Рядок ЗАКРИВАЄ попереднє поле бланка, тобто значення нашого поля
+    починається після нього.
+
+    Три межі, від найслабшої до найсильнішої: дужкова примітка бланка,
+    оголошена схемою межа (`value_starts_after`), дослівний друкований рядок
+    порожнього бланка. Розклад кожної -- у докстрінгах
+    `_is_printed_label_note`, `compile_value_boundaries` і
+    `_value_lines_after_label_note`.
+
+    Виділено в окрему функцію тому, що те саме питання ставиться в ДВА боки:
+    `_value_lines_after_label_note` шукає межу серед рядків ОДНОГО блоку,
+    `_extend_across_pdf_wrap` -- ідучи назад ЧЕРЕЗ межі блоків. Дві копії цієї
+    умови розійшлись би, і тоді "де починається значення" залежало б від того,
+    чи PyMuPDF поклала його початок у той самий блок."""
+    return bool(_is_printed_label_note(line)
+                or is_printed_form_text(line, printed)
+                or any(p.search(line) for p in extra_boundaries))
+
+
 def _value_lines_after_label_note(lines, extra_boundaries=(), printed=()):
     """Значення починається ПІСЛЯ останньої друкованої примітки-лейбла (або
     оголошеної схемою межі, див. compile_value_boundaries) серед рядків-
@@ -437,9 +467,7 @@ def _value_lines_after_label_note(lines, extra_boundaries=(), printed=()):
     межа перед ним."""
     last_note = None
     for k, line in enumerate(lines):
-        if (_is_printed_label_note(line)
-                or is_printed_form_text(line, printed)
-                or any(p.search(line) for p in extra_boundaries)):
+        if _is_field_boundary_line(line, extra_boundaries, printed):
             last_note = k
     if last_note is None or last_note + 1 >= len(lines):
         return lines
@@ -456,12 +484,19 @@ def _lines_backwards(blocks, i, j):
     """Рядки документа ПЕРЕД blocks[i]["lines"][j], у зворотному порядку.
     Не виходить за межі СТОРІНКИ: на іншій сторінці "попередній рядок" --
     це низ попередньої сторінки, тобто підписи й печатки, а не продовження
-    значення (та сама причина, що й у _geometric_candidate)."""
+    значення (та сама причина, що й у _geometric_candidate).
+
+    Так само не виходить за межі одного ПОХОДЖЕННЯ блоків (`source`): у PDF,
+    де частина сторінок має текстовий шар, а частина -- скан через OCR,
+    "попередній рядок" з іншого джерела прийшов іншим механізмом з іншими
+    межами. На docx і на чистому OCR-прогоні `source` однаковий у всіх
+    блоків, тому ця умова там інертна."""
     page = blocks[i].get("page")
+    source = blocks[i].get("source")
     for k in range(j - 1, -1, -1):
         yield blocks[i]["lines"][k]
     for bi in range(i - 1, -1, -1):
-        if blocks[bi].get("page") != page:
+        if blocks[bi].get("page") != page or blocks[bi].get("source") != source:
             return
         for line in reversed(blocks[bi]["lines"]):
             yield line
@@ -538,6 +573,77 @@ def _extend_across_block_boundary(blocks, label_block_i, candidate):
             # УСЕРЕДИНІ самого prefix, де перенос може бути змістовним.
             return "\n".join(prefix) + " " + candidate
     return candidate
+
+
+#: Скільки рядків максимум добирати назад через межу блоку PDF. Обмеження, а
+#: не істина про бланк: голова значення, від якої PyMuPDF відрізала хвіст,
+#: це один-два рядки, тому якщо межа поля не знайшлась за три -- ми, найпевніше,
+#: вже не в тому місці документа, і мовчки набрати півсторінки гірше, ніж
+#: лишити кандидата як є.
+MAX_PDF_WRAP_LOOKBACK_LINES = 3
+
+
+def _extend_across_pdf_wrap(blocks, src_i, start_j, value_lines,
+                            extra_boundaries=(), printed=()):
+    """Добирає ПОЧАТОК значення, який PyMuPDF відрізала межею блоку.
+
+    Причина (розд. 5.7, заміряно 14.08.2026 на deployment/pdf). Блок
+    текстового шару PDF -- це група послідовних рядків, а не абзац
+    (ingest.PDF_TEXT_SOURCE), тому один абзац бланка приходить розкладеним на
+    два блоки рівно на переносі рядка:
+
+        [блок 3] ... '(військове звання, прізвище ім’я по батькові)'
+                     'навідник, 3-тя механізована рота, військова'   <- початок
+        [блок 4] 'частина А0000'                                     <- хвіст
+        [блок 5] '(посада, місце роботи)' ...                        <- лейбл
+
+    "Попередній блок" перед лейблом -- це блок 4, тобто САМ ХВОСТ значення, і
+    поле виходило `частина А0000` з провенансом `matched`: тихо обрізане
+    значення з найвищою довірою. Заміряно 11 з 14 документів deployment/pdf.
+
+    Наявні механізми тут не працюють за побудовою: `_extend_across_block_boundary`
+    чекає незакритої ")" (дужки тут збалансовані), `_extend_to_anchor` --
+    оголошеного схемою `strip_prefix` (у цього поля його немає), і бракує не
+    префікса, а СЕРЕДИНИ значення.
+
+    Тому межа шукається тим самим правилом, яким вона й так шукається
+    ВСЕРЕДИНІ блоку (`_is_field_boundary_line`), лише йдучи назад ЧЕРЕЗ межі
+    блоків: значення поля -- це все між межею попереднього поля й лейблом.
+    Правило бланка не змінюється -- знімається лише неправдива межа.
+
+    Обмежене `source == PDF_TEXT_SOURCE` НАВМИСНО, і це головна гарантія:
+    на docx межа блоку -- це абзац або клітинка, тобто справжня межа поля, а
+    на фото межі відновлює `blank_form.resegment_by_blank` (і навмисно
+    занулює `bbox`/`source`). Обидва шляхи цієї функції не бачать, тому їхні
+    цифри не можуть змінитися.
+
+    Не знайшли межі в межах ліміту або добір переріс очікуваний розмір поля --
+    повертаємо `value_lines` БЕЗ ЗМІН (безпечний відкат, та сама дисципліна,
+    що в `_extend_to_anchor` і `_extend_across_block_boundary`).
+
+    Шматки склеюються ПРОБІЛОМ, не "\\n", і з тієї самої причини, що вже
+    записана в `_extend_across_block_boundary`: тут перенос рядка -- місце,
+    де PyMuPDF розірвала ОДНЕ значення, а не межа двох різних. Практичний
+    наслідок: значення на pdf виходить побайтово тим самим, що на docx, тобто
+    в `facts.value_code` для БД не з'являється двох різних написань того самого
+    факту залежно від формату файлу.
+    """
+    if blocks[src_i].get("source") != PDF_TEXT_SOURCE:
+        return value_lines
+    prefix = []
+    for n, line in enumerate(_lines_backwards(blocks, src_i, start_j)):
+        if (n >= MAX_PDF_WRAP_LOOKBACK_LINES
+                or _is_field_boundary_line(line, extra_boundaries, printed)):
+            break
+        if len(" ".join([line] + prefix + value_lines)) > OVERSIZED_CANDIDATE_CHARS:
+            break
+        prefix.insert(0, line)
+    if not prefix:
+        return value_lines
+    # Перший рядок значення -- продовження останнього дібраного шматка, тому
+    # вони стають ОДНИМ рядком. Решта рядків значення лишається як була:
+    # їхні межі цією правкою не переглядаються.
+    return [" ".join(prefix + value_lines[:1])] + list(value_lines[1:])
 
 
 #: Скільки переставлених друкованих блоків поспіль дозволено пропустити.
@@ -715,9 +821,8 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
                 continue
 
         value_lines = _value_lines_after_label_note(src_lines, boundaries, printed)
-        extended = _extend_to_anchor(blocks, src_i,
-                                     len(src_lines) - len(value_lines),
-                                     value_lines, anchor)
+        start_j = len(src_lines) - len(value_lines)
+        extended = _extend_to_anchor(blocks, src_i, start_j, value_lines, anchor)
         if extended is not value_lines:
             # Якір уже встановив ліву межу значення. Добирати ще й
             # _extend_across_block_boundary НЕ МОЖНА: обидва механізми
@@ -734,7 +839,12 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
             candidates.append(_extend_across_block_boundary(
                 blocks, src_i, "\n".join(value_lines)))
         else:
-            candidates.append("\n".join(value_lines))
+            # Лейбл -- перший рядок свого блоку, тобто кандидат це ВЕСЬ
+            # попередній блок. Саме тут межа блоку могла виявитись не межею
+            # поля, а місцем переносу рядка -- див. _extend_across_pdf_wrap
+            # (працює лише на текстовому шарі PDF).
+            candidates.append("\n".join(_extend_across_pdf_wrap(
+                blocks, src_i, start_j, value_lines, boundaries, printed)))
 
     if not candidates:
         return None, "no_label"
