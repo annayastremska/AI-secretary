@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: chat-stand-postgres
+    environment:
+      POSTGRES_DB: chat_stand
+      POSTGRES_USER: chat_stand
+      POSTGRES_PASSWORD: chat_stand_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
