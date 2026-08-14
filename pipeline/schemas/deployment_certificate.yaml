@@ -4,6 +4,10 @@ template: deployment_certificate
 domain: deployment
 fact_type: deployment_location   # -> dictionaries/fact_type_registry.yaml (validity_model: ranged)
 
+# ПОРОЖНІЙ бланк цієї ж форми, шлях від кореня репозиторію. Див. коментар у
+# leave_ticket.yaml і pipeline/extraction/blank_form.py.
+blank_template: data/eval/samples/deployment/посвідчення_відрядження.docx
+
 # ВИД СУБ'ЄКТА цього бланка. Оголошення схеми, старше за мапінг
 # «домен -> вид» (pipeline/subject_kind.py). person: посвідчення про
 # відрядження -- запис про одну конкретну особу, яку відряджають.

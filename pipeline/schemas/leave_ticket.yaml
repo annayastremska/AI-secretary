@@ -6,6 +6,13 @@ template: leave_ticket
 domain: leave
 fact_type: leave   # -> dictionaries/fact_type_registry.yaml (validity_model: ranged)
 
+# ПОРОЖНІЙ бланк цієї ж форми, шлях від кореня репозиторію. Кандидат, який
+# ЦІЛКОМ складається з рядків цього файлу, значенням не приймається
+# (pipeline/extraction/blank_form.py) -- закриває weak-spots 5.9 і 5.8.
+# Перелік друкованих фраз навмисно НЕ ведеться руками: він похідний від
+# бланка й оновлюється разом із ним.
+blank_template: data/eval/samples/leave/відпускний_шаблон.docx
+
 # ВИД СУБ'ЄКТА цього бланка. Це ОГОЛОШЕННЯ схеми, а не висновок з тексту, і
 # саме тому воно старше за мапінг «домен -> вид» (pipeline/subject_kind.py).
 # person: відпускний квиток -- запис про одну конкретну особу.

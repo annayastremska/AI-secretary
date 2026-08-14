@@ -28,6 +28,7 @@ from pipeline.normalization.normalize import (
     lemmatize_phrase, normalize_field, field_placeholder_tokens,
     fix_numeric_homoglyphs, number_from_words, number_word_value)
 from pipeline.extraction.schema_grammar import build_json_schema_for_fields, chunk_fields
+from pipeline.extraction.blank_form import is_printed_form_text, printed_lines
 
 
 def majority_vote(values):
@@ -741,12 +742,14 @@ def schema_label_heads(schema: dict) -> tuple:
     return tuple(sorted(heads))
 
 
-def validate_block_value(field: dict, raw, label_heads=()):
+def validate_block_value(field: dict, raw, label_heads=(), printed=()):
     """(значення, причина) для значення, яке find_block_before_label щойно
     оголосила `matched`.
 
     Причини відхилення (значення -> None, поле -> global_gaps):
       blank_value          -- лишився placeholder/порожньо після зрізання;
+      printed_form_text    -- кандидат ЦІЛКОМ складається з друкованих рядків
+                              порожнього бланка (blank_form.py);
       printed_label_in_value -- у кандидаті стоїть лейбл/заголовок цього ж
                                 бланка, тобто взято не значення, а верстку;
       type_mismatch        -- поле оголошене date/number, а з кандидата не
@@ -758,6 +761,14 @@ def validate_block_value(field: dict, raw, label_heads=()):
     if not text.strip() or is_placeholder(text, field_placeholder_tokens(field)):
         return None, "blank_value"
 
+    # ПЕРЕД перевіркою типу, і це не косметика: незаповнений слот дати
+    # ("“_____” ______________20___ р.") не є placeholder-ом (у ньому лишились
+    # друковані "20" і "р."), тож без цієї гілки він відхилявся б як
+    # `type_mismatch` -- причина, що вказує на не ту ваду й веде поле в
+    # LLM-фолбек замість того, щоб визнати бланк порожнім.
+    if is_printed_form_text(text, printed):
+        return None, "printed_form_text"
+
     low = text.lower()
     for head in label_heads:
         if phrase_in_text(low, head):
@@ -768,6 +779,46 @@ def validate_block_value(field: dict, raw, label_heads=()):
         if value is None and not confirmed_empty:
             return None, "type_mismatch"
 
+    return text, "matched"
+
+
+def validate_regex_value(field: dict, raw, printed=()):
+    """(значення, причина) для значення, яке щойно віддав схемний regex.
+
+    Окрема від `validate_block_value`, бо шлях інший і перевірки потрібні НЕ
+    всі: regex уже задав форму значення, тому ні `label_heads`, ні перевірка
+    типу тут не доречні -- вони або тавтологічні, або відкидали б те, що сам
+    патерн визнав правильним.
+
+    Лишаються рівно дві, і обидві -- про порожній бланк:
+      blank_value       -- патерн зматчив сам слот ("___"). Значення далі
+                           гасила нормалізація, тобто в БД воно не йшло, --
+                           але провенанс БРЕХАВ, що поле прочитане;
+      printed_form_text -- патерн переліз через перенос рядка й захопив
+                           друкований рядок форми. Лікується результат, а не
+                           патерн: перехід через `\\n` потрібен, бо в
+                           заповнених документах значення стоїть наступним
+                           рядком.
+    """
+    if raw is None:
+        return None, "no_value"
+    # НЕ рядок -- значить regex з іменованими групами віддав {day,month,year}.
+    # Такий результат проходить БЕЗ змін: str() перетворив би словник на його
+    # repr ("{'day': '10', ...}"), і нормалізація дати отримала б текст
+    # замість частин. Заміряно: саме це обвалило всі три поля-дати
+    # (`дата_видачі` 0/16) під час першої версії цієї функції 14.08.2026.
+    # Перевірки нижче суто рядкові й до словника не застосовні: порожнечу
+    # окремих частин усе одно ловить normalize_date.
+    if not isinstance(raw, str):
+        return raw, "matched"
+    text = raw
+    # `not_issued_sentinel` мусить пройти: "документ прямо каже, що ВПД не
+    # видавались" (підтверджено-порожнє) -- це не те саме, що "не вдалося
+    # прочитати" (прогалина), і різниця має дожити до нормалізації.
+    if not text.strip() or is_placeholder(text, field_placeholder_tokens(field)):
+        return None, "blank_value"
+    if is_printed_form_text(text, printed):
+        return None, "printed_form_text"
     return text, "matched"
 
 
@@ -1128,14 +1179,21 @@ def attested_numbers(text: str) -> set:
     return found
 
 
-def ground_llm_value(field: dict, value, document_text: str):
+def ground_llm_value(field: dict, value, document_text: str, printed=()):
     """(значення, причина) для значення, отриманого від моделі.
 
     None + `ungrounded_llm_value` означає "в документі цього немає" -- поле
     лишається прогалиною, і це видно, замість тихого правдоподібного числа.
     Значення не губиться: причина йде в provenance, а сире значення --
     в unresolved_values (build_record).
+
+    `printed` перевіряється ОКРЕМО й ПЕРШИМ, бо заземлення тут безсиле за
+    побудовою: друкований текст У ДОКУМЕНТІ Є, тобто підрядковий пошук його
+    підтверджує. На порожньому бланку посвідчення модель саме так і віддала
+    `document_number` = "Додаток 28" -- заміряно 14.08.2026.
     """
+    if value is not None and is_printed_form_text(value, printed):
+        return None, "printed_form_text"
     if value is None or field.get("type") not in GROUNDED_TYPES:
         return value, None
     if field.get("type") == "number":
@@ -1170,6 +1228,10 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     flat_blocks = flatten_blocks(ocr_blocks)
     denylist = {p.strip().lower() for p in (title_phrases or [])}
     label_heads = schema_label_heads(schema)
+    # Друковані рядки ПОРОЖНЬОГО бланка цієї форми. Порожній frozenset, якщо
+    # схема не оголосила `blank_template:` -- тоді всі перевірки нижче
+    # інертні, тобто новий бланк без шаблону поводиться точно як раніше.
+    printed = printed_lines(schema)
     fields_by_name = {f["name"]: f for f in schema["fields"]}
     results = {}
     localized_gaps, global_gaps, hints = [], [], {}
@@ -1238,7 +1300,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 # шанс через LLM, що й поле, для якого лейбл не знайшовся --
                 # і з тієї самої причини не отримує підказки (відхилений
                 # кандидат -- це якраз НЕПРАВИЛЬНИЙ текст).
-                value, value_reason = validate_block_value(field, raw, label_heads)
+                value, value_reason = validate_block_value(
+                    field, raw, label_heads, printed)
                 results[name] = (value, value_reason)
                 if value is None:
                     global_gaps.append(name)
@@ -1248,13 +1311,21 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
             if raw and field.get("strip_prefix"):
                 raw = strip_literal_prefix(raw, field["strip_prefix"])
             if raw:
-                results[name] = (raw, "matched")
+                # Той самий фільтр, що й на regex-шляху: `starts_with` на
+                # порожньому бланку збігається з друкованим заголовком форми
+                # так само легко, як на заповненому -- зі значенням.
+                value, reason = validate_regex_value(field, raw, printed)
+                results[name] = (value, reason)
+                if value is None:
+                    global_gaps.append(name)
             else:
                 results[name] = (None, "no_value")
                 global_gaps.append(name)
 
         elif mode == "regex":
             value, reason = extract_field_regex(field, ocr_text)
+            if value is not None:
+                value, reason = validate_regex_value(field, value, printed)
             results[name] = (value, reason)
             if value is None and field.get("llm_fallback") is not False:
                 # Regex -- найкрихкіший режим (паттерн пишеться під конкретну
@@ -1303,7 +1374,7 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
             # правильне значення з іншого місця документа хибно вважалось би
             # вигаданим.
             grounded, ungrounded_reason = ground_llm_value(
-                fields_by_name.get(name, {}), voted, ocr_text)
+                fields_by_name.get(name, {}), voted, ocr_text, printed)
             if grounded is None:
                 results[name] = (None, ungrounded_reason)
                 continue

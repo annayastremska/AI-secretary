@@ -55,10 +55,25 @@ def resolve_placeholder_tokens(explicit=None, excluded=None) -> frozenset:
 def field_placeholder_tokens(field_def) -> frozenset:
     """Перелік для конкретного поля -- те, що в нього поклав
     identification.load_schemas (або сама схема, якщо поле оголосило ключі
-    напряму)."""
+    напряму).
+
+    Власний `not_issued_sentinel` поля виключається АВТОМАТИЧНО. Інакше автор
+    схеми мусив би написати ту саму фразу двічі (`not_issued_sentinel:` і
+    `placeholder_tokens_except:`), а два переліки того самого рано чи пізно
+    розійдуться. Семантично це тавтологія: фраза, оголошена як "документ
+    прямо каже, що цього немає", за визначенням НЕ є заповнювачем для цього
+    поля. Для `normalize_null_if_sentinel` це нічого не змінює -- вона й так
+    перевіряє сентинел ПЕРШИМ, незалежно від переліку (див. її докстрінг),
+    -- зате на етапі екстракції сентинел тепер доживає до нормалізації, а не
+    гаситься як `blank_value`.
+    """
     field_def = field_def or {}
+    excluded = list(field_def.get(PLACEHOLDER_TOKENS_EXCEPT_KEY) or [])
+    sentinel = field_def.get("not_issued_sentinel")
+    if sentinel:
+        excluded.append(sentinel)
     return resolve_placeholder_tokens(field_def.get(PLACEHOLDER_TOKENS_KEY),
-                                      field_def.get(PLACEHOLDER_TOKENS_EXCEPT_KEY))
+                                      excluded)
 
 # Незаповнене поле бланка часто лишається як ряд підкреслень/рисок/лапок
 # без жодного символу тексту (напр. "____________" чи "«____» ____ 20___ р.",
