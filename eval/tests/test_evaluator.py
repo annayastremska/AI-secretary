@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Тести на сам ВИМІРЮВАЛЬНИЙ ПРИЛАД (scripts/evaluate.py).
+"""Тести на сам ВИМІРЮВАЛЬНИЙ ПРИЛАД (eval/evaluate.py).
 
 Окремий файл, а не tests/test_regressions.py: там регресії ПАЙПЛАЙНА, тут --
 регресії ОЦІНЮВАЧА. Помилка оцінювача дорожча за помилку пайплайна: вона
@@ -189,7 +189,7 @@ def test_every_mapped_field_exists_in_its_schema():
     відпустки. Тест ловить це без прогону документів."""
     schemas = []
     for name in ("leave_ticket", "deployment_certificate"):
-        with io.open(os.path.join(_PROJECT_ROOT, "schemas", name + ".yaml"),
+        with io.open(os.path.join(_PROJECT_ROOT, "pipeline", "schemas", name + ".yaml"),
                      encoding="utf-8") as f:
             schemas.append(yaml.safe_load(f))
     truth = ev.load_ground_truth(os.path.join(
@@ -259,7 +259,7 @@ def test_rank_dictionary_has_no_alias_shared_by_two_codes():
     """Аліаси приймаються ЛИШЕ тому, що кожен належить одному кодові. Якщо
     довідник колись дасть один аліас двом званням, порівняння стане щедрим
     непомітно."""
-    path = os.path.join(_PROJECT_ROOT, "dictionaries", "military_rank.yaml")
+    path = os.path.join(_PROJECT_ROOT, "pipeline", "dictionaries", "military_rank.yaml")
     if not os.path.exists(path):
         return
     with io.open(path, encoding="utf-8") as f:

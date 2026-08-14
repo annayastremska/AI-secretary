@@ -51,12 +51,12 @@ _SCHEMAS = None
 
 
 def _schema_by_template(template):
-    """Справжня схема з schemas/ -- тести на витяг зв'язків і на regex-и
+    """Справжня схема з pipeline/schemas/ -- тести на витяг зв'язків і на regex-и
     підстави мусять читати ТОЙ САМИЙ YAML, що й пайплайн, інакше вони
     перевіряють свою копію правил, а не правила."""
     global _SCHEMAS
     if _SCHEMAS is None:
-        _SCHEMAS = load_schemas(os.path.join(_PROJECT_ROOT, "schemas"))
+        _SCHEMAS = load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas"))
     return next(s for s in _SCHEMAS if s["template"] == template)
 
 RANK_LOOKUP = {"рядовий": ("soldier", "Солдат"), "підполковник": ("lt_colonel", "Підполковник")}
@@ -176,7 +176,7 @@ def test_value_split_across_blocks_by_wrapped_paren():
 
 def test_strip_prefix_knows_gender():
     """`strip_prefix` зі схеми -- ОДНА форма, а бланк друкує форму за статтю.
-    Було: schemas/leave_ticket.yaml:84 оголошує "звільнений", LEAVE-001 (жінка)
+    Було: pipeline/schemas/leave_ticket.yaml:84 оголошує "звільнений", LEAVE-001 (жінка)
     має надруковане "звільнена", і в значенні ОСНОВНОГО факту лишався рід:
     "звільнена щорічна основна відпустка за 2026 рік". Провенанс -- `matched`.
 
@@ -200,7 +200,7 @@ def test_strip_prefix_knows_gender():
     assert strip_literal_prefix("звільнений\nвідпустка для лікування",
                                 "звільнений") == "відпустка для лікування"
     # Двослівний префікс за статтю: "відрядженому до" / "відрядженій до"
-    # (schemas/deployment_certificate.yaml, destination_points).
+    # (pipeline/schemas/deployment_certificate.yaml, destination_points).
     assert strip_literal_prefix("відрядженій до\nм. Вінниця",
                                 "відрядженому до") == "м. Вінниця"
     # Слово, що НЕ є формою префікса, не зрізається.
@@ -489,7 +489,7 @@ def test_llm_not_asked_when_no_anchor_matched():
 def test_source_instruction_is_not_mistaken_for_a_blank():
     """Документ, що МІСТИТЬ бланки, не є жодним з них.
 
-    Живе репро від команди БД: data/samples/normative/інструкція_діловодство.docx
+    Живе репро від команди БД: eval/synthetic/normative/інструкція_діловодство.docx
     (402898 символів) чесно набирає бал 9 за deployment_certificate і 9 за
     leave_ticket -- бо містить і Додаток 28, і Додаток 30 разом із їхніми
     заголовками. Раніше нічия віддавалась LLM, і та впевнено називала це
@@ -540,8 +540,8 @@ def test_schema_validation_catches_yaml_mistakes():
     # робочі схеми проєкту помилок не мають
     from pipeline.identification import load_schemas
     from pipeline.run import load_fact_types
-    fact_types = load_fact_types(os.path.join(_PROJECT_ROOT, "dictionaries"))
-    for schema in load_schemas(os.path.join(_PROJECT_ROOT, "schemas")):
+    fact_types = load_fact_types(os.path.join(_PROJECT_ROOT, "pipeline", "dictionaries"))
+    for schema in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas")):
         errors = [m for sev, m in validate_schema(schema, fact_types) if sev == "error"]
         assert errors == [], errors
 
@@ -845,7 +845,7 @@ def test_basis_order_regex_matches_real_blank():
     """`basis_order_date`/`basis_order_number` вимагали літерально "наказ від",
     а бланк друкує "наказ КОМАНДИРА ВІЙСЬКОВОЇ ЧАСТИНИ А0000 від ...". Обидва
     поля мають `dimension:`, тобто йдуть у БД окремими фактами, і обидва давали
-    0/14 -- невидимо, бо їх немає в data/eval/field-mapping.yaml.
+    0/14 -- невидимо, бо їх немає в eval/field-mapping.yaml.
 
     Рядки -- справжні `надруковано.ORDER_BASIS` (TRIP-001 і TRIP-012 з
     гомоглифами)."""
@@ -887,7 +887,7 @@ def test_placeholder_tokens_are_configurable_from_schema():
 def test_empty_blank_is_still_empty_after_token_change():
     """Порожній бланк відпускного мусить лишатись порожнім: саме на ньому
     перелік токенів працює правильно. Рядки -- справжні з
-    data/samples/leave/відпускний_шаблон.docx і з LEAVE-011 (вада
+    eval/synthetic/leave/відпускний_шаблон.docx і з LEAVE-011 (вада
     empty_fields)."""
     leave = _schema_by_template("leave_ticket")
     by_name = {f["name"]: f for f in leave["fields"]}
@@ -914,7 +914,7 @@ def test_empty_blank_is_still_empty_after_token_change():
 def test_procedural_domain_wins_over_topical_score():
     """Документ ПРАВИЛ не класифікується як документ про тему, яку він описує.
 
-    Заміряно на data/samples/normative/інструкція_діловодство.docx (402898
+    Заміряно на eval/synthetic/normative/інструкція_діловодство.docx (402898
     символів): бали leave 8, equipment 8, staffing 9, deployment 7 --
     інструкція МІСТИТЬ усі бланки й згадує всі теми, тому тематичний
     переможець визначався шумом (до появи домену normative вона була
@@ -993,7 +993,7 @@ def test_every_domain_and_schema_declares_subject_kind():
     domains = load_domain_keyphrases(
         os.path.join(_PROJECT_ROOT, "dictionaries", "domain_keyphrases.yaml"))
     assert domain_subject_kind_problems(domains) == []
-    for schema in load_schemas(os.path.join(_PROJECT_ROOT, "schemas")):
+    for schema in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas")):
         assert schema.get("subject_kind") in DECLARABLE_SUBJECT_KINDS, schema["template"]
 
 

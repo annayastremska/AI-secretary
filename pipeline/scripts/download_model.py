@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Завантаження ваг MamayLM (GGUF) у models/ -- те, чого pip зробити не може.
 
-    python scripts/download_model.py            # 12B, ~6.8 ГБ (за замовчуванням)
-    python scripts/download_model.py --size 4b  # 4B, ~2.5 ГБ (якщо машина не тягне 12B)
+    python pipeline/scripts/download_model.py            # 12B, ~6.8 ГБ (за замовчуванням)
+    python pipeline/scripts/download_model.py --size 4b  # 4B, ~2.5 ГБ (якщо машина не тягне 12B)
 
 Файл кладеться під ФІКСОВАНОЮ локальною назвою (models/mamaylm-<size>-q4_k_m.gguf),
 на яку вже вказує config.example.yaml, тому після завантаження конфіг правити
