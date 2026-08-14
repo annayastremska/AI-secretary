@@ -234,6 +234,35 @@ def test_number_bounds_on_wrong_type_are_loud():
     assert any(sev == "error" and "max_value" in msg for sev, msg in problems), problems
 
 
+# --- R-A1-13: archived_to доживає до збереженого запису ----------------------
+
+def test_archived_to_reaches_the_stored_record(tmp_path):
+    """archived_to з'являвся ПІСЛЯ _persist і читався лише консоллю --
+    збережений .md не знав, куди переїхав вхідний файл."""
+    import shutil
+    import pipeline.run as run_mod
+    from pipeline.config import load_config
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    shutil.copy(_LEAVE_DOCX, inbox / "LEAVE-001.docx")
+    cfg = load_config(os.path.join(_PROJECT_ROOT, "config.yaml"))
+    cfg["paths"] = dict(cfg["paths"], input_dir=str(inbox))
+    cfg["storage"] = dict(cfg["storage"], local_root=str(tmp_path / "output"))
+    cfg["intake"] = dict(cfg["intake"], archive=True,
+                         processed_dir=str(tmp_path / "processed"),
+                         failed_dir=str(tmp_path / "failed"))
+    res = run_mod.build_resources(cfg, force_no_llm=True)
+    results, _ = run_mod.process_target(str(inbox), res, cfg)
+    meta = results[0]
+    assert meta.get("archived_to")
+    stored = (tmp_path / "output" / meta["storage_key"].replace("/", os.sep)) \
+        .read_text(encoding="utf-8")
+    assert "archived_to" in stored, "збережений запис мусить знати архівний шлях"
+    # розпізнаний текст при перезаписі не загубився
+    assert "Розпізнаний текст" in stored and "ЛЕМЕШКО" in stored
+
+
 # --- R-A1-05 + R-A2-09: мапа «тип -> template» має одне джерело --------------
 
 def test_doc_types_map_lives_in_mapping_not_in_code():

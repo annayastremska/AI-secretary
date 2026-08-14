@@ -693,6 +693,29 @@ def _persist(meta: dict, text: str, res: dict) -> None:
         store.retire(previous_key)
 
 
+def _update_persisted_meta(meta: dict, res: dict) -> None:
+    """Перезаписує ВЖЕ збережений запис оновленими метаданими (R-A1-13:
+    archived_to з'являється в process_target ПІСЛЯ _persist, тому в .md він
+    не потрапляв жодним шляхом -- збережений запис не знав, куди переїхав
+    вхідний файл). Рядок індексу не дописується: він уже є, ключ той самий."""
+    store = res.get("store")
+    key = meta.get("storage_key")
+    if store is None or not key:
+        return
+    path = os.path.join(store.root, key.replace("/", os.sep))
+    marker = "---\n\n## Розпізнаний текст\n\n"
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        text = content.split(marker, 1)[1] if marker in content else ""
+        if text.endswith("\n"):
+            text = text[:-1]
+        store.save(key, _to_markdown(meta, text))
+    except OSError as exc:
+        meta.setdefault("warnings", []).append(
+            f"не вдалося оновити збережений запис (archived_to): {exc}")
+
+
 def scan_target(target: str):
     """Повертає (files, skipped). skipped -- те, що НЕ буде оброблено, і про
     що треба сказати вголос: раніше і підпапки, і файли невідомого типу
@@ -807,6 +830,8 @@ def process_target(target: str, res: dict, cfg: dict, force_template=None,
                 moved_to = archive_input_file(path, meta, cfg)
                 if moved_to:
                     meta["archived_to"] = os.path.relpath(moved_to, cfg["project_root"])
+                    # Ключ мусить дожити й до збереженого .md (R-A1-13).
+                    _update_persisted_meta(meta, res)
             except OSError as exc:
                 meta.setdefault("warnings", []).append(
                     f"не вдалося перенести файл з папки-приймача: {exc}")
