@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Стаття, яку прислав Андрій — що з неї беремо</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --fg:#1c1b19; --muted:#6b6660; --line:#e2ded7;
+    --card:#ffffff; --accent:#8a5a2b; --accent-soft:#f4ece2;
+    --ok:#2f6b46; --ok-bg:#e7f2ea; --warn:#8a6410; --warn-bg:#f8f0dc; --bad:#8f3a34; --bad-bg:#f8e8e6;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#16150f; --fg:#ece7de; --muted:#9a938a; --line:#2f2c26;
+      --card:#1e1c16; --accent:#d09a5e; --accent-soft:#2a241c;
+      --ok:#7fc09a; --ok-bg:#1c2b22; --warn:#dab765; --warn-bg:#2c2617; --bad:#e0938c; --bad-bg:#2e1e1c;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding:56px 24px 100px}
+  h1{font-size:32px; line-height:1.2; margin:0 0 8px; letter-spacing:-.01em}
+  h2{font-size:23px; margin:56px 0 4px; letter-spacing:-.01em}
+  h3{font-size:18px; margin:32px 0 6px}
+  .sub{color:var(--muted); margin:0 0 36px; font-size:15px}
+  .lede{font-size:19px; color:var(--fg)}
+  p{margin:12px 0}
+  .rule{height:1px; background:var(--line); border:0; margin:40px 0}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin:20px 0}
+  .card h3{margin-top:0}
+  .quiet{color:var(--muted); font-size:15px}
+  .fig{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin:24px 0; overflow-x:auto}
+  .fig svg{display:block; margin:0 auto; max-width:100%; height:auto}
+  .figcap{color:var(--muted); font-size:14px; margin:12px 4px 0; text-align:center}
+  table{border-collapse:collapse; width:100%; font-size:15px; margin:18px 0}
+  th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600}
+  .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  .pill{display:inline-block; padding:2px 9px; border-radius:99px; font-size:13px; font-weight:600; white-space:nowrap}
+  .p-ok{background:var(--ok-bg); color:var(--ok)}
+  .p-warn{background:var(--warn-bg); color:var(--warn)}
+  .p-bad{background:var(--bad-bg); color:var(--bad)}
+  code{font-family:var(--mono); font-size:14px; background:var(--accent-soft); padding:1px 5px; border-radius:4px}
+  .verdict{border-left:3px solid var(--accent); padding:4px 0 4px 18px; margin:22px 0}
+  .verdict strong{color:var(--accent)}
+  ol,ul{padding-left:22px} li{margin:7px 0}
+  .tldr{background:var(--card); border:1px solid var(--accent); border-radius:12px; padding:18px 22px; margin:8px 0 32px}
+  .tldr h3{margin:0 0 10px; font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--accent)}
+  .tldr ul{margin:0; padding-left:20px}
+  .tldr li{margin:9px 0}
+  .tldr .ref{color:var(--muted); font-size:14px; white-space:nowrap}
+  .ask{background:var(--accent-soft); border-radius:10px; padding:14px 18px; margin:14px 0}
+  .ask .who{font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--accent); font-weight:700; display:block; margin-bottom:4px}
+  svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Стаття, яку прислав Андрій</h1>
+<p class="sub">Що з неї беремо, і що вийшло по дорозі. Денис · 11.08.2026</p>
+
+<div class="tldr">
+<h3>Коротко, за 30 секунд</h3>
+<ul>
+  <li>Статтю цілком не переносимо — беремо з неї чотири окремі рішення <span class="ref">розділ 1</span></li>
+  <li>Незалежна перевірка збіглася з нашими рішеннями скрізь, де вони вже є <span class="ref">розділ 3</span></li>
+  <li>Головний затик — не архітектура, а два формати даних, про які ми не домовились <span class="ref">розділ 4</span></li>
+  <li>Три питання треба закрити до демо: сховище, одиниця індексу, документ для цитати <span class="ref">розділ 5</span></li>
+  <li>Перед розмовою із замовником треба перевірити ліцензію нашої моделі <span class="ref">розділ 6</span></li>
+</ul>
+</div>
+
+<p class="lede">Андрій прислав статтю про систему, яка шукає відповідь в українських документах і формулює її на місці, без хмарних сервісів. Система посіла друге місце в українському NLP-змаганні UNLP 2026. Питання було: <strong>що з неї можна взяти до нас</strong>.</p>
+
+<p class="quiet"><code>arxiv.org/abs/2604.22095</code></p>
+
+<hr class="rule">
+
+<h2>1. Відповідь на питання Андрія</h2>
+
+<p><strong>Код у них відкритий:</strong> <code>github.com/trokhymovych/unlp-2026-shared-task</code>. Готову навчену версію своєї моделі вони не виклали — тільки базову MamayLM, яка й так публічна.</p>
+
+<h3><span class="pill p-ok">беремо</span> чотири речі</h3>
+<div class="scroll">
+<table>
+  <tr><th>Що</th><th>Навіщо нам</th></tr>
+  <tr><td><strong>Приводити слова до початкової форми перед пошуком</strong></td><td>Щоб «відпустки» знаходило «відпустка». Українська морфологія без цього ламає пошук. Робиться один раз, коли складаємо покажчик документів</td></tr>
+  <tr><td><strong>Підтвердження по залізу</strong></td><td>Вони запустили всю систему — пошук плюс стиснену модель — на одній відеокарті 16 ГБ 2016 року. Значить, наш контур реальний на ноутбуці</td></tr>
+  <tr><td><strong>Їхнє спостереження про пошук</strong></td><td>На малій кількості документів пошук по словах і пошук по змісту дають той самий перший результат. Аргумент починати з простого</td></tr>
+  <tr><td><strong>Вибір MamayLM</strong></td><td>Незалежна команда прийшла до тієї самої моделі, що стоїть у нас</td></tr>
+</table>
+</div>
+
+<h3><span class="pill p-bad">не беремо</span> чотири речі</h3>
+<div class="scroll">
+<table>
+  <tr><th>Що</th><th>Чому ні</th></tr>
+  <tr><td><strong>Різати текст шматками по 500 символів</strong></td><td>Підігнано під їхню метрику «вгадай сторінку». У нас порве процедуру навпіл: витягне «крок 3» без «кроку 1»</td></tr>
+  <tr><td><strong>Пересортування знайденого другою моделлю</strong></td><td>Вони застосовували його до тисяч шматків тексту. У нас десятки документів — знайдене і так цілком їде в модель</td></tr>
+  <tr><td><strong>Їхню модель пересортування <code>jina-reranker-v3</code></strong></td><td>Ліцензія забороняє комерційне використання. Для нашого замовника блокер незалежно від якості</td></tr>
+  <tr><td><strong>Донавчання моделі на 7000 штучних питань</strong></td><td>У змаганні окупається, у нас — ні</td></tr>
+</table>
+</div>
+
+<div class="verdict">
+<p><strong>Головний висновок.</strong> Стаття описує лише один наш механізм — знайти фрагмент документа і процитувати його. Підрахунків, довідки про об'єкти і діагностики там немає, відмова від відповіді теж не розглядається. Тобто це <strong>один із наших чотирьох механізмів</strong> (п'ятий маршрут — відмова). Тому беремо окремі рішення, а не архітектуру цілком.</p>
+</div>
+
+<hr class="rule">
+
+<h2>2. Як ми це перевіряли</h2>
+
+<p>Щоб перевірити наші попередні рішення незалежно, ми дали статтю AI-агенту, <strong>який не бачив нашої архітектури</strong>.</p>
+
+<p>Він отримав голу задачу: що за замовник, які питання, яке залізо, які обмеження. Не отримав ні наш поділ питань на типи, ні обрану бібліотеку інтерфейсу, ні рішення по пошуку. Статтю дали як матеріал, а не як рамку — щоб агент сам вирішив, що звідти брати.</p>
+
+<p>Сенс простий: агент, який бачить наше рішення, буде його доводити. Агент, який його не бачить, або прийде до того самого сам, або покаже, де ми помиляємось.</p>
+
+<p class="quiet">Цей прийом ми вже застосовували при виборі embedding-моделі — питали двічі, з підказками і без. Відповіді вийшли різні, тобто перевірка справді щось ловить.</p>
+
+<hr class="rule">
+
+<h2>3. Що збіглось</h2>
+<p>Дослідження робилось без нашої архітектури — і прийшло ось до чого:</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Дослідження</th><th>Ми</th></tr>
+  <tr><td>Маршрутизатор плюс чотири механізми відповіді плюс відмова</td><td>Наші п'ять доріг</td></tr>
+  <tr><td>«До відмови система зобов'язана спробувати не один механізм»</td><td>Наша правка до ТЗ: відмова — останній крок, а не перший</td></tr>
+  <tr><td>Локальний веб-інтерфейс, Gradio або Streamlit</td><td>Gradio</td></tr>
+  <tr><td>Спочатку звичайний пошук по словах, пошук по змісту потім</td><td>Спочатку повнотекстовий, вектор запасним шаром</td></tr>
+  <tr><td>Рахує база, модель тільки складає запит</td><td>SQL-шаблони, модель підставляє параметри</td></tr>
+  <tr><td>Два окремі сховища: тексти для цитат, таблиця фактів для підрахунків</td><td>Дві дороги на спільній базі</td></tr>
+</table>
+</div>
+
+<div class="verdict">
+<p>Одна перевірка нічого не доводить остаточно, але сигнал сильний: <strong>там, де ми вже вирішили, незалежна перевірка вирішила так само.</strong> Відкритими лишаються дві інші речі — чим наповнити три маршрути з п'яти і як стикуються наші компоненти.</p>
+</div>
+
+<hr class="rule">
+
+<h2>4. Одна відповідь, яка знімає наш головний затик</h2>
+
+<p>Наш затик: <strong>не описано, що саме чат просить у бази і що отримує назад.</strong> Через це кожен компонент упирається в заглушку, і перевірити його окремо неможливо.</p>
+
+<p>Рекомендація дослідження: на демо вся система працює <strong>на одній машині</strong>. Не ділимо її на мережеві сервіси — ділимо код на компоненти і з'єднуємо їх двома погодженими форматами файлів.</p>
+
+<div class="fig">
+<svg viewBox="0 0 800 250" role="img" aria-label="Три компоненти, з'єднані двома погодженими форматами файлів">
+  <g>
+    <rect x="30" y="24" width="226" height="82" rx="10" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+    <text x="143" y="54" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">Вхід документа</text>
+    <text x="143" y="76" text-anchor="middle" font-size="13" fill="var(--muted)">скан → поля → чернетка</text>
+    <text x="143" y="95" text-anchor="middle" font-size="12.5" fill="var(--muted)">Аня</text>
+  </g>
+  <g>
+    <rect x="287" y="24" width="226" height="82" rx="10" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+    <text x="400" y="54" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">Сховища і пошук</text>
+    <text x="400" y="76" text-anchor="middle" font-size="13" fill="var(--muted)">тексти · таблиця фактів</text>
+    <text x="400" y="95" text-anchor="middle" font-size="12.5" fill="var(--muted)">Андрій</text>
+  </g>
+  <g>
+    <rect x="544" y="24" width="226" height="82" rx="10" fill="var(--card)" stroke="var(--line)" stroke-width="1.5"/>
+    <text x="657" y="54" text-anchor="middle" font-size="15" font-weight="700" fill="var(--fg)">Маршрут і чат</text>
+    <text x="657" y="76" text-anchor="middle" font-size="13" fill="var(--muted)">питання → дорога → джерело</text>
+    <text x="657" y="95" text-anchor="middle" font-size="12.5" fill="var(--muted)">Денис</text>
+  </g>
+
+  <g color="var(--muted)">
+    <line x1="143" y1="106" x2="143" y2="158" stroke="currentColor" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <line x1="400" y1="106" x2="400" y2="158" stroke="currentColor" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <line x1="657" y1="106" x2="657" y2="158" stroke="currentColor" stroke-width="1.4" stroke-dasharray="4 4"/>
+  </g>
+
+  <rect x="30" y="158" width="740" height="62" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="400" y="184" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">Два погоджені формати файлів</text>
+  <text x="400" y="205" text-anchor="middle" font-size="13.5" fill="var(--fg)">схема таблиці фактів · формат розібраного документа</text>
+</svg>
+<p class="figcap">Замість домовлятись про виклики між програмами — домовляємось про два файли.</p>
+</div>
+
+<p>У кожного локальна копія системи. Готовий зліпок сховищ лежить у репозиторії як зразок для тестів — тому чат можна перевірити без живого входу документів, а розбір документів перевірити без чату.</p>
+
+<p><strong>Практичний наслідок: кожен показує свій шматок незалежно, не чекаючи на інших.</strong> Різниця macOS і Windows зникає сама — Ollama, Python і SQLite працюють на обох.</p>
+
+<p class="quiet">Це найкорисніше, що вийшло з усієї роботи.</p>
+
+<hr class="rule">
+
+<h2>5. Три питання, які треба закрити до демо</h2>
+<p>Два перші — місця, де дослідження каже інакше, ніж ми вирішили раніше. Третє блокує розділ про цитати.</p>
+
+<div class="ask">
+<span class="who">Питання 1 · сховище</span>
+<p>Дослідження рекомендує <strong>SQLite замість PostgreSQL</strong>. Аргумент: на нашому масштабі PostgreSQL — це сервер, який треба підняти на кожній машині, а SQLite це один файл, який можна покласти в репозиторій як зразок для тестів.</p>
+<p>Технічна деталь до цього: у SQLite немає українського стемера, тому приводити слова до початкової форми треба на етапі складання покажчика (<code>pymorphy3</code> або <code>Stanza</code>).</p>
+<p><strong>Чи є для демо вимога, яку покриває PostgreSQL, але не покриває SQLite?</strong></p>
+</div>
+
+<div class="ask">
+<span class="who">Питання 2 · одиниця індексу</span>
+<p>Ми вирішили індексувати цілий розділ. Дослідження пропонує точніше: <strong>індексувати пункт, а повертати розділ цілком</strong>. Пошук влучає точно, а в модель усе одно їде розділ, тому процедура не ріжеться посередині.</p>
+<p>Плюс правило: фрагмент типу «процедура» — цілісний, не ділиться, хоч би яким довгим був.</p>
+<p><strong>Скільки часу займе перевірити цей варіант на наших документах?</strong></p>
+</div>
+
+<div class="ask">
+<span class="who">Питання 3 · документ на демо</span>
+<p>На демо йде <strong>один інформаційний документ</strong>, з якого система дає цитату. Який саме — ще не обрано.</p>
+<p>За нашим правилом до бази знань беруться тільки публічні нормативні акти з посиланням на офіційну публікацію. Немає посилання — немає джерела.</p>
+<p><strong>Який документ беремо і чи є на нього офіційне посилання?</strong></p>
+</div>
+
+<hr class="rule">
+
+<h2>6. Новий ризик: ліцензія моделі</h2>
+
+<p><strong>MamayLM успадковує Gemma Terms of Use.</strong></p>
+
+<p>Це не відкрита ліцензія, а власні умови Google з переліком заборонених застосувань, які Google лишає за собою право оновлювати. Комерційне використання дозволене, тож це не блокер за замовчуванням — але для державного і військового замовника питання виникне, і краще, щоб воно виникло в нас, а не в них.</p>
+
+<div class="card">
+<h3>Що з цим робити</h3>
+<ul>
+  <li><strong>На демо нічого не міняємо.</strong> Модель стоїть і працює, чотири дні — не час</li>
+  <li>Перед розмовою із замовником — юридична перевірка умов Gemma</li>
+  <li>Якщо не проходить — запасний варіант <code>Qwen3-14B</code> з чистою ліцензією Apache 2.0. Перед перемиканням прогнати наші 16 еталонних питань на обох моделях</li>
+</ul>
+</div>
+
+<hr class="rule">
+
+<h2>7. Де лежить повний текст</h2>
+
+<p><code>docs/research/2026-08-11_blind-architecture-design/research-blind-run.md</code></p>
+
+<p>Там варіанти по кожному вузлу системи, вимоги до заліза трьома рівнями, розгорнуті відповіді на вісім питань і те, що зламається першим, коли документів стане тисячі.</p>
+
+<p>Читати необов'язково. Але один розділ раджу всім — <strong>відповідь на питання 5</strong>: що робити з тими 12 із 16 еталонних питань, у яких відповіді немає в жодному документі. Коротко: замінити міркування моделі нічим не можна, але його можна обгородити трьома способами, і головний коштує лише формат відповіді.</p>
+
+<hr class="rule">
+
+<h2>8. Що далі</h2>
+
+<p>Це дослідження, не план. Плану поки немає свідомо — його є сенс писати після того, як ви це прочитаєте і скажете, що думаєте.</p>
+
+<div class="verdict">
+<p>Що потрібно від вас зараз: <strong>закрити три питання з розділу 5.</strong> Решта — на ваш розсуд.</p>
+</div>
+
+</div>
+</body>
+</html>
