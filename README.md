@@ -135,13 +135,11 @@ python run_pipeline.py --dry-run           # нічого не зберігат�
 `schema_dump.sql`, згадані в `context/db-handoff-notes.md`) — код команди
 БД, не цієї частини роботи.
 
-Що тут ЄСТЬ:
-- повний контракт полів і мапінг на таблиці БД —
-  [`context/db-handoff-notes.md`](context/db-handoff-notes.md);
-- реальний приклад запису, який пайплайн віддає —
-  [`context/example-output.md`](context/example-output.md);
-- перелік невирішеного на боці завантажувача —
-  [`context/response-to-db-team.md`](context/response-to-db-team.md).
+Що тут ЄСТЬ: повний контракт полів, мапінг на таблиці БД і перелік
+невирішеного на боці завантажувача (розд. 9) —
+[`context/db-handoff-notes.md`](context/db-handoff-notes.md). Приклад запису
+дивіться не в документації, а в самому виводі: `data/output/documents/` після
+прогону — переказаний приклад старіє непомітно.
 
 Пайплайн лише пише `.md`-файли з YAML-шапкою в `data/output/` — під'єднання
 цього виходу до PostgreSQL виконує окремий завантажувач на боці команди БД.
@@ -156,9 +154,5 @@ python run_pipeline.py --dry-run           # нічого не зберігат�
   чужа сторона), і як кожна проблема проявляється на практиці.
 - [`context/open-questions.md`](context/open-questions.md) — питання, що
   потребують рішення Анни, офіцерів чи команди БД, а не коду.
-- [`context/db-handoff-notes.md`](context/db-handoff-notes.md) і
-  [`context/response-to-db-team.md`](context/response-to-db-team.md) —
-  контракт виводу пайплайна й перелік невирішеного на боці команди БД.
-- [`context/example-output.md`](context/example-output.md) — реальний приклад
-  запису, який пайплайн віддає команді БД (згенеровано прогоном на
-  синтетичному зразку, не вигадано вручну).
+- [`context/db-handoff-notes.md`](context/db-handoff-notes.md) — контракт
+  виводу пайплайна й перелік невирішеного на боці команди БД.
