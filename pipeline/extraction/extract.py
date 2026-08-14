@@ -1426,7 +1426,8 @@ def ground_llm_value(field: dict, value, document_text: str, printed=()):
     if value is None or field.get("type") not in GROUNDED_TYPES:
         return value, None
     if field.get("type") == "number":
-        number = number_from_words(value)
+        number = number_from_words(value, min_value=field.get("min_value"),
+                                   max_value=field.get("max_value"))
         if number is None:
             return None, "ungrounded_llm_value"
         return (value, None) if number in attested_numbers(document_text) \

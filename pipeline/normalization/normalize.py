@@ -325,13 +325,13 @@ def to_int_or_none(value):
 # Діапазон свідомо обмежений 1..31 (найбільше комбіноване значення --
 # "тридцять один"): це кількість днів/діб, не довільне число.
 
-# Верхня межа для ЦИФРОВОГО шляху number_from_words (словесний і так
-# обмежений структурою UKR_NUMBER_WORDS вище). Без неї захоплений OCR-шум
-# (номер документа, рік тощо) на regex-провалі для day-полів (duration_days/
-# deployment_days) міг дати правдоподібне, але довільне число днів без
-# жодної помилки. 366 -- з запасом (повний рік): цифрою можуть записати
-# довший сумарний період, ніж є у словесному переліку.
-MAX_PLAUSIBLE_DAYS = 366
+# Межі правдоподібності ЧИСЛА -- більше не константа днів у коді (R-A1-03 +
+# R-A2-11: генеричний тип number був приварений до семантики днів межею 366,
+# і поле «кількість осіб: 500» поверталось None без окремої причини).
+# Межі оголошує САМЕ ПОЛЕ схеми (`min_value:` / `max_value:`): для day-полів
+# вони лишаються 1..366 у YAML -- захист від захопленого OCR-шуму (номер
+# документа, рік) на regex-провалі нікуди не зник, лише переїхав туди, де
+# живе знання про поле.
 
 UKR_NUMBER_WORDS = {
     "один": 1, "одна": 1, "одну": 1, "два": 2, "дві": 2, "три": 3, "чотири": 4,
@@ -357,18 +357,32 @@ def number_word_value(token):
     return UKR_NUMBER_WORDS.get(text)
 
 
-def number_from_words(raw_value):
+def number_from_words(raw_value, min_value=None, max_value=None):
     """'тринадцять' -> 13; 'двадцять один' -> 21; '13' -> 13; інше -> None.
 
     Складені числа ("двадцять сім") -- сума двох частин, бо українською
     записуються окремими словами. Апострофи в документах бувають різні
     (’ ‘ ` ´), тому зводяться до одного.
+
+    min_value/max_value -- межі правдоподібності, оголошені ПОЛЕМ схеми
+    (None = межі немає). Раніше тут жила константа 366 -- семантика днів у
+    генеричному типі (R-A1-03 + R-A2-11).
     """
     if raw_value is None:
         return None
+
+    def bounded(number):
+        if number is None:
+            return None
+        if min_value is not None and number < min_value:
+            return None
+        if max_value is not None and number > max_value:
+            return None
+        return number
+
     direct = to_int_or_none(str(raw_value).strip())
     if direct is not None:
-        return direct if 1 <= direct <= MAX_PLAUSIBLE_DAYS else None
+        return bounded(direct)
     text = str(raw_value).lower().strip()
     for ch in _APOSTROPHES:
         text = text.replace(ch, "'")
@@ -386,7 +400,7 @@ def number_from_words(raw_value):
             # тож чесна відповідь -- None (відмова краща за вигадку).
             return None
         total += value
-    return total
+    return bounded(total)
 
 
 def lemmatize_phrase(text):
@@ -686,7 +700,10 @@ def normalize_field(field_def: dict, raw_value, dictionaries: dict):
     if field_type == "number":
         # number_from_words, а не to_int_or_none: приймає і цифру, і пропис.
         # Порядок саме такий -- цифра перевіряється першою всередині.
-        return number_from_words(raw_value), False
+        # Межі правдоподібності -- зі схеми поля, не з коду (R-A1-03).
+        return number_from_words(raw_value,
+                                 min_value=field_def.get("min_value"),
+                                 max_value=field_def.get("max_value")), False
 
     if field_type == "date":
         if isinstance(raw_value, dict):

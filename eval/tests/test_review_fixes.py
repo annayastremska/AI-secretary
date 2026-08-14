@@ -198,6 +198,42 @@ def test_current_mapping_covers_all_active_fields():
     assert problems == [], problems
 
 
+# --- R-A1-03 + R-A2-11: межі числа оголошує поле, а не код -------------------
+
+def test_number_bounds_come_from_schema_not_code():
+    """type: number був приварений до семантики днів межею 366 у коді:
+    «кількість осіб: 500» поверталась None. Межі тепер оголошує поле."""
+    from pipeline.normalization.normalize import normalize_field
+    people_field = {"name": "people_count", "type": "number"}
+    assert normalize_field(people_field, "500", {}) == (500, False)
+    assert normalize_field(people_field, "367", {}) == (367, False)
+    days_field = {"name": "days", "type": "number", "min_value": 1, "max_value": 366}
+    assert normalize_field(days_field, "500", {}) == (None, False)
+    assert normalize_field(days_field, "120", {}) == (120, False)
+    assert normalize_field(days_field, "тринадцять", {}) == (13, False)
+
+
+def test_day_fields_keep_their_366_protection_in_schema():
+    """Захист від OCR-шуму нікуди не зник -- переїхав у YAML day-полів."""
+    from pipeline.identification import load_schemas
+    for schema in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas")):
+        day_fields = [f for f in schema["fields"]
+                      if f.get("dimension") in ("leave_days", "deployment_days")]
+        assert day_fields
+        for f in day_fields:
+            assert f.get("max_value") == 366 and f.get("min_value") == 1
+
+
+def test_number_bounds_on_wrong_type_are_loud():
+    import copy
+    from pipeline.identification import validate_schema
+    schema = copy.deepcopy(_leave_schema())
+    field = next(f for f in schema["fields"] if f["name"] == "destination_place")
+    field["max_value"] = 10
+    problems = validate_schema(schema)
+    assert any(sev == "error" and "max_value" in msg for sev, msg in problems), problems
+
+
 # --- R-A1-05 + R-A2-09: мапа «тип -> template» має одне джерело --------------
 
 def test_doc_types_map_lives_in_mapping_not_in_code():

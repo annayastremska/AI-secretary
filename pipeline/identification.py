@@ -351,6 +351,24 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
                 "схему, що й text (schema_grammar._field_json_schema), тож "
                 "LLM зможе повернути що завгодно замість enum-коду")
 
+        # Межі числа -- лише для type: number (R-A1-03): на іншому типі ключ
+        # не читається ніде, і оголошена межа мовчки не діяла б.
+        for bound_key in ("min_value", "max_value"):
+            bound = field.get(bound_key)
+            if bound is None:
+                continue
+            if field_type != "number":
+                err(f"поле '{name}': {bound_key} читається лише для type: "
+                    f"number -- на type '{field_type}' межа мовчки не діяла б")
+            elif not isinstance(bound, int):
+                err(f"поле '{name}': {bound_key} мусить бути цілим, "
+                    f"отримано {bound!r}")
+        if (isinstance(field.get("min_value"), int)
+                and isinstance(field.get("max_value"), int)
+                and field["min_value"] > field["max_value"]):
+            err(f"поле '{name}': min_value > max_value -- жодне число не "
+                "пройшло б")
+
         # `normalization:` -- закритий перелік, як type / part / db_target, і
         # з тієї самої причини (R-A1-06 + R-A2-05): невідоме значення означає,
         # що оголошена нормалізація мовчки НЕ виконується. Найдорожчий випадок
