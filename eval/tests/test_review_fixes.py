@@ -234,6 +234,28 @@ def test_number_bounds_on_wrong_type_are_loud():
     assert any(sev == "error" and "max_value" in msg for sev, msg in problems), problems
 
 
+# --- R-B1-05: порожня сторінка без растра -- не скан -------------------------
+
+def test_borndigital_file_under_pdf_name_stays_electronic(tmp_path):
+    """Репро b2: docx під іменем .pdf давав source_kind=photo через порожню
+    останню сторінку без текстового шару -- born-digital документ отримував
+    чужу планку якості і (до R-A1-10) чергу «рукописне»."""
+    import shutil
+    import pipeline.run as run_mod
+    from pipeline.config import load_config
+
+    renamed = tmp_path / "05_docx_renamed.pdf"
+    shutil.copy(_LEAVE_DOCX, renamed)
+    cfg = load_config(os.path.join(_PROJECT_ROOT, "config.yaml"))
+    res = run_mod.build_resources(cfg, force_no_llm=True)
+    res["store"] = None
+    meta = run_mod.process_file(str(renamed), res, cfg)
+    assert meta["status"] == "confirmed"
+    assert meta["source_kind"] == "electronic", meta["source_kind"]
+    assert not any("без текстового шару" in w for w in meta["warnings"]), \
+        meta["warnings"]
+
+
 # --- R-A1-15 + R-A2-13: запис у сховище атомарний ----------------------------
 
 def test_store_save_is_atomic(tmp_path, monkeypatch):

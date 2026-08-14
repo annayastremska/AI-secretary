@@ -274,7 +274,15 @@ def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
                     blocks.extend(sort_blocks_by_geometry(page_blocks))
                     continue
 
-                # Сторінка без текстового шару
+                # Сторінка без текстового шару.
+                # ПОРОЖНЯ сторінка (ні тексту, ні жодного зображення) -- НЕ
+                # скан (R-B1-05): docx, збережений/перейменований у PDF, несе
+                # порожню останню сторінку, і вона робила весь born-digital
+                # документ «photo» (а photo -- це і чужа планка якості, і
+                # вхід до черги «рукописне»). Скан за визначенням містить
+                # растр; сторінка без растра -- просто порожній аркуш.
+                if not page.get_images():
+                    continue
                 if ocr_fn is None:
                     pages_needing_ocr.append(i + 1)
                     continue
