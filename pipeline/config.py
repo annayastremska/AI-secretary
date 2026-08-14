@@ -11,8 +11,8 @@ DEFAULTS = {
     "paths": {
         "input_dir": "data/inbox",
         "output_dir": "data/output",
-        "schemas_dir": "schemas",
-        "dictionaries_dir": "dictionaries",
+        "schemas_dir": "pipeline/schemas",
+        "dictionaries_dir": "pipeline/dictionaries",
         "llm_context": "pipeline/llm_context/document_processing_guidelines.md",
     },
     "intake": {
