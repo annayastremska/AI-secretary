@@ -46,6 +46,27 @@ MAPPING_PATH = os.path.join("eval", "field-mapping.yaml")
 # документі, а не лише label з довідника.
 RANK_ALIASES = {}
 
+
+def load_rank_aliases(path=None) -> dict:
+    """ВЛАСНЕ читання довідника звань, свідомо НЕ через build_resources /
+    build_alias_lookup пайплайна (R-A2-10). Довідник-YAML -- спільні ДАНІ
+    (контракт, який і міряється), але КОД читання в приладі свій: якби прилад
+    брав res["dictionaries"], помилка в build_alias_lookup псувала б обидва
+    боки порівняння однаково -- та сама причина, з якої вище лежить власна
+    копія гомогліфів."""
+    path = path or os.path.join("pipeline", "dictionaries", "military_rank.yaml")
+    with io.open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    lookup = {}
+    for value in data.get("values") or []:
+        if not isinstance(value, dict) or not value.get("code"):
+            continue
+        code, label = value["code"], value.get("label", value["code"])
+        for alias in value.get("aliases") or []:
+            if isinstance(alias, str) and alias.strip():
+                lookup[alias.strip().lower()] = (code, label)
+    return lookup
+
 UKR_MONTHS = {
     "січня": 1, "лютого": 2, "березня": 3, "квітня": 4, "травня": 5, "червня": 6,
     "липня": 7, "серпня": 8, "вересня": 9, "жовтня": 10, "листопада": 11, "грудня": 12,
@@ -740,7 +761,8 @@ def main(argv=None):
         print(f"[увага] {w}", file=sys.stderr)
 
     global RANK_ALIASES
-    RANK_ALIASES = res["dictionaries"].get("military_rank", {})
+    # Власний читач, не res["dictionaries"] (R-A2-10) -- див. load_rank_aliases.
+    RANK_ALIASES = load_rank_aliases()
 
     truth = load_ground_truth()
     with io.open(MAPPING_PATH, encoding="utf-8") as f:
