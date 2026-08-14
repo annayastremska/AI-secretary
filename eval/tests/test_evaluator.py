@@ -433,3 +433,60 @@ def _run():
 
 if __name__ == "__main__":
     raise SystemExit(_run())
+
+
+def test_expected_printed_measures_field_absent_from_scenario_answers():
+    """Поле, для якого в `правильні_відповіді` ключа НЕМАЄ, все одно міряється --
+    очікуване береться з розділу «надруковано».
+
+    Це не дрібниця приладу, а закриття заміряної сліпоти: position_and_workplace
+    є в схемі, є на бланку (POSITION) і через `dimension: position` доходить до
+    facts окремим фактом, але сценарної відповіді для нього не існує, тому
+    порівняння тихо пропускалось (`if key not in expected: continue`). Місяць
+    значення на pdf обрізалось до "частина А0000" з провенансом `matched`, і
+    жодна цифра приладу не змінилась ані від поломки, ані від виправлення
+    (known-weak-spots 5.7).
+    """
+    mapping = _mapping()
+    spec = mapping["templates"]["deployment_certificate"]["посада"]
+    assert spec["expected_printed"] == "POSITION"
+    assert spec["field"] == "position_and_workplace"
+    # exact, а не contains: саме обрізаний хвіст був дефектом, і м'яке
+    # порівняння зарахувало б його.
+    assert spec["compare"] == "exact"
+
+
+def test_mapping_key_that_is_never_answered_is_reported():
+    """Ключ мапінгу, якого немає ні в еталонних відповідях, ні в
+    `expected_printed`, мусить бути ПОМИЛКОЮ мапінгу, а не тишею.
+
+    Тиша тут -- це і є механізм, яким поломка поля стає невидимою: перевірка
+    пропускається, а звіт показує 100% на тому, що не міряли.
+    """
+    truth = {"TRIP-004": {"тип": "посвідчення про відрядження",
+                          "правильні_відповіді": {"номер_документа": "209"},
+                          "надруковано": {"DOC_NUMBER": "209"}}}
+    schema = {"template": "deployment_certificate",
+              "fields": [{"name": "document_number"}, {"name": "ghost_field"}]}
+    mapping = {"templates": {"deployment_certificate": {
+        "номер_документа": {"field": "document_number", "compare": "exact",
+                            "printed": ["DOC_NUMBER"]},
+        "привид": {"field": "ghost_field", "compare": "exact",
+                   "printed": ["DOC_NUMBER"]},
+    }}}
+    problems = ev.check_mapping(mapping, [schema], truth)
+    assert any("привид" in p and "НЕ міряється" in p for p in problems), problems
+    assert not any("номер_документа" in p for p in problems), problems
+
+
+def test_position_is_measured_on_both_formats_of_the_real_mapping():
+    """Регресія на самому мапінгу: `посада` мусить лишатися виміряною.
+
+    Прибрати рядок із field-mapping.yaml -- однорядкова правка, яка знову
+    зробить поле невидимим і при цьому НЕ зламає жодного іншого тесту.
+    """
+    mapping = _mapping()
+    keys = mapping["templates"]["deployment_certificate"]
+    measured = [k for k, s in keys.items()
+                if s.get("expected_printed") or s.get("printed")]
+    assert "посада" in measured

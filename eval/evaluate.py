@@ -356,8 +356,25 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
         tpl = tpl_of.get(doc.get("тип"))
         printed_seen[tpl] |= set((doc.get("надруковано") or {}).keys())
 
+    # Ключ мапінгу, якого немає ні в `правильні_відповіді` жодного документа, ні
+    # в `expected_printed`, порівняння ТИХО пропускає (`if key not in expected:
+    # continue`). Саме так поломка position_and_workplace прожила місяць
+    # невидимою. Тому це тепер помилка мапінгу, а не тиша.
+    answered = set()
+    for doc in (truth or {}).values():
+        answered |= set((doc.get("правильні_відповіді") or {}).keys())
+        answered |= set((doc.get("людина") or {}).keys())
+
+    def check_answered(where, key, spec):
+        if key in answered or spec.get("expected_printed"):
+            return
+        problems.append(f"{where}: '{key}' немає ні в 'правильні_відповіді' "
+                        f"жодного документа, ні як `expected_printed` -- поле "
+                        f"НЕ міряється взагалі, і його поломка буде невидима")
+
     def check_printed(where, key, spec, templates):
-        keys = spec.get("printed")
+        keys = spec.get("printed") or ([spec["expected_printed"]]
+                                       if spec.get("expected_printed") else None)
         if not keys:
             problems.append(f"{where}: '{key}' без `printed` -- правило "
                             f"«порожнє на бланку -> null» для нього не діє")
@@ -382,6 +399,7 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
                                 f"'{spec['field']}' немає в схемі {tpl} -- "
                                 f"перевірка дасть тихий 0%")
             check_printed(f"templates.{tpl}", key, spec, [tpl])
+            check_answered(f"templates.{tpl}", key, spec)
 
     all_names = set(SUBJECT_EXTRA_KEYS)
     for s in schemas or []:
@@ -478,11 +496,33 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         checks.append(row)
 
     for key, spec in per_template.items():
-        if key not in expected:
+        # `expected_printed` -- очікуване значення береться з розділу
+        # "надруковано", бо в `правильні_відповіді` ключа для цього поля немає
+        # ЗОВСІМ. Додано 14.08.2026 через position_and_workplace: поле є в
+        # схемі, є на бланку (POSITION), доходить до facts окремим фактом
+        # (dimension: position) -- а в еталоні відповіді на нього немає, тому
+        # `if key not in expected: continue` нижче тихо його пропускав. Через це
+        # поломка поля прожила місяць невидимою: 141/141 не змінилось ні коли
+        # значення обрізалось до "частина А0000", ні коли це виправили.
+        #
+        # Це не послаблення: за рішенням 14.08.2026 (розд. 2.17) правильна
+        # відповідь -- саме надруковане, і решта полів теж уже міряється проти
+        # нього, коли папір розходиться зі сценарієм. Тут просто немає сценарію,
+        # з яким розходитись. Еталонні відповіді при цьому НЕ редагуються.
+        printed_source = spec.get("expected_printed")
+        if printed_source:
+            if printed_source not in printed:
+                continue
+            exp = printed.get(printed_source)
+            printed_keys = spec.get("printed") or [printed_source]
+        elif key in expected:
+            exp = expected[key]
+            printed_keys = spec.get("printed")
+        else:
             continue
         field = spec["field"]
         ours = by_field.get(field, subject.get(field))
-        add(key, field, spec["compare"], ours, expected[key], spec.get("printed"))
+        add(key, field, spec["compare"], ours, exp, printed_keys)
 
     for key, spec in (mapping.get("person") or {}).items():
         if key in person:
