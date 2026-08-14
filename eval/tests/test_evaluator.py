@@ -155,6 +155,133 @@ def test_filled_fields_still_compared_against_scenario():
         assert not checks[key]["expected_blank"], key
 
 
+# --- Задача 1b: swapped_dates -- надруковане ПЛЮС позначка -----------------
+#
+# TRIP-011 має на папері START_D=22, END_D=20. Правильна відповідь -- рівно
+# надруковане (22/20) І позначена суперечність, від якої запис не йде в
+# підрахунки. До 14.08.2026 міряли лише значення, тому пайплайн, що промовчав,
+# мав ту саму оцінку, що пайплайн, який позначив.
+
+_TRIP_SCHEMA = {"template": "deployment_certificate", "fields": [
+    {"name": "document_number"}, {"name": "document_date"},
+    {"name": "deployment_start_date", "db_target": "fact_date_start"},
+    {"name": "deployment_end_date", "db_target": "fact_date_end"},
+    {"name": "deployment_days"}, {"name": "destination_points", "db_target": "fact_value"},
+    {"name": "destination_org"}, {"name": "purpose"},
+    {"name": "rank", "db_target": "person", "part": "rank"},
+    {"name": "surname", "db_target": "person", "part": "surname"},
+]}
+
+
+def _trip_011_truth():
+    import json
+    path = os.path.join(_PROJECT_ROOT, "data", "eval", "synthetic-2026-05",
+                        "per-document", "TRIP-011.json")
+    with io.open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _trip_011_meta(start, end, flagged, confirmed):
+    return {
+        "template": "deployment_certificate",
+        "status": "needs_review" if not confirmed else "confirmed",
+        "date_range_error": (f"date_start ({start}) > date_end ({end})"
+                             if flagged else None),
+        "subject": {"rank": {"code": "senior_sergeant", "label": "Старший сержант"},
+                    "person_alias": "Скиба Остап Орестович"},
+        "facts": [{"value_code": "м. Полтава", "date_start": start, "date_end": end,
+                   "confirmed": confirmed,
+                   "additional_info": {
+                       "document_number": "244", "document_date": "2026-05-19",
+                       "deployment_days": 3,
+                       "destination_org": "військова частина А4419",
+                       "purpose": "отримання засобів індивідуального захисту"}}],
+    }
+
+
+def _trip_checks(meta, truth=None):
+    row = ev.evaluate_record(meta, truth or _trip_011_truth(), _mapping(), _TRIP_SCHEMA)
+    return {c["key"]: c for c in row["checks"]}
+
+
+def test_printed_range_conflict_read_from_paper_not_from_defect_label():
+    """Умову беремо з 'надруковано'. Поле 'вада' приладу невідоме навмисно --
+    інакше на реальному бланку з такою самою опискою перевірки не було б."""
+    mapping = _mapping()
+    per_tpl = mapping["templates"]["deployment_certificate"]
+    spec = mapping["range_checks"]["deployment_certificate"]
+    got = ev.printed_range_conflict(_trip_011_truth()["надруковано"], per_tpl, spec)
+    assert got and (got["start"], got["end"]) == ("2026-05-22", "2026-05-20")
+
+
+def test_no_conflict_check_on_a_healthy_document():
+    """Здоровий діапазон не додає перевірки -- інакше загальна цифра корпусу
+    виросла б на кожному документі, а не на суперечливих."""
+    mapping = _mapping()
+    per_tpl = mapping["templates"]["deployment_certificate"]
+    spec = mapping["range_checks"]["deployment_certificate"]
+    healthy = _trip_011_truth()
+    healthy["надруковано"] = dict(healthy["надруковано"], START_D="20", END_D="22")
+    healthy["правильні_відповіді"]["початок"] = "2026-05-20"
+    healthy["правильні_відповіді"]["кінець"] = "2026-05-22"
+    assert ev.printed_range_conflict(healthy["надруковано"], per_tpl, spec) is None
+    meta = _trip_011_meta("2026-05-20", "2026-05-22", flagged=False, confirmed=True)
+    checks = _trip_checks(meta, healthy)
+    assert "суперечність_діапазону" not in checks
+    assert checks["початок"]["ok"] and checks["кінець"]["ok"]
+
+
+def test_honest_printed_dates_with_flag_is_success():
+    """ГОЛОВНЕ: віддав надруковане, позначив суперечність, не порахував
+    фактом -- три перевірки з трьох."""
+    checks = _trip_checks(_trip_011_meta("2026-05-22", "2026-05-20",
+                                         flagged=True, confirmed=False))
+    assert checks["початок"]["ok"] and checks["початок"]["from_printed"]
+    assert checks["кінець"]["ok"] and checks["кінець"]["from_printed"]
+    assert checks["суперечність_діапазону"]["ok"]
+
+
+def test_silent_reordering_of_dates_is_a_failure():
+    """Пайплайн, що тихо перевернув дати «як має бути», карається: сценарій
+    (20/22) більше не є еталоном, а суперечності він не позначив."""
+    checks = _trip_checks(_trip_011_meta("2026-05-20", "2026-05-22",
+                                         flagged=False, confirmed=True))
+    assert not checks["початок"]["ok"], "виправлений порядок зараховано"
+    assert not checks["кінець"]["ok"], "виправлений порядок зараховано"
+
+
+def test_printed_dates_without_flag_is_a_failure():
+    """САМЕ ЦЕ й було невидиме: значення надруковані, а суперечність
+    промовчана -- до 14.08 такий пайплайн отримував 10/10, як і чесний."""
+    checks = _trip_checks(_trip_011_meta("2026-05-22", "2026-05-20",
+                                         flagged=False, confirmed=False))
+    assert checks["початок"]["ok"] and checks["кінець"]["ok"]
+    assert not checks["суперечність_діапазону"]["ok"], \
+        "промовчану суперечність зараховано як правильну поведінку"
+
+
+def test_flagged_but_still_counted_as_fact_is_a_failure():
+    """Позначка без наслідку -- не позначка: «чернетка ≠ факт» означає, що
+    запис із суперечливим діапазоном не входить у підрахунки."""
+    checks = _trip_checks(_trip_011_meta("2026-05-22", "2026-05-20",
+                                         flagged=True, confirmed=True))
+    assert not checks["суперечність_діапазону"]["ok"]
+
+
+def test_range_check_typo_is_reported_not_silently_disabled():
+    schemas = []
+    for name in ("leave_ticket", "deployment_certificate"):
+        with io.open(os.path.join(_PROJECT_ROOT, "pipeline", "schemas", name + ".yaml"),
+                     encoding="utf-8") as f:
+            schemas.append(yaml.safe_load(f))
+    truth = ev.load_ground_truth(os.path.join(
+        _PROJECT_ROOT, "data", "eval", "synthetic-2026-05"))
+    broken = _mapping()
+    broken["range_checks"]["deployment_certificate"]["end"] = "кiнець"  # лат. i
+    problems = ev.check_mapping(broken, schemas, truth)
+    assert any("range_checks" in p for p in problems), problems
+
+
 # --- Задача 2: надлишок у значеннях ---------------------------------------
 
 def test_contains_flags_surplus_and_shows_the_extra_text():

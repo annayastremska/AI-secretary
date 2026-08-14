@@ -191,14 +191,18 @@ def _transcribe_printed(value: str) -> str:
 def printed_expected(printed: dict, keys, kind):
     """Значення, СКЛАДЕНЕ з блоку `надруковано`, або None якщо не складається.
 
-    Рішення Анни 13.08.2026: **очікуватися має надруковане**. Підстава --
-    вада `swapped_dates`: TRIP-011 має на папері START_D=22, END_D=20 (кінець
-    раніше початку), а `правильні_відповіді` дають ВИПРАВЛЕНИЙ порядок 20/22.
-    Пайплайн читає надруковане й ставить `date_range_error` -- тобто працює
-    правильно, -- а оцінювач рахував це двома помилками й винагородив би
-    пайплайн, що тихо перевертає дати. Документ при цьому НЕ каже, яка з двох
-    дат хибна (може, описка в кінці, а не порядок), тому автовиправлення --
-    це здогадка, а не нормалізація.
+    Правило: **очікуватися має надруковане**. Для порожніх полів це рішення
+    Анни 13.08.2026 (див. `printed_state`); для вади `swapped_dates` --
+    окреме рішення 14.08.2026, зафіксоване в `known-weak-spots.md` розд. 2.17
+    (до нього код застосовував тут «надруковане переважає» і на неї, хоч
+    підстава була ще не погоджена).
+
+    Підстава для `swapped_dates`: TRIP-011 має на папері START_D=22, END_D=20
+    (кінець раніше початку), а `правильні_відповіді` дають ВИПРАВЛЕНИЙ порядок
+    20/22. Документ НЕ каже, що саме хибне: описка в дні початку, описка в дні
+    кінця чи справді переставлений порядок -- і надрукований DAYS=3 сходиться
+    з усіма трьома. Тому перестановка -- це здогадка, а не нормалізація, і
+    правильний вихід -- надруковане.
 
     Свідомо реалізовано ЛИШЕ для дат: саме там живе відомий клас розходження
     "папір проти сценарію", і саме там складання однозначне. Для решти типів
@@ -225,6 +229,40 @@ def printed_expected(printed: dict, keys, kind):
             return None
         month = month_word
     return as_iso_date(f"{day} {month} {year}")
+
+
+_ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def printed_range_conflict(printed: dict, per_template: dict, range_spec: dict):
+    """Чи сам ПАПІР суперечить собі: надрукований кінець раніше за початок.
+
+    Умова читається з блоку `надруковано`, а НЕ з поля `вада` еталона. Це
+    принципово: прилад не має права знати, що документ «навмисно зіпсований» --
+    інакше він міряв би сценарій набору, а не документ, і на реальному бланку з
+    такою самою опискою перевірка просто не спрацювала б.
+
+    -> {"start","end",...} якщо конфлікт є; None якщо його немає або надруковані
+    дати не складаються в календарні (напр. `ocr_noise`, де рік двоцифровий і
+    складання дає сирий текст -- тоді порядок дат невідомий, і вимагати
+    позначку ми не можемо).
+    """
+    if not range_spec:
+        return None
+    start_key, end_key = range_spec.get("start"), range_spec.get("end")
+    start_spec = (per_template or {}).get(start_key or "") or {}
+    end_spec = (per_template or {}).get(end_key or "") or {}
+    if not start_spec or not end_spec:
+        return None
+    start = printed_expected(printed, start_spec.get("printed"), start_spec.get("compare"))
+    end = printed_expected(printed, end_spec.get("printed"), end_spec.get("compare"))
+    if not (start and end and _ISO_RE.match(str(start)) and _ISO_RE.match(str(end))):
+        return None
+    if str(start) <= str(end):
+        return None
+    return {"start": str(start), "end": str(end),
+            "start_key": start_key, "end_key": end_key,
+            "start_field": start_spec.get("field"), "end_field": end_spec.get("field")}
 
 
 def compare(kind, ours, expected):
@@ -348,6 +386,21 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
     all_names = set(SUBJECT_EXTRA_KEYS)
     for s in schemas or []:
         all_names |= {f["name"] for f in (s.get("fields") or [])}
+    # `range_checks` з опечаткою = тихо вимкнена перевірка позначки
+    # суперечності, тобто рівно той самий клас сліпоти, який 2.17 і закриває.
+    for tpl, spec in (mapping.get("range_checks") or {}).items():
+        keys = (mapping.get("templates") or {}).get(tpl)
+        if keys is None:
+            problems.append(f"range_checks.{tpl}: такого шаблону немає в "
+                            f"templates -- перевірка суперечності не діятиме")
+            continue
+        for ref in ("start", "end"):
+            key = spec.get(ref)
+            if key not in keys:
+                problems.append(f"range_checks.{tpl}.{ref}: ключа '{key}' немає "
+                                f"в templates.{tpl} -- перевірка суперечності "
+                                f"діапазону тихо вимкнена")
+
     for key, spec in (mapping.get("person") or {}).items():
         if spec["field"] not in all_names:
             problems.append(f"person.{key}: поля '{spec['field']}' немає ні в "
@@ -435,6 +488,35 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         if key in person:
             add(key, spec["field"], spec["compare"], subject.get(spec["field"]),
                 person[key], spec.get("printed"))
+
+    # ДРУГА ПОЛОВИНА ПРАВИЛЬНОЇ ВІДПОВІДІ на суперечливому діапазоні.
+    #
+    # Правило «очікуємо надруковане» міряє ЗНАЧЕННЯ -- і тільки. Через це
+    # (замір 14.08.2026, TRIP-011 = 10/10) пайплайн, що віддав надруковані дати
+    # й ПРОМОВЧАВ про суперечність, отримував рівно ту саму оцінку, що
+    # пайплайн, який її позначив. Тобто найдорожча частина поведінки --
+    # «чернетка ≠ факт» -- не міряласясь узагалі, а defect `swapped_dates`
+    # вважався заміряним.
+    #
+    # Правильний вихід на такому документі -- три речі разом: надрукований
+    # початок, надрукований кінець і ПОЗНАЧЕНА суперечність, від якої запис не
+    # йде в підрахунки. Тому додається окрема перевірка, і саме як перевірка, а
+    # не як рядок звіту: рядок звіту нічого не карає.
+    conflict = printed_range_conflict(
+        printed, per_template,
+        (mapping.get("range_checks") or {}).get(template or ""))
+    if conflict:
+        flagged = bool(meta.get("date_range_error"))
+        counted = bool(main.get("confirmed"))
+        checks.append({
+            "key": "суперечність_діапазону",
+            "field": f"{conflict['start_field']}+{conflict['end_field']}",
+            "compare": "flag", "ok": flagged and not counted,
+            "surplus": False, "expected_blank": False, "from_printed": True,
+            "ours": f"date_range_error={flagged}, confirmed={counted}",
+            "expected": "date_range_error=True, confirmed=False",
+            "range_conflict": dict(conflict, flagged=flagged, confirmed=counted),
+        })
 
     return {
         "id": truth["id"],
@@ -613,6 +695,24 @@ def main(argv=None):
                   f"  {'+' if c['ok'] else '-'}")
         print("     ^ пайплайн не може знати сценарій і не має права виправляти "
               "документ сам; суперечність позначається date_range_error.")
+
+    # Суперечливий діапазон на папері: чи позначено й чи НЕ пораховано фактом.
+    # Окремий блок, бо цієї перевірки не існувало до 14.08.2026, і загальна
+    # цифра корпусу через неї росте рівно на кількість таких документів.
+    conflicts = [(r["id"], c) for r in results for c in r["checks"]
+                 if c.get("range_conflict")]
+    if conflicts:
+        good = sum(1 for _, c in conflicts if c["ok"])
+        print(f"\n  ! СУПЕРЕЧНІСТЬ ДІАПАЗОНУ НА ПАПЕРІ: {good}/{len(conflicts)} "
+              "позначено правильно")
+        for doc_id, c in conflicts:
+            rc = c["range_conflict"]
+            print(f"     {doc_id:10} надруковано {rc['start']} -> {rc['end']} "
+                  f"(кінець раніше початку); date_range_error={rc['flagged']}, "
+                  f"confirmed={rc['confirmed']}  {'+' if c['ok'] else '-'}")
+        print("     ^ правильна відповідь тут -- надруковане ПЛЮС позначка. "
+              "Без цієї перевірки пайплайн, що промовчав про суперечність, "
+              "мав ту саму оцінку, що пайплайн, який її позначив.")
 
     ok_fields = sum(r["fields_ok"] for r in results)
     all_fields = sum(r["fields_total"] for r in results)
