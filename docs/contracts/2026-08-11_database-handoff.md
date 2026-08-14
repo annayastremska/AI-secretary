@@ -448,3 +448,82 @@ meta["document_links"] = [
   немає;
 - `leave_ticket` мапиться на `document_types.code = 'vacation_report'` («Рапорт
   на відпустку») -- це інший документ, ніж виданий квиток.
+
+## 10. Оновлення від команди БД (14.08.2026)
+
+Перевірено проти актуального `pipeline/` (гілка `anya`, коміт `370c817`) і
+реального `context/example-output.md`, не по опису -- один пункт нижче
+розходиться з тим, що написано в розд. 1.1/9.
+
+**Закрито цього разу:**
+
+- `source_kind` більше не хардкод -- читаємо `meta["source_kind"]`.
+- `documents.source_id` -- `mobile_photo`/`unit_export` за `source_kind`,
+  не завжди `unit_export`.
+- `storage_key` -- довіряємо значенню з шапки (більше не рахуємо самі, і
+  кросдисковий `ValueError` на цьому більше не крашить завантаження).
+- `review_queue.queue_type` -- беремо ваше готове значення напряму, наш
+  if/elif лишився тільки fallback-ом для файлів без цього ключа.
+- `person_alias`/`person_complete` -- використовуються; `person_complete:
+  false` тепер блокує створення особи/фактів (як і `unresolved`), без
+  спроби вставки з порожніми NOT NULL.
+- `facts.confidence` -- заповнюється з `fact.confidence` (і з
+  `field_provenance.rank.confidence` для звання).
+- `facts.source_field` -- нова колонка, заповнюється з `fact.source_field`.
+- **`resolve_or_create_object` тепер викликається** (не наш `canonical_name`-
+  пошук) -- `object_aliases` більше не порожня. Коли функція СТВОРЮЄ новий
+  об'єкт (не знаходить наявний за псевдонімом), документ отримує
+  `review_queue.queue_type = 'new_person'` (новий CHECK-варіант) -- саме
+  те, що просили в п.1.
+- `dimensions` для всіх 8+ похідних кодів (`deployment_org`,
+  `deployment_days`, `deployment_purpose`, `order_date`, `order_number`,
+  `leave_days`, `leave_actual_return`, `unit_to_report`, `document_number`,
+  `document_date`, `leave_place`) -- назва й `validity_model` синхронізовані
+  1:1 з вашим `dictionaries/fact_type_registry.yaml`, не з описом у розд. 2
+  (там `leave_days`/`unit_to_report`/`leave_place` названо з іншим
+  `validity_model`, ніж у реальному реєстрі -- звірено grep-ом).
+- `dimension_values` для `rank` засіяно (22 коди/мітки з вашого
+  `military_rank.yaml`) -- мітка «Солдат» для коду `soldier` тепер є в базі.
+- `valid_from`/`confirmed` факту звання -- більше не з дати основного
+  факту документа: `valid_from` = `uploaded_at` (документ як точка відліку
+  "станом на коли ми це знаємо"), `confirmed` -- за власним
+  `field_provenance.rank.resolved`, не успадковано від основного факту (п.17
+  закрито).
+- `ON CONFLICT (checksum) DO UPDATE` замість `DO NOTHING` -- reprocess
+  тепер реально доносить виправлену версію: старі факти документа йдуть у
+  `rejected` + запис у `review_log`, нові вставляються поруч (п.13 закрито).
+- `current_state`-факти (`rank`, `position`) -- при новому факті того самого
+  виміру для того самого об'єкта попередній закривається (`valid_to`), а не
+  накопичується без обмежень (п.12 частково закрито -- механізм інший, ніж
+  `superseded_by`-колонка, але задачу "як визначити чинний" вирішує).
+- `leave_ticket` -- окремий `document_types.code`, більше не той самий
+  рядок, що `vacation_report` (п.6 закрито).
+- Захист від `facts_check`-краху: якщо `date_start > date_end` дійшло до
+  `insert_fact`, `valid_to` скидається в `NULL`, факт лишається
+  `unconfirmed` -- не крашимо транзакцію, не приховуємо проблему (`date_range_error`
+  і так у `pipeline_meta`).
+
+**Розходження з розд. 1.1, знайдене верифікацією:** `subject_kind`,
+`subject_kind_source`, `subject_kind_reason`, `create_subject_object` -- у
+жодному файлі `pipeline/*.py` (grep, коміт `370c817`) і в самому
+`context/example-output.md` цих ключів немає. Судячи з усього, розд. 1.1
+описує заплановану, ще не запушену версію. Не будували під це код -- немає
+що тестувати проти неіснуючого виводу. Дайте знати, коли це реально
+з'явиться в `example-output.md`, підключимо тим самим циклом.
+
+**Лишається відкритим (свідомо, не забуто):**
+
+- `order_number`/`order_date` як факти на об'єкті людини, а не колонки
+  `documents` (п.15) -- залишили як факти: дешевше зараз, але це компроміс,
+  не остаточне рішення. Потрібне ваше архітектурне зважування, не наш
+  односторонній вибір.
+- `unit_to_report` -- досі текст у `facts.value`, не зв'язок з об'єктом
+  `unit` (п.16 частково) -- `object_kinds.unit` є, використання немає:
+  потрібна або нова колонка-посилання на `facts`, або окрема таблиця
+  зв'язків, обидва варіанти більші за одну міграцію.
+- `documents.status` не розрізняє `confirmed`/`needs_review` (п.9) --
+  підтверджуємо: це свідомий вибір (стадія конвеєра окремо від довіри до
+  запису), не забуте розрізнення. Якщо це створює проблему для запитів
+  чат-бота -- скажіть, переглянемо.
+- Таблиця зв'язків документ->документ і `superseded_by` на `facts` (розд.
+  7) -- не зроблено цього разу, реальний обсяг роботи, не одна міграція.
