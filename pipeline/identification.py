@@ -402,9 +402,30 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
     if best_template is not None:
         ident = by_template[best_template].get("identification") or {}
         min_score = ident.get("min_score", DEFAULT_MIN_SCORE)
+        # ОДНОГО ЗАГОЛОВКА НЕ ДОСИТЬ -- потрібен хоч один підтверджувальний
+        # анкор. Анкори для цього й існують: заголовок бланка може бути
+        # ЗГАДАНИЙ у будь-якому документі, що на цей бланк посилається.
+        #
+        # Заміряно 14.08.2026 на реальних документах: "Положення про
+        # проходження військової служби" і "Статут гарнізонної та вартової
+        # служб" один раз згадують "посвідчення про відрядження" -- це давало
+        # бал рівно 5 при НУЛІ анкорів, тобто рівно min_score, і документ
+        # визнавався посвідченням. Процедурна перевірка вище тепер ловить саме
+        # ці два, але лише тому, що вони процедурні: НЕпроцедурний документ,
+        # який просто згадує бланк (напр. наказ про конкретне відрядження),
+        # проходив би далі.
+        #
+        # Ціна перевірки заміряна й дорівнює нулю: усі 60 реальних бланків
+        # набору (docx + pdf) мають 1 заголовок І 5 анкорів. Тобто вимога не
+        # відкидає жодного справжнього документа, лише прибирає вирок за
+        # одним згадуванням.
+        anchors_declared = list(ident.get("anchors") or [])
+        anchor_hits = sum(1 for p in anchors_declared
+                          if phrase_in_text((text or "").lower(), p))
+        anchor_ok = (not anchors_declared) or anchor_hits > 0
         # Строга нерівність: рівний бал двох шаблонів -- це неоднозначність,
         # а не перемога того, хто випадково перший у списку.
-        if best_score >= min_score and best_score > runner_up_score:
+        if best_score >= min_score and best_score > runner_up_score and anchor_ok:
             schema = by_template[best_template]
             return {
                 "schema": schema, "template": best_template, "domain": schema.get("domain"),

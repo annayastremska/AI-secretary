@@ -1236,6 +1236,35 @@ def test_dead_ocr_server_restarts_instead_of_losing_the_rest_of_the_batch():
     assert restart_needed([{"text": "абв"}], True) is False
 
 
+def test_title_mention_alone_does_not_identify_a_template():
+    """Заголовок бланка МОЖЕ бути згаданий у будь-якому документі, що на цей
+    бланк посилається -- тому одного заголовка без анкора не досить.
+
+    Заміряно 14.08.2026: "Положення про проходження військової служби" і
+    "Статут гарнізонної та вартової служб" один раз згадують "посвідчення про
+    відрядження", що давало бал рівно 5 при НУЛІ анкорів (рівно min_score) --
+    і документ визнавався посвідченням. Процедурна перевірка ловить саме ці
+    два, але лише бо вони процедурні; звичайний наказ, що згадує бланк,
+    проходив би далі.
+
+    Ціна вимоги дорівнює нулю: усі 60 реальних бланків набору (docx + pdf)
+    мають 1 заголовок І 5 анкорів -- заміряно, тому жоден справжній документ
+    вимога не відкидає.
+    """
+    from pipeline.identification import identify_template
+    schemas = [{"template": "deployment_certificate", "fields": [], "domain": "deployment",
+                "identification": {"title": ["посвідчення про відрядження"],
+                                    "anchors": ["термін відрядження", "мета відрядження"],
+                                    "min_score": 5}}]
+    # згадка заголовка, анкорів немає -> НЕ ідентифікуємо
+    mention = ("Наказ по військовій частині. Оформити посвідчення про "
+               "відрядження згідно з установленим порядком.")
+    assert identify_template(mention, schemas)["schema"] is None
+    # заголовок + хоч один анкор -> ідентифікуємо
+    real = mention + " Термін відрядження 3 дні."
+    assert identify_template(real, schemas)["template"] == "deployment_certificate"
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):
