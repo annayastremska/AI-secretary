@@ -78,7 +78,32 @@ KNOWN_FIELD_TYPES = {"category", "text", "date", "number", "object_ref"}
 # щоб автор нової схеми дізнався про це з попередження, а не з тихо
 # незаповненого поля через тиждень. `note` тут свідомо НЕМА: він і не має
 # читатись кодом, це документація для людини, і попередження на нього -- шум.
-DECLARED_BUT_UNREAD_KEYS = {"multiple", "registry", "out_of_scope"}
+#
+# РОЗДІЛЕНО 14.08.2026 за рівнем, на якому ключ реально стоїть у YAML. Доти в
+# одному переліку лежали і ключі ПОЛЯ, і ключ СХЕМИ, а перевірка була рівно
+# одна -- `DECLARED_BUT_UNREAD_KEYS & set(field)`. Тобто попередження про
+# `out_of_scope:` (він верхнього рівня, полем не буває) **не спрацьовувало
+# ніколи**, і твердження docs/known-weak-spots.md п.2.7 «валідатор тепер
+# попереджає» для цього ключа було неправдою.
+# Розбір кожного з трьох ключів і чому доля в них різна --
+# docs/architecture/2026-08-14_multirow-tables-and-multiple-subjects.md розд. 5.
+DECLARED_BUT_UNREAD_FIELD_KEYS = {"multiple", "registry"}
+DECLARED_BUT_UNREAD_SCHEMA_KEYS = {"out_of_scope"}
+# Сумісність: назва вживалась як єдиний перелік. Лишаємо об'єднання, щоб
+# зовнішній читач (тест, скрипт) не зламався на перейменуванні.
+DECLARED_BUT_UNREAD_KEYS = (DECLARED_BUT_UNREAD_FIELD_KEYS
+                            | DECLARED_BUT_UNREAD_SCHEMA_KEYS)
+# Що саме станеться зі значенням, якщо ключ лишити оголошеним. Загальне «не
+# читається кодом» не давало автору схеми ЗРОБИТИ з попередження висновок:
+# `registry:` лишається оголошенням назавжди (реєстру як даних немає), а
+# `multiple:` -- це нереалізована ПОВЕДІНКА, і на невідкладеному полі вона
+# означає тихо неправильне значення, а не порожнє.
+UNREAD_KEY_CONSEQUENCE = {
+    "registry": "значення піде в facts.value рядком, об'єкт не створиться "
+                "-- лишається ОГОЛОШЕННЯМ навмисно (weak-spots п.2.7)",
+    "multiple": "витягнеться лише ПЕРШЕ значення (weak-spots п.2.8)",
+    "out_of_scope": "документація межі шаблону для людини, як `note`",
+}
 # Типи зв'язку документ->документ, які build_record складає в
 # record["document_links"]. Перелік закритий: невідомий тип означав би, що
 # зв'язок оголошений у YAML і мовчки нікуди не пішов.
@@ -133,6 +158,12 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
              "домену; якщо мапінгу для цього домену теж немає, кожен документ "
              f"отримає '{UNKNOWN_SUBJECT}' і об'єкт у БД не створиться")
 
+    # Рівень СХЕМИ, не поля. Доти цієї перевірки не було взагалі -- див.
+    # коментар до DECLARED_BUT_UNREAD_SCHEMA_KEYS.
+    for key in sorted(DECLARED_BUT_UNREAD_SCHEMA_KEYS & set(schema)):
+        warn(f"ключ схеми '{key}' не читається кодом -- "
+             f"{UNREAD_KEY_CONSEQUENCE[key]}")
+
     seen_names = set()
     targets = set()
     single_value_targets_seen = {}
@@ -145,9 +176,24 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
             err(f"поле '{name}' оголошене двічі")
         seen_names.add(name)
 
-        for key in DECLARED_BUT_UNREAD_KEYS & set(field):
-            warn(f"поле '{name}': ключ '{key}' не читається кодом "
-                 "(оголошений, але не реалізований)")
+        for key in sorted(DECLARED_BUT_UNREAD_FIELD_KEYS & set(field)):
+            # `multiple: true` на НЕвідкладеному полі -- не попередження.
+            # Відкладене поле й так оголошене як невитягуване (воно йде в
+            # not_implemented_fields, тобто споживач знає, що значення немає).
+            # А на діючому полі оголошення обіцяє СПИСОК, рушій же візьме одне
+            # значення й віддасть його як повне -- «120 осіб у книзі
+            # штатно-посадового обліку» перетворюються на одну, і в записі
+            # ніде не сказано, що решту втрачено. Це тихо неправильна ЦИФРА в
+            # підрахунках, а не порожнє поле, тому error, а не warning.
+            if (key == "multiple" and field.get("multiple")
+                    and field.get("priority") != "deferred"):
+                err(f"поле '{name}': multiple: true на невідкладеному полі -- "
+                    "рушій візьме лише ПЕРШЕ значення й віддасть його як "
+                    "повний список (сегментації на рядки немає). Або "
+                    "priority: deferred, або поле не повинно бути multiple")
+                continue
+            warn(f"поле '{name}': ключ '{key}' не читається кодом -- "
+                 f"{UNREAD_KEY_CONSEQUENCE[key]}")
 
         target = field.get("db_target", "additional_info")
         targets.add(target)
