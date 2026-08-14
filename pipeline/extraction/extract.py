@@ -28,7 +28,9 @@ from pipeline.normalization.normalize import (
     lemmatize_phrase, normalize_field, field_placeholder_tokens,
     fix_numeric_homoglyphs, number_from_words, number_word_value)
 from pipeline.extraction.schema_grammar import build_json_schema_for_fields, chunk_fields
-from pipeline.extraction.blank_form import is_printed_form_text, printed_lines
+from pipeline.extraction.blank_form import (
+    is_printed_form_text, label_order_index, printed_after_label, printed_lines,
+    printed_order, resegment_by_blank)
 
 
 def majority_vote(values):
@@ -256,6 +258,17 @@ def _geometric_candidate(blocks, label_i, h_med):
         return None
     label_page = blocks[label_i].get("page")
     lx1, ly1, lx2, ly2 = label_bbox
+    # Скільки ДОТИКУ дозволено вважати "над"/"під", а не перетином.
+    # Заміряний реальний провал (LEAVE-006.png, `ПІБ`/`звання` = None): рамка
+    # рядка "старший сержант ВЛОХ Святослав Олесьович" (y 643-685) заходить на
+    # рамку свого лейбла "(військове звання, прізвище...)" (y 683-727) на ДВА
+    # пікселі. Строге `by2 <= ly1` викидало правильного кандидата з РОЗГЛЯДУ
+    # ВЗАГАЛІ (він не "праворуч", не "над", не "під"), і "найближчим зверху"
+    # ставав номер документа рядком вище. Рамки сусідніх рядків OCR
+    # торкаються постійно -- це властивість детектора, а не верстки.
+    # Чверть висоти рядка: дотик переживається, справжній сусід по рядку
+    # (перетин на цілий рядок) -- ні.
+    touch = 0.25 * h_med
 
     same_row, same_above, same_below = [], [], []
     for i, block in enumerate(blocks):
@@ -276,9 +289,9 @@ def _geometric_candidate(blocks, label_i, h_med):
         x_overlap = bx1 < lx2 and lx1 < bx2
         if y_overlap and bx1 > lx2:
             same_row.append((bx1 - lx2, i))
-        elif x_overlap and by2 <= ly1:
+        elif x_overlap and by2 <= ly1 + touch:
             same_above.append((ly1 - by2, i))
-        elif x_overlap and by1 >= ly2:
+        elif x_overlap and by1 >= ly2 - touch:
             same_below.append((by1 - ly2, i))
 
     for group in (same_row, same_above, same_below):
@@ -385,7 +398,7 @@ def compile_value_boundaries(field: dict):
             for p in (field.get("value_starts_after") or [])]
 
 
-def _value_lines_after_label_note(lines, extra_boundaries=()):
+def _value_lines_after_label_note(lines, extra_boundaries=(), printed=()):
     """Значення починається ПІСЛЯ останньої друкованої примітки-лейбла (або
     оголошеної схемою межі, див. compile_value_boundaries) серед рядків-
     кандидатів, а не з першого рядка блоку.
@@ -407,12 +420,25 @@ def _value_lines_after_label_note(lines, extra_boundaries=()):
     еталона це пропускала лише тому, що field-mapping.yaml порівнює цей ключ
     через `compare: contains` -- заміряно на 7 документах leave-pdf.
 
+    `printed` -- друковані рядки ПОРОЖНЬОГО бланка (blank_form.printed_lines).
+    Це найсильніша з трьох меж і єдина, що не є евристикою: рядок, який
+    дослівно надрукований на бланку, значенням поля не є за визначенням.
+    Потрібна вона там, де лейбл РОЗРІЗАНИЙ навпіл, а значення стоїть між
+    половинами -- заміряний випадок `місце` (LEAVE-006/008.png): кандидат
+    перед лейблом "до якого звільнено військовослужбовця)" виходить як
+        '(вид відпустки та найменування населеного пункту,'   <- перша половина
+        'м. Івано-Франківськ'                                 <- значення
+    Перша половина не є дужковою приміткою (не збалансована), тому
+    `_is_printed_label_note` її не бачить, і поле відхилялось цілком як
+    "лейбл у значенні".
+
     Порожній залишок -> рядки НЕ ріжуться: примітка в кінці кандидата це
     частина самого значення ("(перервана, відкликаний з відпустки)"), а не
     межа перед ним."""
     last_note = None
     for k, line in enumerate(lines):
         if (_is_printed_label_note(line)
+                or is_printed_form_text(line, printed)
                 or any(p.search(line) for p in extra_boundaries)):
             last_note = k
     if last_note is None or last_note + 1 >= len(lines):
@@ -514,8 +540,46 @@ def _extend_across_block_boundary(blocks, label_block_i, candidate):
     return candidate
 
 
+#: Скільки переставлених друкованих блоків поспіль дозволено пропустити.
+#: Обмеження, а не істина про бланк: якщо між лейблом і значенням стоїть
+#: більше двох чужих друкованих рядків, ми, найпевніше, вже не в тому місці
+#: документа, і мовчки взяти щось звідти гірше, ніж чесно не знайти.
+MAX_REORDERED_SKIP = 2
+
+
+def _previous_value_block(blocks, label_i, label_index, order):
+    """Індекс найближчого попереднього блоку, який МОЖЕ бути значенням, або
+    None.
+
+    "Може бути" = блок не є друкованим рядком бланка, що на самому бланку
+    стоїть ПІСЛЯ нашого лейбла (blank_form.printed_after_label). Такий блок
+    опинився перед лейблом лише через порядок читання OCR, і пропустити його
+    -- єдиний спосіб дістати значення, яке за ним стоїть.
+
+    Заміряно (LEAVE-003/004/007.png): між "м. Житомир" і лейблом
+    "до якого звільнено військовослужбовця)" Surya вставила "терміном на" --
+    рядок, надрукований на бланку НИЖЧЕ лейбла. Без пропуску `місце` на цих
+    документах виходило `printed_form_text`, тобто чесний нуль замість
+    правильного значення, яке лежало на один блок далі.
+
+    Без оголошеного бланка (`order` порожній) поведінка та сама, що була:
+    береться рівно попередній блок.
+    """
+    skipped = 0
+    for k in range(label_i - 1, -1, -1):
+        lines = blocks[k]["lines"]
+        if not lines:
+            continue
+        if (skipped < MAX_REORDERED_SKIP
+                and printed_after_label("\n".join(lines), label_index, order)):
+            skipped += 1
+            continue
+        return k
+    return None
+
+
 def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
-                            boundaries=()):
+                            boundaries=(), printed=(), order=None):
     """blocks: результат group_blocks_into_lines() -- список
     {"lines": [...], "bbox": (...)|None}.
 
@@ -562,6 +626,16 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
     """
     low_label = label_substring.lower()
     low_denylist = denylist or set()
+    # Геометрія працює лише тоді, коли bbox має КОЖЕН блок. Причина заміряна
+    # (LEAVE-003.png): після відновлення меж за бланком (blank_form.
+    # resegment_by_blank) частина блоків геометрії не має, і "найближчий
+    # вирівняний" рахувався по НАБОРУ З ДІРКАМИ -- лейбл "(вид відпустки..."
+    # знайшов "найближчим зверху" ПІБ заявника через півсторінки, бо всі
+    # справжні сусіди вибули з розгляду разом із bbox. Дірявий набір гірший
+    # за відсутність геометрії: docx без неї дає 176/176.
+    geometry_ok = all(b.get("bbox") for b in blocks)
+    order = order or {}
+    label_index = label_order_index(label_substring, order)
 
     hits = []
     for i, block in enumerate(blocks):
@@ -624,11 +698,11 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
         if j > 0:
             src_i, src_lines = i, blocks[i]["lines"][:j]
         else:
-            geo_i = _geometric_candidate(blocks, i, h_med)
-            if geo_i is not None:
-                src_i, src_lines = geo_i, blocks[geo_i]["lines"]
-            elif i > 0 and blocks[i - 1]["lines"]:
-                src_i, src_lines = i - 1, blocks[i - 1]["lines"]
+            geo_i = _geometric_candidate(blocks, i, h_med) if geometry_ok else None
+            prev_i = geo_i if geo_i is not None \
+                else _previous_value_block(blocks, i, label_index, order)
+            if prev_i is not None:
+                src_i, src_lines = prev_i, blocks[prev_i]["lines"]
             else:
                 # Цей хіт не дав ЖОДНОГО кандидата (лейбл -- перший рядок
                 # першого блоку документа, і геометрія теж не спрацювала).
@@ -640,7 +714,7 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
                 unresolved_hit = True
                 continue
 
-        value_lines = _value_lines_after_label_note(src_lines, boundaries)
+        value_lines = _value_lines_after_label_note(src_lines, boundaries, printed)
         extended = _extend_to_anchor(blocks, src_i,
                                      len(src_lines) - len(value_lines),
                                      value_lines, anchor)
@@ -1045,7 +1119,8 @@ def primary_name_group(schema: dict) -> str:
     return DEFAULT_NAME_GROUP
 
 
-def resolve_name_groups(schema, grouped_blocks, denylist, dictionaries):
+def resolve_name_groups(schema, grouped_blocks, denylist, dictionaries, printed=(),
+                        order=None):
     """{group: (rank_result, name_parts, raw_line, label_reason)} -- по одному
     розбору на ОСОБУ, не один на документ.
 
@@ -1077,7 +1152,8 @@ def resolve_name_groups(schema, grouped_blocks, denylist, dictionaries):
                                       "patronymic": None}, None, "no_label")
             continue
         raw_line, label_reason = find_block_before_label(grouped_blocks, label,
-                                                         denylist, anchor=strip)
+                                                         denylist, anchor=strip,
+                                                         printed=printed, order=order)
         if raw_line and strip:
             raw_line = strip_literal_prefix(raw_line, strip)
         rank_result, name_parts = parse_rank_and_name(raw_line, rank_lookup)
@@ -1224,6 +1300,22 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     однієї групи позначає лише ЇЇ поля як llm_error, не чіпає інші групи й
     не втрачає вже отримані детерміновані значення.
     """
+    # ВІДНОВЛЕННЯ МЕЖ ПОЛІВ -- ПЕРШИМ, до всього іншого (A3, blank_form.py).
+    # Surya віддає області зображення, а не абзаци, тому друковані лейбли
+    # бланка приходять склеєними зі значеннями в один рядок. Різання по
+    # відомому тексту порожнього бланка повертає ту саму послідовність
+    # "лейбл / значення", яку docx має з абзаців, -- і далі весь двигун
+    # працює без жодної зміни.
+    #
+    # `ocr_text` перебудовується ЛИШЕ якщо різання щось змінило, і це не
+    # оптимізація: схемні regex-и прив'язані до пробілів між словами
+    # ("терміном\\s+на\\s+"), тож без перебудови `днів` лишався б зламаним на
+    # тих самих документах, де блоки вже виправлені. Коли різати нічого, текст
+    # лишається ТИМ САМИМ рядком, тобто docx/PDF не зачеплені взагалі.
+    ocr_blocks, resegmented = resegment_by_blank(ocr_blocks, schema)
+    if resegmented:
+        ocr_text = "\n".join(_raw_block_text(b) for b in ocr_blocks)
+
     grouped_blocks = group_blocks_into_lines(ocr_blocks)
     flat_blocks = flatten_blocks(ocr_blocks)
     denylist = {p.strip().lower() for p in (title_phrases or [])}
@@ -1232,13 +1324,18 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     # схема не оголосила `blank_template:` -- тоді всі перевірки нижче
     # інертні, тобто новий бланк без шаблону поводиться точно як раніше.
     printed = printed_lines(schema)
+    # Порядок друкованих рядків бланка -- окремо від їх множини: множина
+    # відповідає на "чи це друкований текст", порядок -- на "де він стоїть
+    # відносно лейбла" (див. find_block_before_label / printed_after_label).
+    blank_order = printed_order(schema)
     fields_by_name = {f["name"]: f for f in schema["fields"]}
     results = {}
     localized_gaps, global_gaps, hints = [], [], {}
 
     # Розбір "звання ПІБ" -- один на ОСОБУ, до головного циклу. Раніше це був
     # один лінивий кеш на весь документ (див. resolve_name_groups).
-    name_groups = resolve_name_groups(schema, grouped_blocks, denylist, dictionaries)
+    name_groups = resolve_name_groups(schema, grouped_blocks, denylist, dictionaries,
+                                      printed, blank_order)
 
     for field in schema["fields"]:
         name = field["name"]
@@ -1275,7 +1372,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
             raw, label_reason = find_block_before_label(
                 grouped_blocks, field["label_before"], denylist,
                 anchor=field.get("strip_prefix"),
-                boundaries=compile_value_boundaries(field))
+                boundaries=compile_value_boundaries(field), printed=printed,
+                order=blank_order)
             if raw is not None and field.get("strip_prefix"):
                 raw = strip_literal_prefix(raw, field["strip_prefix"])
             if raw is None:
