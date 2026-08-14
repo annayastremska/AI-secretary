@@ -489,7 +489,7 @@ def test_llm_not_asked_when_no_anchor_matched():
 def test_source_instruction_is_not_mistaken_for_a_blank():
     """Документ, що МІСТИТЬ бланки, не є жодним з них.
 
-    Живе репро від команди БД: eval/synthetic/normative/інструкція_діловодство.docx
+    Живе репро від команди БД: data/eval/samples/normative/інструкція_діловодство.docx
     (402898 символів) чесно набирає бал 9 за deployment_certificate і 9 за
     leave_ticket -- бо містить і Додаток 28, і Додаток 30 разом із їхніми
     заголовками. Раніше нічия віддавалась LLM, і та впевнено називала це
@@ -887,7 +887,7 @@ def test_placeholder_tokens_are_configurable_from_schema():
 def test_empty_blank_is_still_empty_after_token_change():
     """Порожній бланк відпускного мусить лишатись порожнім: саме на ньому
     перелік токенів працює правильно. Рядки -- справжні з
-    eval/synthetic/leave/відпускний_шаблон.docx і з LEAVE-011 (вада
+    data/eval/samples/leave/відпускний_шаблон.docx і з LEAVE-011 (вада
     empty_fields)."""
     leave = _schema_by_template("leave_ticket")
     by_name = {f["name"]: f for f in leave["fields"]}
@@ -914,7 +914,7 @@ def test_empty_blank_is_still_empty_after_token_change():
 def test_procedural_domain_wins_over_topical_score():
     """Документ ПРАВИЛ не класифікується як документ про тему, яку він описує.
 
-    Заміряно на eval/synthetic/normative/інструкція_діловодство.docx (402898
+    Заміряно на data/eval/samples/normative/інструкція_діловодство.docx (402898
     символів): бали leave 8, equipment 8, staffing 9, deployment 7 --
     інструкція МІСТИТЬ усі бланки й згадує всі теми, тому тематичний
     переможець визначався шумом (до появи домену normative вона була

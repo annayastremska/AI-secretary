@@ -4,12 +4,12 @@
 Запускати з КОРЕНЯ репозиторію як модуль -- інакше `import pipeline` не
 знайдеться (у корені репо код не лежить, це правило проєкту):
 
-    python -m pipeline.run_pipeline                          # уся папка з config.paths.input_dir
-    python -m pipeline.run_pipeline --input eval/synthetic/deployment/посвідчення.docx
-    python -m pipeline.run_pipeline --no-llm                 # лише детермінований прохід
-    python -m pipeline.run_pipeline --template leave_ticket  # примусова схема (для тестів)
-    python -m pipeline.run_pipeline --dry-run                # нічого не зберігати
-    python -m pipeline.run_pipeline --reprocess              # ігнорувати дедуплікацію
+    python run_pipeline.py                          # уся папка з config.paths.input_dir
+    python run_pipeline.py --input data/eval/samples/deployment/посвідчення.docx
+    python run_pipeline.py --no-llm                 # лише детермінований прохід
+    python run_pipeline.py --template leave_ticket  # примусова схема (для тестів)
+    python run_pipeline.py --dry-run                # нічого не зберігати
+    python run_pipeline.py --reprocess              # ігнорувати дедуплікацію
 
 Вихід -- коротка таблиця по документах; повний запис лягає у сховище
 (data/output/documents/<domain>/<id>.md) з YAML-шапкою, що містить subject,
@@ -32,7 +32,7 @@ STATUS_MARK = {
 
 def _force_utf8_output():
     """Кирилиця в stdout/stderr незалежно від кодової сторінки консолі й
-    редіректу у файл. Без цього `python -m pipeline.run_pipeline > log.txt` на Windows
+    редіректу у файл. Без цього `python run_pipeline.py > log.txt` на Windows
     міг кинути UnicodeEncodeError уже ПІСЛЯ того, як усі документи успішно
     оброблені й збережені -- втрачався лише звіт, але виглядало як падіння."""
     for stream in (sys.stdout, sys.stderr):

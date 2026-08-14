@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 """Оцінка пайплайна проти еталона синтетичного набору.
 
-    python -m eval.evaluate --input eval/synthetic/leave/synthetic-2026-05/docx
+    python -m eval.evaluate --input data/eval/samples/leave/synthetic-2026-05/docx
     python -m eval.evaluate --input ... --no-llm
     python -m eval.evaluate --input ... --report out.json
 
 Навіщо саме так, а не golden-файли: у наборі є по-польові правильні відповіді
-(`eval/expected/synthetic-2026-05/per-document/<ID>.json`), тож можна міряти
+(`data/eval/synthetic-2026-05/per-document/<ID>.json`), тож можна міряти
 точність, а не лише "чи змінилась поведінка". Звіт пишеться в JSON, тому два
 прогони порівнюються діфом -- це закриває і задачу golden-файлів.
 
 Пайплайн викликається через process_file напряму, БЕЗ сховища й БЕЗ
-перенесення файлів: прогін на eval/synthetic/ не має ні виносити зразки з
+перенесення файлів: прогін на data/eval/samples/ не має ні виносити зразки з
 репозиторію, ні засмічувати індекс дедуплікації (інакше другий прогін того
 самого набору віддав би 30 duplicate).
 
@@ -35,7 +35,7 @@ import yaml
 from pipeline.config import load_config
 from pipeline.run import build_resources, process_file
 
-EVAL_DIR = os.path.join("eval", "expected", "synthetic-2026-05")
+EVAL_DIR = os.path.join("data", "eval", "synthetic-2026-05")
 MAPPING_PATH = os.path.join("eval", "field-mapping.yaml")
 DOC_ID_RE = re.compile(r"((?:LEAVE|TRIP)-\d+)", re.I)
 

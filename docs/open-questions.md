@@ -300,9 +300,9 @@ MamayLM у малих розмірах не була ні підтверджен
 Інструкції з діловодства. Але **другий нормативний документ у репозиторії
 проходить мимо гейта**, і це заміряно, не гіпотеза:
 
-    eval/synthetic/normative/інструкція_діловодство.docx
+    data/eval/samples/normative/інструкція_діловодство.docx
         -> домен normative -> subject_kind: none -> об'єкт НЕ створюється ✓
-    eval/synthetic/normative/інструкція_автомобільна_техніка.pdf  (76125 симв.)
+    data/eval/samples/normative/інструкція_автомобільна_техніка.pdf  (76125 симв.)
         -> домен equipment -> subject_kind: equipment
         -> create_subject_object: TRUE -> фантомний об'єкт «техніка» ✗
 

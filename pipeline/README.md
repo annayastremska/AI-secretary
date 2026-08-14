@@ -9,7 +9,7 @@
 ## Правило даних
 
 Реальні документи замовника сюди **не кладемо** — ні для тестів, ні тимчасово.
-Зразки для розробки беремо з `eval/synthetic/`.
+Зразки для розробки беремо з `data/eval/samples/`.
 
 ## Чернетка vs підтверджений факт
 
@@ -34,8 +34,8 @@
 
 - `pipeline/` — інжест → ідентифікація шаблону → екстракція → нормалізація
   → збірка запису → локальне сховище.
-- `pipeline/run_pipeline.py` — вхідна точка. Запуск **з кореня репо як модуль**:
-  `python -m pipeline.run_pipeline`. Не `python pipeline/run_pipeline.py` —
+- `run_pipeline.py` — вхідна точка. Запуск **з кореня репо як модуль**:
+  `python run_pipeline.py`. Не `python pipeline/run_pipeline.py` —
   тоді на `sys.path` потрапляє сам `pipeline/`, і `import pipeline` не
   знаходиться.
 - `pipeline/schemas/` — схема полів на кожен тип бланка (regex/LLM/дата/
@@ -48,18 +48,18 @@
 
 Дані й вимірювання (ділянка `eval/`, та сама власниця):
 
-- `eval/synthetic/<домен>/` — зразки документів по доменах (leave, deployment,
+- `data/eval/samples/<домен>/` — зразки документів по доменах (leave, deployment,
   normative, equipment, staffing). **Єдине місце в репо, куди пускають файли
-  документів**: каркасний `.gitignore` блокує `*.docx`/`*.pdf`/`*.png` усюди,
-  крім `eval/synthetic/**`.
-- `eval/expected/synthetic-2026-05/` — еталонні відповіді до набору.
+  документів**: `.gitignore` блокує `*.docx`/`*.pdf`/`*.png`/`*.xlsx` усюди,
+  крім `data/eval/**`.
+- `data/eval/synthetic-2026-05/` — еталонні відповіді до набору.
 - `eval/evaluate.py` — вимірювальний прилад (`python -m eval.evaluate`),
   `eval/field-mapping.yaml` — як поля виводу зіставляються з еталоном.
 - `eval/tests/` — регресійні тести пайплайна й тести на сам прилад.
 
 Локальний стан прогону (у `.gitignore`, у git не їде):
 
-- `data/inbox/` — папка-приймач: `python -m pipeline.run_pipeline` без
+- `data/inbox/` — папка-приймач: `python run_pipeline.py` без
   аргументів обробляє все, що лежить безпосередньо в ній (без підпапок), і
   переносить оброблене далі, щоб приймач спорожнявся.
 - `data/processed/<дата>/`, `data/failed/<дата>/` — куди переносяться оброблені
@@ -67,7 +67,7 @@
   має глянути людина.
 - `data/output/` — витягнуті записи: `documents/<domain>/<id>.md` з YAML-шапкою
   (`subject`, `facts`, провенанс кожного поля); `unresolved` — окремою текою.
-- `eval/reports/` — JSON-звіти прогонів оцінювача.
+- `data/eval/reports/` — JSON-звіти прогонів оцінювача.
 
 Написане — у `docs/`: контракт із базою (`docs/contracts/`), архітектура
 (`docs/architecture/`), дослідження (`docs/research/`), два живі списки
@@ -128,7 +128,7 @@ ocr:
 Перевірка, що обидва компоненти справді підключені:
 
 ```bash
-python -m pipeline.run_pipeline --input eval/synthetic/leave/synthetic-2026-05/png/LEAVE-001.png
+python run_pipeline.py --input data/eval/samples/leave/synthetic-2026-05/png/LEAVE-001.png
 ```
 
 Вивід має показати `LLM: увімкнено | OCR: surya` перед списком документів.
@@ -141,7 +141,7 @@ python -m pipeline.run_pipeline --input eval/synthetic/leave/synthetic-2026-05/p
 результат буде в `data/output/documents/deployment/`:
 
 ```bash
-python -m pipeline.run_pipeline --input eval/synthetic/deployment/посвідчення_відрядження_заповнений.docx
+python run_pipeline.py --input data/eval/samples/deployment/посвідчення_відрядження_заповнений.docx
 ```
 
 Файл, переданий через `--input`, **не** переміщується, тому цю команду можна
@@ -152,10 +152,10 @@ python -m pipeline.run_pipeline --input eval/synthetic/deployment/посвідч
 Решта режимів:
 
 ```bash
-python -m pipeline.run_pipeline                     # обробити все з data/inbox (і перенести оброблене)
-python -m pipeline.run_pipeline --no-llm            # лише детермінований прохід
-python -m pipeline.run_pipeline --template leave_ticket   # примусова схема
-python -m pipeline.run_pipeline --dry-run           # нічого не зберігати
+python run_pipeline.py                     # обробити все з data/inbox (і перенести оброблене)
+python run_pipeline.py --no-llm            # лише детермінований прохід
+python run_pipeline.py --template leave_ticket   # примусова схема
+python run_pipeline.py --dry-run           # нічого не зберігати
 ```
 
 `config.yaml` у `.gitignore` — це налаштування конкретної машини; у

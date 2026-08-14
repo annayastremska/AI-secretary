@@ -1,11 +1,10 @@
-# Jekyll config for the repo-gated Pages site (.github/workflows/pages.yml).
-# Excluded paths never reach the site: the site is for the handbook and reports,
-# not a mirror of the working tree — src/ and agent-sessions/ stay repo-only.
+# Jekyll config для Pages-сайту. Каркасний workflow, що його збирав, прибрано
+# разом із рештою каркасу курсу 14.08.2026 -- файл лишається як налаштування
+# теми, якщо сайт колись піднімуть знову.
 title: Team docs
 theme: jekyll-theme-primer
 exclude:
-  - src
-  - agent-sessions
+  - data
   - node_modules
   - vendor
   - Gemfile
