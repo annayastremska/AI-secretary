@@ -162,7 +162,6 @@ fields:
   - name: leave_start_date
     type: date
     extraction: regex
-    normalization: iso_date
     regex_variants:
       # варіант 1: спільний рік наприкінці діапазону (фото2)
       - pattern: 'з\s+(?P<day>\d{1,2})\s+(?P<month>[а-яіїє]+|\d{1,2})\s+по\s+\d{1,2}\s+[а-яіїє]+\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
@@ -173,7 +172,6 @@ fields:
   - name: leave_end_date_planned
     type: date
     extraction: regex
-    normalization: iso_date
     regex_variants:
       - pattern: 'по\s+(?P<day>\d{1,2})\s+(?P<month>[а-яіїє]+|\d{1,2})\s+(?P<year>\d{4})\s*(?:р\.?|рок\w*)'
       - pattern: 'по\s*[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2}|[а-яіїє]+)\s+20(?P<year>\d{2})\s*(?:р\.?|рок\w*)'
@@ -187,7 +185,6 @@ fields:
     dimension: leave_actual_return
     extraction: block_before_label
     label_before: "дата повернення"
-    normalization: iso_date
     # Дата повернення не може бути РАНІШЕ планового кінця відпустки (16/16 у
     # наборі: повернення = кінець + 1 день). Це те поле, що ЗАКРИВАЄ відпустку,
     # тому хибне значення лишає людину "у відпустці" назавжди.
@@ -225,7 +222,6 @@ fields:
   - name: document_date
     type: date
     extraction: regex
-    normalization: iso_date
     dimension: document_date
     regex_variants:
       - pattern: '№\s*[\w/\-]+\s+від\s+(?P<day>\d{1,2})\.(?P<month>\d{1,2})\.(?P<year>\d{4})'

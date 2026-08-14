@@ -143,6 +143,15 @@ SINGLE_VALUE_DB_TARGETS = {"fact_value", "fact_date_start", "fact_date_end"}
 # САМУ вільну схему {"string","null"}, що й легітимний "text" -- тобто
 # категоріальне поле втрачає enum-обмеження LLM без жодного попередження.
 KNOWN_FIELD_TYPES = {"category", "text", "date", "number", "object_ref"}
+# Значення `normalization:`, які normalize_field справді читає (R-A1-06 +
+# R-A2-05). Доти значення цього ключа не перевірялось НІЯК: одруківка
+# `null_if_not_isued` не давала жодного повідомлення, а «не видавались»
+# ставало реальним значенням поля і їхало в базу окремим фактом.
+KNOWN_NORMALIZATIONS = {"nominative_case", "null_if_not_issued"}
+# Типи, для яких normalize_field диспетчеризує ДО читання `normalization:` --
+# ключ на такому полі мертвий за побудовою (саме так 8 рядків
+# `normalization: iso_date` прожили в схемах, не читаючись жодним рядком коду).
+TYPE_DISPATCHED_BEFORE_NORMALIZATION = {"category", "number", "date"}
 # Ключі, які схема може оголосити, але код їх НЕ читає. Тримаємо перелік явно,
 # щоб автор нової схеми дізнався про це з попередження, а не з тихо
 # незаповненого поля через тиждень. `note` тут свідомо НЕМА: він і не має
@@ -284,6 +293,32 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
                 f"{sorted(KNOWN_FIELD_TYPES)}) -- отримає ту саму вільну "
                 "схему, що й text (schema_grammar._field_json_schema), тож "
                 "LLM зможе повернути що завгодно замість enum-коду")
+
+        # `normalization:` -- закритий перелік, як type / part / db_target, і
+        # з тієї самої причини (R-A1-06 + R-A2-05): невідоме значення означає,
+        # що оголошена нормалізація мовчки НЕ виконується. Найдорожчий випадок
+        # заміряний: одруківка в null_if_not_issued перетворює
+        # підтверджено-порожнє поле («не видавались») на текстове значення,
+        # яке їде в БД окремим фактом.
+        normalization = field.get("normalization")
+        if normalization is not None:
+            if normalization not in KNOWN_NORMALIZATIONS:
+                err(f"поле '{name}': невідома normalization '{normalization}' "
+                    f"(відомі: {sorted(KNOWN_NORMALIZATIONS)}) -- нормалізація "
+                    "мовчки не виконувалась би, а сентинел/відмінок пішов би "
+                    "в БД сирим значенням")
+            elif field_type in TYPE_DISPATCHED_BEFORE_NORMALIZATION:
+                err(f"поле '{name}': normalization '{normalization}' не "
+                    f"читається для type '{field_type}' -- normalize_field "
+                    "диспетчеризує за типом раніше, ключ мертвий")
+            if normalization == "null_if_not_issued" and not field.get("not_issued_sentinel"):
+                err(f"поле '{name}': null_if_not_issued без not_issued_sentinel "
+                    "-- порівнювати нема з чим, нормалізація інертна")
+        if field.get("not_issued_sentinel") and normalization != "null_if_not_issued":
+            err(f"поле '{name}': not_issued_sentinel оголошено без "
+                "normalization: null_if_not_issued -- сентинел "
+                f"'{field.get('not_issued_sentinel')}' пішов би в БД як "
+                "реальне значення поля")
 
         part = field.get("part")
         if part is not None and part not in NAME_PART_ROLES:

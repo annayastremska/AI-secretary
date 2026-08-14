@@ -156,7 +156,6 @@ fields:
   - name: deployment_start_date
     type: date
     extraction: regex
-    normalization: iso_date
     regex_variants:
       # окремий рік при кожній даті -- підтверджено за реальним текстом docx,
       # тут це основний варіант, не запасний (на відміну від leave_ticket)
@@ -166,7 +165,6 @@ fields:
   - name: deployment_end_date
     type: date
     extraction: regex
-    normalization: iso_date
     regex_variants:
       - pattern: 'по\s*[«"“„]?(?P<day>\d{1,2})[»"”‟]?\s+(?P<month>\d{1,2}|[а-яіїє]+)\s+20(?P<year>\d{2})\s*(?:р\.?|рок\w*)'
     db_target: fact_date_end
@@ -199,7 +197,6 @@ fields:
     # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
     dimension: order_date
     extraction: regex
-    normalization: iso_date
     note: >
       «Підстава відрядження: рішення, наказ від ___ №___» — єдине
       ідентифікуюче посилання на цьому бланку (власного номера/дати
@@ -289,7 +286,6 @@ fields:
   - name: document_date
     type: date
     extraction: regex
-    normalization: iso_date
     dimension: document_date
     regex_variants:
       - pattern: '№\s*[\w/\-]+\s+від\s+(?P<day>\d{1,2})\.(?P<month>\d{1,2})\.(?P<year>\d{4})'

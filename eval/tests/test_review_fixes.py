@@ -154,6 +154,63 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-A1-06 + R-A2-05: значення `normalization:` валідуються ---------------
+
+def _leave_schema():
+    from pipeline.identification import load_schemas
+    return next(s for s in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas"))
+                if s["template"] == "leave_ticket")
+
+
+def test_normalization_typo_is_loud():
+    """Одруківка `null_if_not_isued` не давала ЖОДНОГО повідомлення валідатора,
+    а «не видавались» ставало реальним значенням поля в БД."""
+    import copy
+    from pipeline.identification import validate_schema
+    schema = copy.deepcopy(_leave_schema())
+    field = next(f for f in schema["fields"]
+                 if f.get("normalization") == "null_if_not_issued")
+    field["normalization"] = "null_if_not_isued"
+    problems = validate_schema(schema)
+    assert any(sev == "error" and "normalization" in msg and "null_if_not_isued" in msg
+               for sev, msg in problems), problems
+
+
+def test_sentinel_without_normalization_is_loud():
+    """not_issued_sentinel без null_if_not_issued -- сентинел їде в БД як
+    реальне значення; це і є заміряний наслідок одруківки."""
+    import copy
+    from pipeline.identification import validate_schema
+    schema = copy.deepcopy(_leave_schema())
+    field = next(f for f in schema["fields"] if f.get("not_issued_sentinel"))
+    del field["normalization"]
+    problems = validate_schema(schema)
+    assert any(sev == "error" and "not_issued_sentinel" in msg
+               for sev, msg in problems), problems
+
+
+def test_dead_normalization_on_dispatched_type_is_loud():
+    """`normalization:` на type date/number/category мертвий за побудовою --
+    саме так 8 рядків iso_date прожили в схемах, не читаючись ніде."""
+    import copy
+    from pipeline.identification import validate_schema
+    schema = copy.deepcopy(_leave_schema())
+    field = next(f for f in schema["fields"] if f.get("type") == "date")
+    field["normalization"] = "nominative_case"
+    problems = validate_schema(schema)
+    assert any(sev == "error" and "не читається для type" in msg
+               for sev, msg in problems), problems
+
+
+def test_current_schemas_validate_clean_of_errors():
+    """Обидві робочі схеми (після зняття мертвого iso_date) не мають ЖОДНОЇ
+    помилки валідатора -- інакше run.py виключив би їх із набору."""
+    from pipeline.identification import load_schemas, validate_schema
+    for schema in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas")):
+        errors = [m for sev, m in validate_schema(schema) if sev == "error"]
+        assert not errors, errors
+
+
 # --- R-B1-04: неможлива дата мусить лишати сирий збіг -----------------------
 
 def test_impossible_date_keeps_raw_match_visible():

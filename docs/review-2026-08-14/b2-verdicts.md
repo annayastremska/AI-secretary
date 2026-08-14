@@ -265,6 +265,13 @@ how_verified:
      значення поля з dimension: travel_document.
 note: severity should-fix, а не nit, саме через (4): підтверджено-порожнє поле
   перетворюється на текстове значення, що їде в базу окремим фактом.
+outcome: fixed — (а) 8 мертвих рядків `normalization: iso_date` знято зі схем;
+  (б) validate_schema перевіряє normalization як закритий перелік
+  (KNOWN_NORMALIZATIONS), еррорить мертвий ключ на type date/number/category,
+  null_if_not_issued без сентинела і сентинел без null_if_not_issued.
+  ДО: одруківка -> тиша, «не видавались» їде в БД. ПІСЛЯ: error, схема
+  виключається вголос. Тести: 4 у test_review_fixes.py.
+  Корпуси: 192/192 ×2, 169/169 ×2, тестів 169.
 ```
 
 ```
