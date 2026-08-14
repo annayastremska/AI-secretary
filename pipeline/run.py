@@ -303,17 +303,27 @@ def _person_identity(subject: dict) -> dict:
     return subject
 
 
-def _review_queue_type(status: str, source_kind: str, audit_sampled: bool):
+def _review_queue_type(status: str, source_kind: str, audit_sampled: bool,
+                       ocr_used: bool = False):
     """Одне значення queue_type, бо в них review_queue приймає рівно одне.
     Порядок = порядок пріоритету: непізнаний тип документа гірший за
     непідтверджений факт, а вибірка аудиту -- найслабша причина з трьох."""
     if status == "unresolved":
         return "unknown_type"
     if status == "needs_review":
-        # handwritten окремим типом ставимо лише для фото: рукописне
-        # заповнення буває тільки там, і людині при розборі це підказка, яким
-        # інструментом дивитись документ.
-        return "handwritten" if source_kind == "photo" else "unconfirmed_fact"
+        # handwritten окремим типом -- ЛИШЕ коли вміст справді читався з
+        # пікселів (OCR), а не з текстового шару. Раніше вистачало самого
+        # source_kind == "photo" без жодної перевірки вмісту (R-A1-10 +
+        # R-A2-12): docx під іменем .pdf (порожня остання сторінка без
+        # текстового шару -> scan_pages_detected -> photo, R-B1-05) потрапляв
+        # би в чергу «рукописне», хоча кожне його значення прийшло з
+        # born-digital тексту. OCR -- це не доказ рукопису, але це доказ, що
+        # людині треба дивитись саме зображення; текстовий шар -- доказ
+        # протилежного. Рукопис як такий пайплайн не розпізнає (свідомо,
+        # docs/open-questions.md), тож handwritten тут означає «читалось
+        # оком з картинки», як і погоджено в контракті з БД.
+        return "handwritten" if (source_kind == "photo" and ocr_used) \
+            else "unconfirmed_fact"
     return "qa_sample" if audit_sampled else None
 
 
@@ -629,7 +639,9 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             # дивитись на поля.
             review_queue=("unknown_type" if (template_by_llm or unknown_kind
                                              or not form_recognized)
-                          else _review_queue_type(status, source_kind, audit_sampled)),
+                          else _review_queue_type(
+                              status, source_kind, audit_sampled,
+                              ocr_used=bool(ingest_info.get("ocr_pages")))),
             subject=subject,
             subject_kind=subject_kind,
             subject_kind_source=kind_info["source"],

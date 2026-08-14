@@ -449,6 +449,13 @@ how_verified: прямий виклик:
   Код run.py:312 — один рядок, жодної перевірки вмісту чи причини.
   Незалежно перетинається з R-B1-05: docx під іменем .pdf отримує
   source_kind=photo, тобто «рукописним» може стати навіть born-digital файл.
+outcome: fixed — _review_queue_type тепер вимагає ocr_used (ingest_info
+  ocr_pages > 0): «handwritten» лише коли вміст справді читався з пікселів;
+  текстовий шар -> unconfirmed_fact. Закриває заміряний хибний клас
+  (born-digital у черзі «рукописне»). Повне розпізнавання рукопису як таке —
+  свідомо поза системою (docs/open-questions.md), контракт із БД не змінено.
+  Тест: test_handwritten_queue_requires_ocr_evidence.
+  Корпуси: 224/224 ×2, 183/183 ×2, тестів 185.
 ```
 
 ```

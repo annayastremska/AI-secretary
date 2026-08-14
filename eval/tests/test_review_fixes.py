@@ -198,6 +198,22 @@ def test_current_mapping_covers_all_active_fields():
     assert problems == [], problems
 
 
+# --- R-A1-10 + R-A2-12: «handwritten» вимагає доказу читання з пікселів -----
+
+def test_handwritten_queue_requires_ocr_evidence():
+    """Раніше вистачало source_kind=photo без перевірки вмісту: born-digital
+    docx під іменем .pdf потрапляв би в чергу «рукописне»."""
+    from pipeline.run import _review_queue_type
+    # вміст прийшов з текстового шару -- рукописним його ніхто не читав
+    assert _review_queue_type("needs_review", "photo", False,
+                              ocr_used=False) == "unconfirmed_fact"
+    # вміст справді читався OCR-ом з зображення
+    assert _review_queue_type("needs_review", "photo", False,
+                              ocr_used=True) == "handwritten"
+    assert _review_queue_type("needs_review", "electronic", False,
+                              ocr_used=False) == "unconfirmed_fact"
+
+
 # --- R-A2-04: document_links міряються, а не «пайплайн не знає» -------------
 
 def test_replacing_document_must_carry_supersedes_link():
