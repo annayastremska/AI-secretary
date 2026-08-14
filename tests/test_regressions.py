@@ -1208,6 +1208,34 @@ def test_degraded_ocr_is_not_confused_with_unknown_document():
     assert any("підозріло мало" in w for w in meta["warnings"]), meta["warnings"]
 
 
+def test_dead_ocr_server_restarts_instead_of_losing_the_rest_of_the_batch():
+    """Виміряний баг: внутрішній llama-server Surya падав (ErrorDeviceLost на
+    вбудованій графіці), surya віддавала порожній результат як «чисту
+    сторінку», а бекенд лишав `handle` виставленим -- тому сам він більше не
+    піднімався. Гинув не один документ, а ВСІ наступні: 7 з 16 пішли в
+    unresolved з нулем полів, без жодного винятку.
+
+    Перевіряємо саму умову перезапуску, а не Surya: тест мусить бігати без
+    моделі й без обробки документів.
+    """
+    from pipeline.ocr.surya_reader import restart_needed
+
+    # порожньо + сервер мертвий -> єдиний випадок, коли перезапуск виправданий
+    assert restart_needed([], False) is True
+
+    # порожньо, але сервер ЖИВИЙ -- законно чистий аркуш. Перезапуск тут
+    # означав би хвилини на перечитування ваг за кожен пустий скан.
+    assert restart_needed([], True) is False
+
+    # "не змогли перевірити" -- не діагноз "мертвий": інакше найперший
+    # документ пакета перезапускав би щойно піднятий сервер
+    assert restart_needed([], None) is False
+
+    # текст уже є -- перезапускати нема чого, навіть якщо сервер щойно впав
+    assert restart_needed([{"text": "абв"}], False) is False
+    assert restart_needed([{"text": "абв"}], True) is False
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):
