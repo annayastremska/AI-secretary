@@ -8,15 +8,75 @@ surya імпортується ліниво -- пайплайн має зава�
 неї (docx-шлях OCR не потребує взагалі).
 """
 import html
+import ipaddress
 import os
 import re
 import sys
+from urllib.parse import urlsplit
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _BR_RE = re.compile(r"<br\s*/?>")
 
 
 DEFAULT_INFERENCE_PARALLEL = "2"
+
+# Змінна середовища surya, якою МОЖНА відправити зображення документів на чужу
+# машину: якщо вона виставлена, surya не піднімає локальний сервер, а
+# під'єднується до вказаного URL
+# (`surya/inference/backends/spawn.py`, «0. If user pinned an external URL»).
+INFERENCE_URL_ENV = "SURYA_INFERENCE_URL"
+
+
+class ExternalInferenceRefused(RuntimeError):
+    """OCR відмовився працювати, бо розпізнавання пішло б за межі машини."""
+
+
+def _is_loopback_host(host: str) -> bool:
+    if not host:
+        return False
+    host = host.strip().strip("[]").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        # Не IP і не localhost -- імені ми не розв'язуємо: DNS міг би вказати
+        # куди завгодно, і «схоже на локальне» не є доказом локальності.
+        return False
+
+
+def check_inference_url(url) -> None:
+    """Пускає далі лише порожнє значення або loopback. Інакше -- виняток.
+
+    Найдорожче обмеження проєкту (`docs/spec/security-constraints.md`):
+    зображення документів не виходять за межі машини. Гарантію дає те, що
+    внутрішній сервер розпізнавання слухає лише loopback на випадковому порту
+    (`s.bind(("127.0.0.1", 0))` у surya), АЛЕ ця гарантія умовна: виставлена
+    `SURYA_INFERENCE_URL` її скасовує, і зробити це може будь-хто на машині,
+    поза нашим конфігом і поза git. Тому тут саме ПЕРЕВІРКА, а не покладання
+    на те, що ми її ніде не виставляємо.
+
+    Відмова, а не попередження: попередження в пакетному прогоні на 16
+    документів побачить хіба той, хто читає stderr, -- а ціна пропущеного
+    попередження тут не «поле не витягли», а бойові документи на чужому сервері.
+
+    Ім'я, яке не є ні IP, ні `localhost`, теж відмова: покладатись на DNS
+    означало б, що безпека залежить від вмісту hosts-файлу.
+    """
+    if not url or not str(url).strip():
+        return
+    raw = str(url).strip()
+    # Без схеми ("192.168.1.5:8080") urlsplit кладе все в path і hostname дає
+    # None -- тоді ми б помилково побачили "порожній хост" і пропустили адресу.
+    parsed = urlsplit(raw if "//" in raw else "//" + raw)
+    if _is_loopback_host(parsed.hostname or ""):
+        return
+    raise ExternalInferenceRefused(
+        f"{INFERENCE_URL_ENV}={raw} вказує за межі цієї машини -- розпізнавання "
+        "відправляло б зображення документів на зовнішній сервер. OCR не "
+        "запускається. Приберіть змінну середовища (або вкажіть 127.0.0.1). "
+        "Див. docs/spec/security-constraints.md."
+    )
 
 
 def restart_needed(blocks, server_healthy) -> bool:
@@ -64,7 +124,8 @@ def _health_of(manager):
         return None
 
 
-def make_surya_reader(llama_server_path=None, inference_parallel=None):
+def make_surya_reader(llama_server_path=None, inference_parallel=None,
+                      n_gpu_layers=None, hub_offline=False):
     """Повертає callable(image_path) -> list[{"text","bbox"}].
 
     Модель вантажиться один раз на процес (замикання), не на кожен файл --
@@ -73,7 +134,28 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None):
     llama_server_path: Surya всередині запускає llama.cpp-сервер. На Linux/
     Colab він збирається з джерел; на Windows простіше вказати шлях до вже
     готового бінарника, ніж тягнути тулчейн.
+
+    n_gpu_layers: скільки шарів моделі розпізнавання вивантажити на GPU
+    (`LLAMA_CPP_NGL` для того самого внутрішнього сервера). `None` -- не
+    торкатися середовища взагалі, тобто лишити дефолт surya (99 = ВСІ шари на
+    GPU). Замірено 14.08.2026: на цій машині це не «harmless no-op on pure-CPU
+    builds», як пише коментар у surya/settings.py, -- бінарник winget-збірки
+    має `ggml-vulkan.dll`, тому 99 означає інференс на вбудованій графіці, а в
+    логах смерті сервера стоїть `vk::ErrorDeviceLost`. `0` дає чистий CPU.
+    Див. docs/research/2026-08-14_ocr-ngl0-control-run.md.
+
+    hub_offline: виставити `HF_HUB_OFFLINE=1`, тобто заборонити surya звертатись
+    до HuggingFace за власними файлами моделі («You are sending unauthenticated
+    requests to the HF Hub» у логах прогонів). Документів у тих запитах немає,
+    але мережевий виклик є, і з цим прапорцем «нічого не йде в мережу» стає
+    перевіряним. Вимкнено за замовчуванням: на машині без прогрітого кешу
+    моделі offline зламає ПЕРШИЙ запуск, а це гірше за зайвий запит по ваги.
     """
+    # Перевірка ПЕРЕД будь-яким імпортом surya: якщо розпізнавання пішло б за
+    # межі машини, ми не маємо навіть піднімати менеджер.
+    check_inference_url(os.environ.get(INFERENCE_URL_ENV))
+    if hub_offline:
+        os.environ["HF_HUB_OFFLINE"] = "1"
     # Явне присвоєння, не setdefault: якщо змінна вже була в середовищі,
     # setdefault мовчки ігнорував конфіг, і конфіг перестав описувати те, що
     # реально працює. `is None`, а не `or`, щоб явний 0 не перетворювався на 2.
@@ -82,6 +164,11 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None):
     os.environ["SURYA_INFERENCE_PARALLEL"] = str(inference_parallel)
     if llama_server_path:
         os.environ["LLAMA_CPP_BINARY"] = llama_server_path
+    # `is not None`, а не `if n_gpu_layers`: 0 -- це осмислене значення
+    # (контрольний прогін на чистому CPU), і воно НЕ повинно бути
+    # неотличимим від «не задано».
+    if n_gpu_layers is not None:
+        os.environ["LLAMA_CPP_NGL"] = str(n_gpu_layers)
 
     from PIL import Image, ImageOps
     from surya.inference import SuryaInferenceManager

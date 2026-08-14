@@ -331,6 +331,76 @@ def test_health_of_returns_none_when_there_is_nothing_to_ask():
         types.SimpleNamespace(backend=types.SimpleNamespace(handle=empty_handle))) is None
 
 
+# --- Частина 5: розпізнавання не виходить за межі машини --------------------
+#
+# Найдорожче обмеження проєкту (`docs/spec/security-constraints.md`): зображення
+# документів не покидають машину. Гарантія тримається на тому, що внутрішній
+# сервер surya слухає лише loopback (`s.bind(("127.0.0.1", 0))`), АЛЕ вона
+# умовна: `SURYA_INFERENCE_URL` змушує surya під'єднатись до чужого сервера
+# замість підняти свій. Виставити цю змінну може будь-хто на машині -- поза
+# нашим конфігом, поза git, і пайплайн промовчав би. Тому тут перевірка кодом.
+#
+# Ці тести коштують мілісекунди й мусять бігати на кожному прогоні: ціна
+# пропущеної відмови -- не «поле не витягли», а бойові документи на чужій
+# машині.
+
+@contextlib.contextmanager
+def _inference_url(value):
+    saved = os.environ.get(surya_reader.INFERENCE_URL_ENV)
+    if value is None:
+        os.environ.pop(surya_reader.INFERENCE_URL_ENV, None)
+    else:
+        os.environ[surya_reader.INFERENCE_URL_ENV] = value
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop(surya_reader.INFERENCE_URL_ENV, None)
+        else:
+            os.environ[surya_reader.INFERENCE_URL_ENV] = saved
+
+
+def test_external_inference_url_refuses_to_start_ocr():
+    """Виставлена ЗОВНІШНЯ URL -> відмова, а не попередження.
+
+    Відмова саме тут, у `make_surya_reader`, ще ДО імпорту surya: тест не
+    підставляє жодних фальшивок, тому якщо перевірка колись переїде нижче
+    (після `from surya.inference import ...`), тест упаде з ImportError, а не
+    пройде тихо.
+    """
+    import pytest
+
+    for url in ("http://10.0.0.7:8080/v1",        # чужа машина в мережі
+                "https://ocr.example.com/v1",     # чужий сервіс
+                "192.168.1.5:8080",               # без схеми -- теж адреса
+                "http://ocr-internal:8080",       # ім'я: DNS може вказати куди завгодно
+                "http://[2001:db8::1]:8080"):     # IPv6
+        with _inference_url(url):
+            with pytest.raises(surya_reader.ExternalInferenceRefused):
+                make_surya_reader()
+
+
+def test_loopback_inference_url_is_allowed():
+    """Loopback -- це та сама машина, працюємо. Інакше перевірка ламала б
+    легітимний сценарій «сервер уже піднятий вручну на 127.0.0.1»."""
+    for url in ("http://127.0.0.1:50564/v1", "http://localhost:8080",
+                "http://127.5.5.5:1234", "http://[::1]:8080"):
+        with _inference_url(url):
+            with _fake_surya([["Відпускний квиток"]], healthy=True) as (read, _):
+                assert len(read("LEAVE-001.png")) == 1
+
+
+def test_unset_inference_url_is_allowed():
+    """Не виставлена -- нормальний режим: surya піднімає свій сервер на
+    loopback. Без цього тесту «відмовлятись завжди» теж пройшло б."""
+    with _inference_url(None):
+        with _fake_surya([["Відпускний квиток"]], healthy=True) as (read, _):
+            assert len(read("LEAVE-001.png")) == 1
+    # і сама чиста функція: порожні значення не є адресою
+    for empty in (None, "", "   "):
+        surya_reader.check_inference_url(empty)
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):

@@ -42,7 +42,10 @@ import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from pipeline.ocr.surya_reader import make_surya_reader  # noqa: E402
+from pipeline.ocr.surya_reader import (  # noqa: E402
+    DEFAULT_INFERENCE_PARALLEL,
+    make_surya_reader,
+)
 
 GB = 1024 ** 3
 
@@ -162,6 +165,9 @@ def main(argv=None):
     parser.add_argument("--limit", type=int, default=0, help="0 = усі")
     parser.add_argument("--inference-parallel", default=None)
     parser.add_argument("--llama-server-path", default=None)
+    # None = не торкатися LLAMA_CPP_NGL (дефолт surya 99 -> усі шари на GPU
+    # через Vulkan). 0 = контрольний прогін на чистому CPU.
+    parser.add_argument("--n-gpu-layers", type=int, default=None)
     args = parser.parse_args(argv)
 
     for stream in (sys.stdout, sys.stderr):
@@ -198,9 +204,15 @@ def main(argv=None):
         emit(f"# машина: RAM {psutil.virtual_memory().total / GB:.2f} ГБ, "
              f"вільно на старті {psutil.virtual_memory().available / GB:.2f} ГБ, "
              f"llama на старті: {_fmt_llama(_llama_processes())}")
+        # Режим бекенда пишемо в сам звіт: без нього два звіти з різними -ngl
+        # неможливо розрізнити через тиждень, а порівняння цифр без цього
+        # рядка недійсне.
+        emit(f"# LLAMA_CPP_NGL={args.n_gpu_layers if args.n_gpu_layers is not None else 'дефолт surya (99)'}"
+             f", SURYA_INFERENCE_PARALLEL={args.inference_parallel or DEFAULT_INFERENCE_PARALLEL}")
 
         t_load = time.time()
-        reader = make_surya_reader(args.llama_server_path, args.inference_parallel)
+        reader = make_surya_reader(args.llama_server_path, args.inference_parallel,
+                                   args.n_gpu_layers)
         emit(f"# модель завантажена за {time.time() - t_load:.1f} с")
 
         for index, path in enumerate(files, 1):
