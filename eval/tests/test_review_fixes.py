@@ -154,6 +154,39 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-A1-04: --reprocess не лишає два живі записи на той самий вміст -------
+
+def test_reprocess_retires_previous_record(tmp_path):
+    """Раніше після --reprocess на диску лежали ДВА .md з одним file_hash у
+    робочих теках -- споживач documents/** порахував би вміст двічі."""
+    import glob as _glob
+    import pipeline.run as run_mod
+    from pipeline.config import load_config
+
+    cfg = load_config(os.path.join(_PROJECT_ROOT, "config.yaml"))
+    cfg["storage"] = dict(cfg["storage"], local_root=str(tmp_path / "output"))
+    res = run_mod.build_resources(cfg, force_no_llm=True)
+
+    first = run_mod.process_file(_LEAVE_DOCX, res, cfg)
+    assert first["status"] == "confirmed"
+
+    dup = run_mod.process_file(_LEAVE_DOCX, res, cfg)
+    assert dup["status"] == "duplicate"
+
+    second = run_mod.process_file(_LEAVE_DOCX, res, cfg, reprocess=True)
+    assert second["status"] == "confirmed"
+    assert second["supersedes_storage_key"] == first["storage_key"]
+
+    live = _glob.glob(str(tmp_path / "output" / "documents" / "**" / "*.md"),
+                      recursive=True)
+    retired = _glob.glob(str(tmp_path / "output" / "superseded" / "**" / "*.md"),
+                         recursive=True)
+    assert len(live) == 1, f"живим має лишитись рівно один запис: {live}"
+    assert len(retired) == 1, "старий запис не губиться, а їде в superseded/"
+    # дедуплікація віддає НОВИЙ ключ
+    assert res["store"].find_by_hash(second["file_hash"]) == second["storage_key"]
+
+
 # --- R-B1-01: тематичний домен не дається за ОДИН збіг фрази ----------------
 
 def _domains():

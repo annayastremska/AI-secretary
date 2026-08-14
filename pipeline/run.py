@@ -245,6 +245,10 @@ def blank_meta(**overrides) -> dict:
         # Ознака, що ЦЕЙ документ скасовує/змінює інший (див.
         # build_record["document_links"]). Порожній список -- норма.
         "document_links": [],
+        # Ключ ПОПЕРЕДНЬОГО запису того самого вмісту, який цей запис
+        # замінив при --reprocess (R-A1-04). None = першопрохід. Сам старий
+        # запис при цьому переїжджає в superseded/ (store.retire).
+        "supersedes_storage_key": None,
         # Сирий текст полів, значення яких у документі Є, але не
         # зіставилось із довідником (напр. звання поза словником).
         # Вихід OCR як ФАКТ у кожному записі: скільки блоків і символів
@@ -347,8 +351,8 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
     file_hash = file_sha256(path)
     store = res["store"]
 
-    existing_key = store.find_by_hash(file_hash) if (store and not reprocess) else None
-    if existing_key:
+    existing_key = store.find_by_hash(file_hash) if store else None
+    if existing_key and not reprocess:
         return blank_meta(
             status="duplicate", file_hash=file_hash,
             source_file=os.path.basename(path), uploaded_at=now,
@@ -363,6 +367,10 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         file_hash=file_hash,
         source_file=os.path.basename(path),
         uploaded_at=now,
+        # При --reprocess старий запис того самого вмісту буде replaced, а не
+        # здубльований (R-A1-04): ключ їде в meta (видно, ЩО замінено), а сам
+        # файл _persist переносить у superseded/.
+        supersedes_storage_key=(existing_key if reprocess else None),
     )
 
     ingest_warnings = []
@@ -665,6 +673,12 @@ def _persist(meta: dict, text: str, res: dict) -> None:
     # означали різні речі й порівнювати їх було неможливо.
     meta["storage_key"] = key
     store.save(key, _to_markdown(meta, text), file_hash=meta["file_hash"])
+    # Старий запис того самого вмісту (--reprocess) прибирається з живих ПІСЛЯ
+    # успішного збереження нового: якщо save впав, старий запис лишається
+    # єдиним і чинним (R-A1-04).
+    previous_key = meta.get("supersedes_storage_key")
+    if previous_key and previous_key != key:
+        store.retire(previous_key)
 
 
 def scan_target(target: str):

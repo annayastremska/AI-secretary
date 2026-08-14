@@ -78,6 +78,27 @@ class LocalDocumentStore:
         завантажене двічі під різними іменами, не має дати два факти."""
         return self._load_index().get(file_hash)
 
+    def retire(self, key: str):
+        """Прибирає запис із «живих»: файл переїжджає з documents/ у
+        superseded/ (той самий підшлях). Повертає новий шлях або None, якщо
+        файла немає.
+
+        Додано за R-A1-04: `--reprocess` лишав ДВА повні .md з одним
+        file_hash у робочих теках -- споживач, що читає documents/**,
+        порахував би той самий вміст двічі. Дані не губляться (файл лишається
+        на диску), але живим лишається рівно один запис на вміст. Рядок
+        індексу старого запису не чіпаємо: індекс append-only, при читанні
+        перемагає останній запис (тобто новий ключ)."""
+        old_path = os.path.join(self.root, key.replace("/", os.sep))
+        if not os.path.exists(old_path):
+            return None
+        retired_key = key.replace("documents/", "superseded/", 1) \
+            if key.startswith("documents/") else f"superseded/{key}"
+        new_path = os.path.join(self.root, retired_key.replace("/", os.sep))
+        os.makedirs(os.path.dirname(new_path), exist_ok=True)
+        os.replace(old_path, new_path)
+        return new_path
+
     def save(self, key: str, content: str, file_hash: str = None) -> str:
         path = os.path.join(self.root, key.replace("/", os.sep))
         os.makedirs(os.path.dirname(path), exist_ok=True)

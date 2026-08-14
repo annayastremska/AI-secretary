@@ -373,6 +373,14 @@ how_verified: repro_04 зі сховищем у scratch:
 note: A1 писав «індекс перезаписує hash→key» — фактично індекс ДОПИСУЄ другий
   рядок (append), а перемагає останній при читанні. Наслідок той самий,
   механізм трохи інший.
+outcome: fixed — store.retire(key) переносить старий запис у superseded/
+  (дані не губляться, живим лишається один запис на вміст); process_file при
+  reprocess кладе ключ старого запису в meta.supersedes_storage_key, _persist
+  ретирить старий ПІСЛЯ успішного збереження нового. Індекс лишається
+  append-only (перемагає останній рядок). ДО: два .md у documents/ з одним
+  file_hash. ПІСЛЯ: один живий + один у superseded/. Тест:
+  test_reprocess_retires_previous_record. Корпуси: 192/192 ×2, 169/169 ×2,
+  тестів 177.
 ```
 
 ```
