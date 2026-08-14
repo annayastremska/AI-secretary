@@ -11,7 +11,6 @@ docflow-expertise/
 ├── README.md · CLAUDE.md           опис проєкту й правила роботи
 ├── requirements.txt · requirements-optional.txt
 ├── config.example.yaml · run_pipeline.py
-├── _config.yml                     тема Pages
 │
 ├── pipeline/                    АНЯ · розбір документа
 │   ├── ingestion/ ocr/ classification/ extraction/
