@@ -1,0 +1,156 @@
+<meta charset="utf-8">
+<title>Структура бази — реєстр особового складу</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #16181d; --muted: #6b7280; --line: #e5e7eb;
+    --head: #f6f7f9; --accent: #1f4e79; --chip: #eef2f7; --warn: #8a5a00; --warnbg: #fff8e6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14161a; --fg:#e8eaed; --muted:#9aa1ab; --line:#2a2e35;
+            --head:#1c1f25; --accent:#8ab4e8; --chip:#22262d; --warn:#e0b464; --warnbg:#2a2317; }
+  }
+  :root[data-theme="dark"] {
+    --bg:#14161a; --fg:#e8eaed; --muted:#9aa1ab; --line:#2a2e35;
+    --head:#1c1f25; --accent:#8ab4e8; --chip:#22262d; --warn:#e0b464; --warnbg:#2a2317;
+  }
+  :root[data-theme="light"] {
+    --bg:#ffffff; --fg:#16181d; --muted:#6b7280; --line:#e5e7eb;
+    --head:#f6f7f9; --accent:#1f4e79; --chip:#eef2f7; --warn:#8a5a00; --warnbg:#fff8e6;
+  }
+  body {
+    background: var(--bg); color: var(--fg); margin: 0 auto; padding: 32px 20px 80px;
+    max-width: 1180px;
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 15px; margin: 34px 0 10px; color: var(--accent); letter-spacing: .01em; }
+  .sub { color: var(--muted); margin: 0 0 22px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; padding: 0; list-style: none; }
+  .facts li { background: var(--chip); border-radius: 6px; padding: 5px 11px; font-size: 13px; }
+  .note {
+    background: var(--warnbg); border-left: 3px solid var(--warn); color: var(--fg);
+    padding: 12px 14px; border-radius: 0 6px 6px 0; margin: 0 0 26px; font-size: 14px;
+  }
+  .note b { color: var(--warn); }
+  .wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  thead th { background: var(--head); font-weight: 600; font-size: 12.5px; color: var(--muted);
+             text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; }
+  td.num { color: var(--muted); text-align: right; width: 34px; font-variant-numeric: tabular-nums; }
+  td.key { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; white-space: nowrap; }
+  td.ex { color: var(--muted); font-size: 12.5px; }
+  tbody tr:hover { background: var(--head); }
+  .part { color: var(--warn); font-size: 12px; white-space: nowrap; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
+  @media print { body { max-width: none; } thead th { position: static; } }
+</style>
+
+<h1>Реєстр особового складу — структура бази</h1>
+<p class="sub">Синтетичні дані. Файл <code>unit_roster.csv</code>. Реальних людей у базі немає.</p>
+
+<ul class="facts">
+  <li><b>300</b> рядків — один рядок = одна людина</li>
+  <li><b>37</b> колонок</li>
+  <li><b>5</b> підрозділів: три механізовані роти (по 90), взвод забезпечення (15), управління батальйону (15)</li>
+  <li>дати у форматі <code>РРРР-ММ-ДД</code></li>
+</ul>
+
+<div class="note">
+  <b>Як читати.</b> Кожен рядок таблиці — одна колонка бази. Номер зліва потрібен для відповіді:
+  достатньо назвати номери — «7 і 19 не треба», «між 11 і 12 бракує такого-то поля».
+  Приклади — справжні значення з бази, по три на колонку, щоб було видно формат.
+</div>
+
+<h2>А. Хто це</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th>Приклад 1</th><th>Приклад 2</th><th>Приклад 3</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="key">service_id</td><td>Наскрізний номер людини в реєстрі. Ключ, за яким документ приліплюється до людини</td><td class="ex">UNIT-0001</td><td class="ex">UNIT-0002</td><td class="ex">UNIT-0300</td></tr>
+<tr><td class="num">2</td><td class="key">rank</td><td>Військове звання. У базі 12 різних, від рядового до підполковника</td><td class="ex">рядовий</td><td class="ex">сержант</td><td class="ex">капітан</td></tr>
+<tr><td class="num">3</td><td class="key">last_name</td><td>Прізвище</td><td class="ex">Гавриш</td><td class="ex">Вернигора</td><td class="ex">Дрозденко</td></tr>
+<tr><td class="num">4</td><td class="key">first_name</td><td>Ім'я</td><td class="ex">Адам</td><td class="ex">Іван</td><td class="ex">Максим</td></tr>
+<tr><td class="num">5</td><td class="key">patronymic</td><td>По батькові</td><td class="ex">Станіславович</td><td class="ex">Артемович</td><td class="ex">Соломонович</td></tr>
+<tr><td class="num">6</td><td class="key">full_name</td><td>ПІБ одним рядком. Дублює колонки 3–5 — зроблено для пошуку</td><td class="ex">Гавриш Адам Станіславович</td><td class="ex">Вернигора Іван Артемович</td><td class="ex">Дрозденко Максим Соломонович</td></tr>
+<tr><td class="num">7</td><td class="key">gender</td><td>Стать. У базі 276 чоловіків, 24 жінки</td><td class="ex">чоловіча</td><td class="ex">жіноча</td><td class="ex">—</td></tr>
+</tbody></table></div>
+
+<h2>Б. Посада і підрозділ</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th>Приклад 1</th><th>Приклад 2</th><th>Приклад 3</th></tr></thead>
+<tbody>
+<tr><td class="num">8</td><td class="key">position_index</td><td>Номер посади за штатом: перші дві цифри — підрозділ, далі порядковий номер посади в ньому</td><td class="ex">01-001</td><td class="ex">02-001</td><td class="ex">03-001</td></tr>
+<tr><td class="num">9</td><td class="key">position_title</td><td>Назва посади. У базі 17 різних</td><td class="ex">старшина роти</td><td class="ex">командир відділення</td><td class="ex">оператор БПЛА</td></tr>
+<tr><td class="num">10</td><td class="key">subdivision</td><td>Підрозділ, у якому людина числиться</td><td class="ex">1-ша механізована рота</td><td class="ex">Взвод забезпечення</td><td class="ex">Управління батальйону</td></tr>
+<tr><td class="num">11</td><td class="key">position_assigned_date</td><td>Дата призначення на цю посаду</td><td class="ex">2025-01-13</td><td class="ex">2025-12-16</td><td class="ex">2024-12-10</td></tr>
+</tbody></table></div>
+
+<h2>В. Як потрапив у частину</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th>Приклад 1</th><th>Приклад 2</th><th>Приклад 3</th></tr></thead>
+<tbody>
+<tr><td class="num">12</td><td class="key">arrived_from</td><td>Звідки прибув. Шість варіантів: переведення, запас, навчальний центр, новобранець</td><td class="ex">переведення з іншої військової частини</td><td class="ex">запас (повторний призов)</td><td class="ex">Навчальний центр «Десна»</td></tr>
+<tr><td class="num">13</td><td class="key">enrollment_date</td><td>Дата зарахування до списків частини</td><td class="ex">2024-07-07</td><td class="ex">2025-03-24</td><td class="ex">2024-04-01</td></tr>
+<tr><td class="num">14</td><td class="key">enrollment_order_date</td><td>Дата наказу про зарахування</td><td class="ex">2024-07-10</td><td class="ex">2025-03-24</td><td class="ex">2024-04-03</td></tr>
+<tr><td class="num">15</td><td class="key">enrollment_order_number</td><td>Номер наказу про зарахування</td><td class="ex">№556</td><td class="ex">№609</td><td class="ex">№103</td></tr>
+</tbody></table></div>
+
+<h2>Г. Накази — призначення і звання</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th>Приклад 1</th><th>Приклад 2</th><th>Приклад 3</th></tr></thead>
+<tbody>
+<tr><td class="num">16</td><td class="key">appointment_order_date</td><td>Дата наказу про призначення на посаду</td><td class="ex">2025-01-14</td><td class="ex">2025-12-21</td><td class="ex">2024-12-10</td></tr>
+<tr><td class="num">17</td><td class="key">appointment_order_issuer</td><td>Хто видав наказ про призначення</td><td class="ex">командир батальйону</td><td class="ex">командир бригади</td><td class="ex">командувач Сухопутних військ ЗСУ</td></tr>
+<tr><td class="num">18</td><td class="key">appointment_order_number</td><td>Номер наказу про призначення</td><td class="ex">№766</td><td class="ex">№635</td><td class="ex">№551</td></tr>
+<tr><td class="num">19</td><td class="key">rank_order_date</td><td>Дата наказу про присвоєння звання</td><td class="ex">2024-12-17</td><td class="ex">2026-06-26</td><td class="ex">2026-03-13</td></tr>
+<tr><td class="num">20</td><td class="key">rank_order_issuer</td><td>Хто видав наказ про звання</td><td class="ex">начальник штабу батальйону</td><td class="ex">командир батальйону</td><td class="ex">командир бригади</td></tr>
+<tr><td class="num">21</td><td class="key">rank_order_number</td><td>Номер наказу про звання</td><td class="ex">№59</td><td class="ex">№430</td><td class="ex">№519</td></tr>
+</tbody></table></div>
+
+<h2>Д. На яких підставах служить</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th>Приклад 1</th><th>Приклад 2</th><th>Приклад 3</th></tr></thead>
+<tbody>
+<tr><td class="num">22</td><td class="key">service_type</td><td>Тип служби: мобілізація (161 людина), контракт (114), базова (25)</td><td class="ex">військова служба за мобілізацією</td><td class="ex">військова служба за контрактом</td><td class="ex">базова військова служба</td></tr>
+<tr><td class="num">23</td><td class="key">contract_start_date</td><td>Початок контракту. <span class="part">Заповнено 114 із 300</span> — тільки у контрактників</td><td class="ex">2025-03-15</td><td class="ex">2023-07-06</td><td class="ex">2023-10-07</td></tr>
+<tr><td class="num">24</td><td class="key">contract_end_date</td><td>Кінець контракту. <span class="part">Заповнено 114 із 300</span></td><td class="ex">2028-03-15</td><td class="ex">2026-07-06</td><td class="ex">2028-10-07</td></tr>
+<tr><td class="num">25</td><td class="key">conscription_period</td><td>Строк для тих, хто не за контрактом. <span class="part">Заповнено 186 із 300</span></td><td class="ex">на весь період мобілізації</td><td class="ex">12 місяців</td><td class="ex">—</td></tr>
+</tbody></table></div>
+
+<h2>Е. Документи особи</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th>Приклад 1</th><th>Приклад 2</th><th>Приклад 3</th></tr></thead>
+<tbody>
+<tr><td class="num">26</td><td class="key">rnokpp</td><td>РНОКПП (ІПН), 10 цифр</td><td class="ex">0133890838</td><td class="ex">8495931034</td><td class="ex">4139537672</td></tr>
+<tr><td class="num">27</td><td class="key">id_document_type</td><td>Тип документа: книжечка (165 людей) або ID-картка (135)</td><td class="ex">Паспорт громадянина України (книжечка)</td><td class="ex">Паспорт громадянина України (ID-картка)</td><td class="ex">—</td></tr>
+<tr><td class="num">28</td><td class="key">id_document_series</td><td>Серія паспорта, дві літери. <span class="part">Заповнено 165 із 300</span> — в ID-картки серії немає</td><td class="ex">БУ</td><td class="ex">УЗ</td><td class="ex">ЩТ</td></tr>
+<tr><td class="num">29</td><td class="key">id_document_number</td><td>Номер документа: 6 цифр у книжечки, 9 в ID-картки</td><td class="ex">218196</td><td class="ex">407816</td><td class="ex">648350305</td></tr>
+</tbody></table></div>
+
+<h2>Ж. Особисті дані</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th>Приклад 1</th><th>Приклад 2</th><th>Приклад 3</th></tr></thead>
+<tbody>
+<tr><td class="num">30</td><td class="key">birth_date</td><td>Дата народження</td><td class="ex">1972-10-03</td><td class="ex">1975-12-16</td><td class="ex">1997-11-23</td></tr>
+<tr><td class="num">31</td><td class="key">birth_place</td><td>Місце народження</td><td class="ex">село Лохвиця</td><td class="ex">село Чугуїв</td><td class="ex">село Дрогобич</td></tr>
+<tr><td class="num">32</td><td class="key">service_entry_date</td><td>Дата вступу на військову службу — раніша за зарахування в цю частину</td><td class="ex">2024-06-27</td><td class="ex">2025-03-15</td><td class="ex">2024-03-25</td></tr>
+<tr><td class="num">33</td><td class="key">service_entry_authority</td><td>Який ТЦК призвав</td><td class="ex">Шевченківський РТЦК та СП м. Києва</td><td class="ex">Київський РТЦК та СП Полтавської області</td><td class="ex">Соборний РТЦК та СП м. Дніпра</td></tr>
+<tr><td class="num">34</td><td class="key">education</td><td>Освіта, чотири рівні</td><td class="ex">повна загальна середня</td><td class="ex">професійно-технічна</td><td class="ex">вища</td></tr>
+<tr><td class="num">35</td><td class="key">relatives_info</td><td>Родина одним рядком, вільний текст</td><td class="ex">неодружений(а)</td><td class="ex">дружина/чоловік — Лілія</td><td class="ex">дружина/чоловік — Варвара, діти — 3</td></tr>
+<tr><td class="num">36</td><td class="key">additional_info</td><td>Примітка, вільний текст. <span class="part">Заповнено 94 із 300</span></td><td class="ex">має посвідчення водія категорії C</td><td class="ex">має досвід роботи з БПЛА</td><td class="ex">проходить строкову медичну комісію</td></tr>
+<tr><td class="num">37</td><td class="key">phone</td><td>Телефон. Формат запису плаває — три різні варіанти в одній колонці</td><td class="ex">+380 02 654-23-51</td><td class="ex">+380 (47) 525-53-41</td><td class="ex">489 32 52</td></tr>
+</tbody></table></div>
+
+<h2>Чого в базі немає</h2>
+<div class="wrap"><table>
+<thead><tr><th class="num">№</th><th>Колонка</th><th>Що це</th><th colspan="3">Чому це важливо</th></tr></thead>
+<tbody>
+<tr><td class="num">38</td><td class="key">—</td><td>Номер військової частини</td><td colspan="3">Є тільки підрозділ. У документах номер в/ч друкується в кутовому штампі — його доведеться задавати окремо</td></tr>
+<tr><td class="num">39</td><td class="key">—</td><td>Поточний стан людини</td><td colspan="3">Немає ознаки «у відпустці», «у відрядженні», «у шпиталі», «на позиції». Саме це мають приносити документи</td></tr>
+<tr><td class="num">40</td><td class="key">—</td><td>Історія змін</td><td colspan="3">База показує зріз на сьогодні. Питання «де він був у березні» відповіді не має</td></tr>
+</tbody></table></div>
+
+<footer>
+  Відповідати зручно номерами: <b>«7 і 19 не треба, додати 38»</b>.<br>
+  Рядки 38–40 — не колонки бази, а те, чого в ній бракує.
+</footer>
