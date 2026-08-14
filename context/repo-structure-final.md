@@ -48,8 +48,7 @@ docflow-expertise/
 │   ├── known-weak-spots.md      живий список, у корені навмисно
 │   ├── open-questions.md        живий список, у корені навмисно
 │   ├── collaboration-rules.md
-│   ├── spec/ research/ architecture/ contracts/ client/
-│   └── scripts/download_model.py -> лишається в pipeline/scripts/
+│   └── spec/ research/ architecture/ contracts/ client/
 │
 └── demos/                       СПІЛЬНЕ
 ```
@@ -64,7 +63,7 @@ docflow-expertise/
 
 | Зараз | Куди |
 |---|---|
-| `pipeline/**` (усі 8 підмодулів + `llm_context/`) | без змін |
+| `pipeline/**` (29 файлів, 8 підпакетів разом із `llm_context/`) | без змін |
 | `schemas/` (2 файли) | `pipeline/schemas/` |
 | `dictionaries/` (4 файли) | `pipeline/dictionaries/` |
 | `notebooks/` (5 ipynb) | `pipeline/notebooks/` |
