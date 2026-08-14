@@ -542,6 +542,37 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
     # початок, надрукований кінець і ПОЗНАЧЕНА суперечність, від якої запис не
     # йде в підрахунки. Тому додається окрема перевірка, і саме як перевірка, а
     # не як рядок звіту: рядок звіту нічого не карає.
+    # ЧЕРНЕТКА ≠ ФАКТ -- як ПЕРЕВІРКА, а не рядок звіту (R-A2-02).
+    #
+    # До 14.08.2026 статуси й позначки confirmed поверталися лише полями звіту
+    # поза `checks`, тому в fields_ok/fields_total не входили. Заміряно
+    # (b2-verdicts, repro_03): пайплайн, який КОЖЕН документ віддає як
+    # needs_review з facts[*].confirmed=true -- тобто з повним розривом правила
+    # «чернетка ≠ факт» -- отримував ті самі 176/176 і 16/16. Саме тому
+    # R-A1-01 (needs_review-документ їде в підрахунки як підтверджений факт)
+    # могла дожити до рев'ю: прилад її не карав.
+    #
+    # Інваріант, який міряється (без жодного знання сценарію):
+    #   status=confirmed    -> УСІ факти confirmed=true і критичних прогалин
+    #                          немає (інакше статус бреше в бік довіри);
+    #   інші статуси        -> ЖОДЕН факт не сміє мати confirmed=true, бо
+    #                          споживач фільтрує за facts.confirmed і взяв би
+    #                          непідтверджений запис у підрахунок.
+    fact_flags = [bool(f.get("confirmed")) for f in facts]
+    if meta.get("status") == "confirmed":
+        consistent = (bool(fact_flags) and all(fact_flags)
+                      and not (meta.get("unknown_critical_fields") or []))
+    else:
+        consistent = not any(fact_flags)
+    checks.append({
+        "key": "чернетка_не_факт",
+        "field": "status+facts.confirmed",
+        "compare": "flag", "ok": consistent,
+        "surplus": False, "expected_blank": False, "from_printed": False,
+        "ours": f"status={meta.get('status')}, facts.confirmed={fact_flags}",
+        "expected": "status=confirmed <=> усі facts.confirmed=true",
+    })
+
     conflict = printed_range_conflict(
         printed, per_template,
         (mapping.get("range_checks") or {}).get(template or ""))
