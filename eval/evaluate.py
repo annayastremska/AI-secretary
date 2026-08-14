@@ -624,6 +624,27 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         "expected": "status=confirmed <=> усі facts.confirmed=true",
     })
 
+    # ЗВ'ЯЗОК ДОКУМЕНТ -> ДОКУМЕНТ (R-A2-04). Пайплайн ВИТЯГУЄ ознаку
+    # скасування (record["document_links"]), а прилад її не міряв зовсім --
+    # і звіт дослівно стверджував протилежне («пайплайн НЕ знає про
+    # скасування»). Еталон: поле пара.replaces документа. Перевіряються ОБИДВА
+    # боки: документ-замінник мусить мати зв'язок supersedes, документ без
+    # пари -- НЕ мати (вигаданий зв'язок не кращий за пропущений).
+    pair = truth.get("пара") or {}
+    expects_link = bool(isinstance(pair, dict) and pair.get("replaces"))
+    supersedes_links = [l for l in (meta.get("document_links") or [])
+                        if l.get("link_type") == "supersedes"]
+    checks.append({
+        "key": "зв'язок_скасування",
+        "field": "document_links",
+        "compare": "flag", "ok": bool(supersedes_links) == expects_link,
+        "surplus": False, "expected_blank": False, "from_printed": False,
+        "ours": f"supersedes-зв'язків: {len(supersedes_links)}",
+        "expected": ("є supersedes-зв'язок" if expects_link
+                     else "зв'язків немає"),
+        "links": supersedes_links,
+    })
+
     conflict = printed_range_conflict(
         printed, per_template,
         (mapping.get("range_checks") or {}).get(template or ""))
@@ -863,10 +884,17 @@ def main(argv=None):
     print("\n=== пари (документ + той, що скасовує) ===")
     for row in results:
         if row["категорія"] == "пара":
+            link_check = next((c for c in row["checks"]
+                               if c["key"] == "зв'язок_скасування"), None)
+            links = (link_check or {}).get("links") or []
+            targets = ", ".join(str(l.get("target_document_number")) for l in links)
             print(f"  {row['id']:10} чинний={row['чинний']:4} status={row['status']:13} "
-                  f"confirmed={row['confirmed']}")
-    print("  (пайплайн НЕ знає про скасування -- це очікувано, "
-          "зв'язку документ->документ у контракті немає)")
+                  f"confirmed={row['confirmed']} "
+                  f"зв'язок={'+' if link_check and link_check['ok'] else '-'}"
+                  f"{f' (№ {targets})' if links else ''}")
+    print("  (зв'язок supersedes міряється перевіркою «зв'язок_скасування»: "
+          "замінник мусить нести ознаку, документ без пари -- ні; закриття "
+          "старого факту -- запит по всіх документах на боці БД)")
 
     if unmatched:
         print(f"\nбез еталона ({len(unmatched)}): {', '.join(unmatched[:5])}")

@@ -198,6 +198,39 @@ def test_current_mapping_covers_all_active_fields():
     assert problems == [], problems
 
 
+# --- R-A2-04: document_links міряються, а не «пайплайн не знає» -------------
+
+def test_replacing_document_must_carry_supersedes_link():
+    """Документ-замінник без зв'язку supersedes -- провал перевірки, а не
+    невидимість (раніше звіт стверджував, що міряти нічого)."""
+    meta = _meta("confirmed", [True])
+    meta["document_links"] = []
+    truth = {"id": "X-001", "пара": {"replaces": "X-000"}}
+    row = evaluate_record(meta, truth, {}, None)
+    link = next(c for c in row["checks"] if c["key"] == "зв'язок_скасування")
+    assert link["ok"] is False
+
+
+def test_invented_supersedes_link_is_a_failure():
+    """Вигаданий зв'язок на документі без пари не кращий за пропущений."""
+    meta = _meta("confirmed", [True])
+    meta["document_links"] = [{"link_type": "supersedes",
+                               "target_document_number": "157"}]
+    row = evaluate_record(meta, {"id": "X-001", "пара": None}, {}, None)
+    link = next(c for c in row["checks"] if c["key"] == "зв'язок_скасування")
+    assert link["ok"] is False
+
+
+def test_correct_supersedes_link_passes():
+    meta = _meta("confirmed", [True])
+    meta["document_links"] = [{"link_type": "supersedes",
+                               "target_document_number": "157"}]
+    truth = {"id": "X-001", "пара": {"replaces": "X-000"}}
+    row = evaluate_record(meta, truth, {}, None)
+    link = next(c for c in row["checks"] if c["key"] == "зв'язок_скасування")
+    assert link["ok"] is True
+
+
 def test_wrapped_sentinel_is_confirmed_empty_not_a_value():
     """Знахідка нової перевірки «впд»: текстовий шар PDF розриває сентинел
     («не \\nвидавались»), однорядковий патерн ловив лише «не», і воно їхало в
