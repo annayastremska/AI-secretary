@@ -1,0 +1,37 @@
+# Повний запуск: обробка .docx / .pdf + LLM-шар.
+#
+# Ваги моделі pip встановити не може (це не пакет, а файл на кілька ГБ) --
+# після встановлення виконайте:
+#     python scripts/download_model.py
+# Скрипт покладе їх у models/ саме туди, куди дивиться config.example.yaml.
+
+pyyaml>=6.0,<7
+python-docx>=1.1.0,<2
+
+# PDF: текстовий шар віддає блоки з координатами (OCR не потрібен), а скан у
+# PDF-обгортці рендериться в зображення для OCR.
+pymupdf>=1.24,<2
+
+# Морфологія української: ПІБ у бланках стоїть у різних відмінках ("Іваненку
+# Івану"), а в базу мусить іти називний. Без цих пакетів пайплайн працює, але
+# ПІБ лишається у відмінку джерела, і provenance це явно показує
+# (morphology: no_morphology).
+pymorphy3>=2.0,<3
+pymorphy3-dicts-uk
+
+# Для scripts/download_model.py (завантаження ваг з huggingface.co).
+huggingface_hub>=0.23,<2
+
+# LLM-шар. На PyPI у llama-cpp-python лежить ЛИШЕ source distribution, тому
+# звичайний `pip install` компілює з джерел і вимагає C++-тулчейн (на Windows
+# -- MSVC Build Tools). Індекс нижче -- офіційні готові CPU-wheel-и проєкту,
+# з ними встановлення не потребує компілятора.
+# Для GPU замініть /cpu на свій бекенд, напр. /cu124 (див. документацію
+# llama-cpp-python), і поставте n_gpu_layers: -1 у config.yaml.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# Верхня межа не косметична: llama-cpp-python історично міняла API
+# грамматик і chat_format між мінорними версіями.
+llama-cpp-python>=0.3.0,<0.4
+
+# --- Не входить сюди, ставиться окремо: див. requirements-optional.txt ---
+# surya-ocr  -- фото й скановані PDF (тягне torch, ~1.5 ГБ додаткових ваг)

@@ -1,0 +1,47 @@
+# ЗРАЗОК конфігу. Скопіюйте в config.yaml і правте під свою машину:
+#     cp config.example.yaml config.yaml
+# Сам config.yaml у .gitignore: це налаштування конкретної машини
+# (шляхи, наявність моделі), не частина коду.
+#
+# Значення за замовчуванням -- у pipeline/config.py; тут лише те, що
+# відрізняється для конкретної машини. Шляхи -- відносні до кореня репо.
+
+paths:
+  input_dir: data/inbox        # куда кладуться вхідні файли (папка-приймач)
+  output_dir: data/output
+
+intake:
+  # Переносити оброблені файли з папки-приймача, щоб вона справді
+  # спорожнялась. Діє лише при скануванні каталогу: файл, переданий через
+  # --input, лишається на місці.
+  archive: true
+  processed_dir: data/processed   # confirmed / needs_review / duplicate
+  failed_dir: data/failed         # unresolved -- потребує людини
+
+llm:
+  enabled: true
+  # Шлях, куди кладе ваги `python scripts/download_model.py` -- правити не
+  # потрібно. Якщо машина не тягне 12B, є --size 4b (тоді змініть 12b на 4b
+  # у назві файлу нижче).
+  # Якщо ваг ще немає, прогін не падає: буде попередження, а поля
+  # extraction: llm лишаться чесно позначеними прогалинами.
+  model_path: models/mamaylm-12b-q4_k_m.gguf
+  n_gpu_layers: 0              # 0 = CPU; -1 = усі шари на GPU
+  batch_size: 4                # полів на один LLM-виклик
+  self_consistency_n: 1         # >1 = кілька семплів + majority_vote (дорожче)
+  max_context_chars: 6000
+
+ocr:
+  # none -> обробляються лише docx (зображення явно відхиляються).
+  # surya -> потрібен встановлений surya-ocr; на Windows зазвичай ще й
+  # готовий бінарник llama-server (Surya запускає його всередині).
+  engine: none
+  llama_server_path: null
+
+storage:
+  # Локальні файли -- єдиний бекенд. Зовнішнє сховище й БД -- поза межами
+  # цієї частини роботи.
+  local_root: data/output
+
+review:
+  sample_rate: 20              # 1 з 20 підтверджених документів -> ручна перевірка (5%)

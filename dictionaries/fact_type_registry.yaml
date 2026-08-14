@@ -1,0 +1,101 @@
+# Реєстр типів фактів і їхньої моделі чинності (не довідник значень поля --
+# це про сам ТИП факту-рядка, розділ "три форми чинності" з обговорення
+# архітектури БД). Нове fact_type тут -- один рядок, не новий код.
+#
+# validity_model:
+#   ranged          -- має початок і кінець, "активний" = сьогодні в межах діапазону
+#   current_state   -- має початок, лишається чинним, доки не з'явиться новіший факт
+#                       того самого типу для того самого об'єкта
+#   permanent_event -- разова подія, ніколи не "спливає" сама по собі
+fact_types:
+  - code: leave
+    label: Відпустка
+    validity_model: ranged
+
+  - code: deployment_location
+    label: Місцезнаходження під час відрядження
+    validity_model: ranged
+
+  - code: attendance
+    label: Присутність (табель)
+    validity_model: ranged   # один день: date_start = date_end
+
+  - code: rank
+    label: Військове звання
+    validity_model: current_state
+
+  - code: position
+    label: Посада
+    validity_model: current_state
+
+  - code: equipment_status
+    label: Стан техніки
+    validity_model: current_state
+
+  # --- Виміри, що походять від полів схеми з `dimension:` ---
+  # Додано після верифікації проти БД-споживача: ці 8 кодів пайплайн уже
+  # віддавав у facts, а в реєстрі їх не було, тобто ми віддавали факти, для
+  # яких навіть на нашому боці не сказано, чи вони ranged, current_state чи
+  # permanent_event. Їхній get_or_create_dimension підставляв сам код як
+  # назву виміру, і в dimensions з'являлись рядки з назвою "deployment_org".
+  - code: deployment_org
+    label: Організація призначення у відрядженні
+    validity_model: ranged
+
+  - code: deployment_days
+    label: Тривалість відрядження, днів
+    validity_model: ranged
+
+  - code: deployment_purpose
+    label: Мета відрядження
+    validity_model: ranged
+
+  # permanent_event: реквізит документа-підстави. Не "стан" людини й нічим не
+  # спливає -- саме тому це найслабше місце нашого мапінгу, див. питання до
+  # команди БД у context/db-handoff-notes.md (номер наказу за суттю належить
+  # таблиці documents, а не таблиці фактів про особу).
+  - code: order_date
+    label: Дата наказу-підстави
+    validity_model: permanent_event
+
+  - code: order_number
+    label: Номер наказу-підстави
+    validity_model: permanent_event
+
+  - code: leave_days
+    label: Тривалість відпустки, днів
+    validity_model: ranged
+
+  - code: leave_actual_return
+    label: Фактична дата повернення з відпустки
+    validity_model: permanent_event
+
+  - code: unit_to_report
+    label: Частина, до якої зобов'язаний прибути
+    validity_model: ranged
+
+  # --- Реквізити самого документа (додано 11.08.2026) ---
+  # permanent_event: номер і дата видачі не "спливають" і не змінюються.
+  # За суттю це реквізити рядка documents, а не виміри стану особи -- питання
+  # до команди БД відкрите (context/db-handoff-notes.md), але доки колонок у
+  # documents немає, вони йдуть окремими фактами, інакше губляться зовсім.
+  - code: document_number
+    label: Номер документа
+    validity_model: permanent_event
+
+  - code: document_date
+    label: Дата видачі документа
+    validity_model: permanent_event
+
+  - code: leave_place
+    label: Населений пункт, до якого звільнено
+    validity_model: ranged
+
+  # Додано 13.08.2026 у відповідь на зауваження команди БД: вони помітили, що
+  # travel_document_number лежить в additional_info основного факту, тоді як
+  # решта реквізитів (document_number, order_number) піднята окремими фактами.
+  # Асиметрія була не свідомою -- просто не дійшли руки. Прибираємо, бо
+  # непояснена асиметрія в контракті дорожча за один зайвий рядок у dimensions.
+  - code: travel_document
+    label: Військові перевізні документи
+    validity_model: permanent_event
