@@ -174,4 +174,13 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None):
             return blocks
         return _read_once(image_path)
 
+    # Діагностиці потрібен доступ до менеджера й до перевірки здоров'я, щоб
+    # писати `/health` та RSS сервера ПО КОЖНОМУ документу. Атрибути на
+    # функції, а не зміна сигнатури: пайплайн (`pipeline/run.py`) далі бачить
+    # звичайний `callable(image_path)`, а скрипт замірів не мусить дублювати
+    # закриття над `manager` -- інакше він міряв би ІНШИЙ сервер, ніж той, на
+    # якому працює прогін.
+    read.manager = manager
+    read.health = lambda: _health_of(manager)
+
     return read
