@@ -560,8 +560,12 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
     best_template, best_score = ranked[0] if ranked else (None, 0)
     runner_up_score = ranked[1][1] if len(ranked) > 1 else 0
     coarse_domain = None
+    domain_scores = None
     if domains:
-        coarse_domain, _ = classify_domain_rules(text, domains)
+        # Скори доменів їдуть далі в запис (R-B1-01): раніше в
+        # `identification` лежали лише скори ШАБЛОНІВ, і вирок про домен
+        # неможливо було ні перевірити, ні оскаржити.
+        coarse_domain, domain_scores = classify_domain_rules(text, domains)
 
     # ЗВІД ПРАВИЛ НЕ Є БЛАНКОМ, скільком би анкорам він не відповідав.
     # Перевірка стоїть ПЕРЕД вибором шаблону навмисно, і це виправлення
@@ -584,7 +588,8 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
         return {
             "schema": None, "template": None, "domain": coarse_domain,
             "source": None, "score": best_score, "runner_up": runner_up_score,
-            "scores": scores, "reason": f"procedural_document:{coarse_domain}",
+            "scores": scores, "domain_scores": domain_scores,
+            "reason": f"procedural_document:{coarse_domain}",
             "blank_edition": None,
         }
 
@@ -696,7 +701,8 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
     return {
         "schema": None, "template": None, "domain": coarse_domain,
         "source": None, "score": best_score, "runner_up": runner_up_score,
-        "scores": scores, "reason": reason, "blank_edition": None,
+        "scores": scores, "domain_scores": domain_scores,
+        "reason": reason, "blank_edition": None,
     }
 
 

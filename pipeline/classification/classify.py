@@ -13,6 +13,15 @@ import yaml
 
 _PHRASE_RE_CACHE = {}
 
+# Мінімальний бал ТЕМАТИЧНОГО домену (R-B1-01). Раніше порога не було: один
+# збіг однієї body-фрази (бал 1) давав вирок -- медична довідка отримувала
+# домен `leave`, а через мапінг «домен -> вид» ще й subject_kind=person і
+# create_subject_object=True. 2 означає «одного випадкового збігу не досить»:
+# заголовок (×3) проходить сам, body-фрази потрібні щонайменше дві -- та сама
+# логіка, що DEFAULT_LLM_FLOOR для шаблонів. Перевизначається в довіднику
+# ключем `min_score` на домені.
+DEFAULT_DOMAIN_MIN_SCORE = 2
+
 # Пробіли, які в docx/OCR трапляються замість звичайного: нерозривний,
 # вузький нерозривний, тонкий, а також переноси рядків усередині заголовка,
 # розбитого OCR на два рядки.
@@ -158,5 +167,12 @@ def classify_domain_rules(text: str, domains: dict):
     best_domain, best_score = ranked[0]
     runner_up_score = ranked[1][1] if len(ranked) > 1 else 0
     if best_score == 0 or best_score == runner_up_score:
+        return None, scores
+    min_score = (domains.get(best_domain) or {}).get("min_score",
+                                                     DEFAULT_DOMAIN_MIN_SCORE)
+    if best_score < min_score:
+        # Один випадковий збіг -- не свідчення (R-B1-01): чесніше сказати
+        # "домен не визначено", ніж дати чужому документу тематичний домен,
+        # вид суб'єкта person і дозвіл створити об'єкт у реєстрі.
         return None, scores
     return best_domain, scores

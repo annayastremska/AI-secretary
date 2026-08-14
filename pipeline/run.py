@@ -440,7 +440,11 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
                     subject_kind_source=kind_info["source"],
                     subject_kind_reason=kind_info["reason"],
                     create_subject_object=creates_object(kind_info["kind"]),
-                    identification={"scores": ident.get("scores"), "source": None})
+                    identification={"scores": ident.get("scores"),
+                                    # Скори доменів -- щоб вирок про домен був
+                                    # перевірним, а не лише шаблонні (R-B1-01).
+                                    "domain_scores": ident.get("domain_scores"),
+                                    "source": None})
         _persist(meta, text, res)
         return meta
 

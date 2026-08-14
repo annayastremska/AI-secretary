@@ -154,6 +154,39 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-B1-01: тематичний домен не дається за ОДИН збіг фрази ----------------
+
+def _domains():
+    from pipeline.classification.classify import load_domain_keyphrases
+    return load_domain_keyphrases(os.path.join(
+        _PROJECT_ROOT, "pipeline", "dictionaries", "domain_keyphrases.yaml"))
+
+
+def test_single_body_phrase_hit_does_not_assign_domain():
+    """Медична довідка з одним «у відпустку» отримувала домен leave з балом 1,
+    а через мапінг ще й subject_kind=person і create_subject_object=True."""
+    from pipeline.classification.classify import classify_domain_rules
+    text = "Довідка про лікування. Призначено стаціонарне лікування терміном на десять днів."
+    domain, scores = classify_domain_rules(text, _domains())
+    assert scores.get("leave") == 1, scores
+    assert domain is None, "один збіг однієї фрази -- не свідчення"
+
+
+def test_title_hit_still_assigns_domain():
+    from pipeline.classification.classify import classify_domain_rules
+    domain, _ = classify_domain_rules("Відпускний квиток № 102", _domains())
+    assert domain == "leave"
+
+
+def test_no_domain_means_no_subject_object():
+    """Без домену вид суб'єкта -- unknown, об'єкт у чужому реєстрі не
+    створюється."""
+    from pipeline.subject_kind import creates_object, resolve_subject_kind
+    kind_info = resolve_subject_kind(schema=None, domain=None, domains=_domains())
+    assert kind_info["kind"] == "unknown"
+    assert creates_object(kind_info["kind"]) is False
+
+
 # --- R-A2-06: документ, що впав необробленою помилкою, лишає слід -----------
 
 def test_crashed_document_is_persisted_and_archived(tmp_path, monkeypatch):
