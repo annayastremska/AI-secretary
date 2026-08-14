@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1160">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --bg: #eef0e9;
+      --ink: #1f261f;
+      --muted: #6b7266;
+      --hair: #c7ccbf;
+      --paper-soft: #e2e6da;
+      --accent: #3a4770;
+      --font-main: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #14170f; --ink: #e9ebdf; --muted: #8c9285; --hair: #333a2c; --paper-soft: #1b2015; --accent: #8b9ad6; }
+    }
+  </style>
+  <title>Чи вміє ШІ прочитати рукописну заяву — кейс</title>
+</head>
+<body class="m-0 bg-[var(--bg)] text-[var(--ink)] font-[var(--font-main)] text-[14px] leading-[1.6]">
+  <main class="mx-auto w-[1120px] px-8 py-8 pb-16">
+
+    <header class="border-y-2 border-[var(--ink)] py-4">
+      <p class="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">КЕЙС · РОЗПІЗНАВАННЯ РУКОПИСУ</p>
+      <h1 class="mt-3 text-[30px] leading-tight font-normal text-balance">Чи може ШІ прочитати рукописну заяву замість людини</h1>
+      <p class="mt-3 max-w-[760px] text-[15px]">
+        Папір з рукописним текстом лишається зручним форматом обміну інформацією для
+        військовослужбовців — не завжди є доступ до комп'ютера чи інтернету. Заява —
+        рукописний бланк на 2 сторінки: ПІБ, паспортні дані, РНОКПП (ІПН), військова частина,
+        телефон, підпис — усього 42 поля. Щоб звести це у цифрову базу, хтось має вручну
+        перепечатати кожну заяву. Перевірили: чи впорається з цим штучний інтелект замість
+        людини, і наскільки йому можна довіряти.
+      </p>
+    </header>
+
+    <!-- DOCUMENT SAMPLE -->
+    <section class="mt-8">
+      <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">Як виглядає матеріал</div>
+      <div class="mt-3 grid grid-cols-[340px_1fr] gap-6 items-start">
+        <div class="border border-[var(--hair)] bg-[var(--paper-soft)] p-5 shadow-[0_6px_18px_-8px_rgba(0,0,0,0.25)] -rotate-1">
+          <p class="text-[13px] font-semibold">Заява</p>
+          <p class="mt-4 text-[13px]">Від військовослужбовця:</p>
+          <svg width="180" height="26" viewBox="0 0 180 26" class="mt-1 text-[var(--ink)]">
+            <path d="M2 20 C 12 4, 22 4, 30 16 S 42 24, 50 10 S 62 2, 72 16 S 84 22, 94 8 S 108 4, 118 18 S 130 22, 140 10 S 154 4, 166 16 S 176 20, 178 14"
+                  fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          </svg>
+          <div class="mt-5 space-y-2 text-[13px] font-[var(--font-mono)]">
+            <p class="font-[var(--font-main)]">Паспорт серія <span class="tracking-[0.2em]">▮▮</span> № <span class="tracking-[0.2em]">▮▮▮▮▮▮</span></p>
+            <p class="font-[var(--font-main)]">виданий <span class="tracking-[0.15em]">▮▮.▮▮.20▮▮</span></p>
+            <p class="font-[var(--font-main)]">РНОКПП (ІПН): <span class="tracking-[0.2em]">▮▮▮▮▮▮▮▮▮▮</span></p>
+            <p class="font-[var(--font-main)]">Військове звання / Посада: <span class="tracking-[0.2em]">▮▮▮▮▮▮</span></p>
+            <p class="font-[var(--font-main)]">Військова частина: <span class="tracking-[0.2em]">▮▮▮▮▮</span></p>
+            <p class="font-[var(--font-main)]">Телефон: <span class="tracking-[0.2em]">(0▮▮) ▮▮▮-▮▮-▮▮</span></p>
+          </div>
+        </div>
+        <div class="text-[13px] text-[var(--muted)] max-w-[520px] pt-2">
+          <p class="text-[var(--ink)] font-medium">Фрагмент заяви — макет, не реальний скан.</p>
+          <p class="mt-2">
+            Друковані підписи полів (як на бланку) залишені без змін — це просто шаблон,
+            однаковий для всіх 12 заяв. Рукописні відповіді на скріншоті замасковані:
+            підпис — хвиляста лінія, цифри (паспорт, ІПН, телефон) — блоками.
+            У реальних заявах саме ці рукописні поля — паспорт, ІПН, телефон, прізвище,
+            дата підпису — виявились найважчими для розпізнавання: там моделі найчастіше
+            розходились між собою.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- VERDICT -->
+    <section class="mt-8 border-2 border-[var(--ink)] p-5">
+      <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+        [ <span class="bg-[var(--ink)] text-[var(--bg)] px-1">ВЕРДИКТ</span> ]
+      </div>
+      <p class="mt-3 text-[19px] leading-snug max-w-[820px] text-balance">
+        Так, ШІ читає рукопис. Але сам — не гарантує результат, навіть найкраща з 7 моделей.
+        Людина перевіряє <span class="font-semibold">завжди</span>.
+      </p>
+      <div class="mt-5 grid grid-cols-4 gap-4 border-t border-[var(--hair)] pt-4">
+        <div>
+          <div class="font-[var(--font-mono)] text-[32px] tabular-nums">87%</div>
+          <div class="mt-1 text-[12px] text-[var(--muted)]">найкраща модель — точність<br>по всій базі, усі 408 клітинок</div>
+        </div>
+        <div>
+          <div class="font-[var(--font-mono)] text-[32px] tabular-nums">59%</div>
+          <div class="mt-1 text-[12px] text-[var(--muted)]">та сама модель, тільки на<br>70 найважчих клітинках</div>
+        </div>
+        <div>
+          <div class="font-[var(--font-mono)] text-[32px] tabular-nums">80%</div>
+          <div class="mt-1 text-[12px] text-[var(--muted)]">на найважчих — хоч одна<br>з 7 моделей вгадала правильно</div>
+        </div>
+        <div>
+          <div class="font-[var(--font-mono)] text-[32px] tabular-nums text-[var(--accent)]">5.7%</div>
+          <div class="mt-1 text-[12px] text-[var(--muted)]">на найважчих — голосування<br>більшістю, гірше за одну модель</div>
+        </div>
+      </div>
+      <p class="mt-4 text-[13px] text-[var(--muted)] max-w-[820px]">
+        По всій базі найкраща модель читає добре (87%). Просідає саме там, де і людині важко:
+        нерозбірливий підпис, цифри ІПН, дата видачі паспорта. Тому робоча схема — не голосування
+        і не «модель сама вирішує». Модель дає чернетку, людині показують тільки місця, де моделі
+        розійшлись, людина звіряє зі сканом і затверджує.
+      </p>
+    </section>
+
+    <!-- METHOD -->
+    <section class="mt-8">
+      <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+        [ <span class="bg-[var(--ink)] text-[var(--bg)] px-1">01</span> ] Як тестували
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-6 text-[13px]">
+        <div class="border border-[var(--hair)] p-4">
+          <p class="font-[var(--font-mono)] text-[22px] tabular-nums">12 × 2</p>
+          <p class="mt-1 text-[var(--muted)]">реальних заяв, по 2 сторінки — 24 скани всього.
+            Один шаблон бланку, 42 поля на заяву.</p>
+        </div>
+        <div class="border border-[var(--hair)] p-4">
+          <p class="font-[var(--font-mono)] text-[22px] tabular-nums">7 моделей</p>
+          <p class="mt-1 text-[var(--muted)]">штучного інтелекту, які «бачать» зображення
+            і читають текст із нього — від маленьких (влазять на ноутбук) до найпотужнішої.</p>
+        </div>
+        <div class="border border-[var(--hair)] p-4">
+          <p class="font-[var(--font-mono)] text-[22px] tabular-nums">168 запитів</p>
+          <p class="mt-1 text-[var(--muted)]">кожній моделі показали кожну сторінку і попросили
+            заповнити ту саму анкету. Разом — 15 хв, $0.24 (менше гривні на всю заяву).</p>
+        </div>
+      </div>
+      <p class="mt-4 text-[13px] text-[var(--muted)] max-w-[820px]">
+        Результати звірили вручну зі сканами: людина переглянула всі 70 місць, де відповіді
+        моделей розійшлись між собою (з 408 клітинок зведеної таблиці) — це найважчі поля
+        за визначенням, не випадкова вибірка.
+      </p>
+    </section>
+
+    <!-- METHODOLOGY -->
+    <section class="mt-8">
+      <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+        [ <span class="bg-[var(--ink)] text-[var(--bg)] px-1">02</span> ] Як рахується точність — три рівні складності
+      </div>
+      <p class="mt-2 text-[13px] max-w-[820px]">
+        Спершу тут рахувалась точність тільки на 70 найважчих клітинках — і відсотки виглядали
+        неправдоподібно низькими. Тому перерахував <span class="font-semibold">по всіх 408 клітинках бази</span>
+        (12 заяв × 34 поля), напряму з сирих відповідей усіх 7 моделей — щоб було видно повну
+        картину, а не тільки найгірший випадок.
+      </p>
+      <p class="mt-3 text-[13px] max-w-[820px]">
+        Вийшло три шари. <span class="font-semibold">Усі 408</span> — точність по всій базі.
+        <span class="font-semibold">Консенсус, 338</span> — поля, де семи моделям спершу
+        здалось, що вони згодні між собою (тут особисто людина скани не звіряла — це не незалежна
+        перевірка, а «чи модель погодилась із рештою»). <span class="font-semibold">Найважчі, 70</span> —
+        єдиний шар зі справжньою, звіреною зі сканом точністю. На ньому й тримається ризик:
+        саме туди потрапляють підпис, паспорт, ІПН.
+      </p>
+      <div class="mt-4 grid grid-cols-2 gap-6">
+        <div class="border border-[var(--hair)] p-4">
+          <p class="text-[12px] font-medium">Спірні клітинки по заявах (12 документів)</p>
+          <p class="mt-1 text-[11px] text-[var(--muted)]">Від 1 до 11 на заяву — нерівномірно, назви прибрані</p>
+          <div class="mt-3 flex items-end gap-1.5 h-[70px]">
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:73%">8</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:100%">11</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:27%">3</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:18%">2</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:73%">8</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:55%">6</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:18%">2</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:73%">8</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:55%">6</div>
+            <div class="flex-1 bg-[var(--ink)] text-[var(--bg)] flex items-end justify-center text-[9px] pb-0.5" style="height:91%">10</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:45%">5</div>
+            <div class="flex-1 bg-[var(--hair)] flex items-end justify-center text-[9px] pb-0.5" style="height:9%">1</div>
+          </div>
+        </div>
+        <div class="border border-[var(--hair)] p-4">
+          <p class="text-[12px] font-medium">Де саме моделі найчастіше плутались</p>
+          <p class="mt-1 text-[11px] text-[var(--muted)]">Топ типів полів із 70 спірних клітинок</p>
+          <ul class="mt-3 space-y-1.5 text-[13px] font-[var(--font-mono)] tabular-nums">
+            <li class="flex justify-between"><span class="font-[var(--font-main)]">звання / посада</span><span>8 з 70</span></li>
+            <li class="flex justify-between"><span class="font-[var(--font-main)]">ким і коли виданий паспорт</span><span>6 з 70</span></li>
+            <li class="flex justify-between"><span class="font-[var(--font-main)]">ПІБ у шапці заяви</span><span>6 з 70</span></li>
+            <li class="flex justify-between"><span class="font-[var(--font-main)]">ініціали біля підпису</span><span>6 з 70</span></li>
+            <li class="flex justify-between text-[var(--muted)]"><span class="font-[var(--font-main)]">решта 21 тип полів</span><span>44 з 70</span></li>
+          </ul>
+          <p class="mt-3 text-[11px] text-[var(--muted)]">
+            Ці 4 типи — уже третина всіх суперечок. І майже все на сторінці 1: там 62 з 70
+            спірних клітинок, на сторінці 2 (дата, підпис) — лише 8.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TABLE -->
+    <section class="mt-8">
+      <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+        [ <span class="bg-[var(--ink)] text-[var(--bg)] px-1">03</span> ] Порівняння 7 моделей
+      </div>
+      <p class="mt-2 text-[12px] text-[var(--muted)] max-w-[820px]">
+        Три колонки точності зліва направо — від легкого до важкого: усі 408 клітинок бази,
+        потім тільки 338 «консенсусних» (без незалежної перевірки), потім тільки 70 звірених
+        зі сканом. Відсортовано за точністю на всій базі.
+      </p>
+      <div class="mt-4 overflow-x-auto">
+        <table class="w-full border-collapse text-[13px]">
+          <thead>
+            <tr class="border-b-2 border-[var(--ink)] text-left">
+              <th class="py-2 pr-3 font-normal text-[11px] uppercase tracking-[0.1em] text-[var(--muted)]">Модель</th>
+              <th class="py-2 pr-3 font-normal text-[11px] uppercase tracking-[0.1em] text-[var(--muted)] text-right">Швидкість / стор.</th>
+              <th class="py-2 pr-3 font-normal text-[11px] uppercase tracking-[0.1em] text-[var(--muted)] text-right">Ціна / 24 стор.</th>
+              <th class="py-2 pr-3 font-normal text-[11px] uppercase tracking-[0.1em] text-[var(--muted)] text-right">Точність: усі 408</th>
+              <th class="py-2 pr-3 font-normal text-[11px] uppercase tracking-[0.1em] text-[var(--muted)] text-right">консенсус 338</th>
+              <th class="py-2 pr-3 font-normal text-[11px] uppercase tracking-[0.1em] text-[var(--muted)] text-right">найважчі 70</th>
+              <th class="py-2 font-normal text-[11px] uppercase tracking-[0.1em] text-[var(--muted)] text-right">Локально</th>
+            </tr>
+          </thead>
+          <tbody class="font-[var(--font-mono)] tabular-nums">
+            <tr class="border-b border-[var(--hair)]">
+              <td class="py-2 pr-3 font-[var(--font-main)]">gemini-3-flash <span class="text-[10px] text-[var(--muted)]">(закрита, найпотужніша)</span></td>
+              <td class="py-2 pr-3 text-right">5.8 с</td>
+              <td class="py-2 pr-3 text-right">$0.0749</td>
+              <td class="py-2 pr-3 text-right font-semibold">87.0%</td>
+              <td class="py-2 pr-3 text-right">92.9%</td>
+              <td class="py-2 pr-3 text-right">58.6%</td>
+              <td class="py-2 text-right">—</td>
+            </tr>
+            <tr class="border-b border-[var(--hair)]">
+              <td class="py-2 pr-3 font-[var(--font-main)]">qwen3.5-9b</td>
+              <td class="py-2 pr-3 text-right">77.3 с</td>
+              <td class="py-2 pr-3 text-right">$0.0267</td>
+              <td class="py-2 pr-3 text-right">64.7% <span class="text-[10px] text-[var(--muted)]">†</span></td>
+              <td class="py-2 pr-3 text-right">72.7%</td>
+              <td class="py-2 pr-3 text-right">12.0%</td>
+              <td class="py-2 text-right">—</td>
+            </tr>
+            <tr class="border-b border-[var(--hair)]">
+              <td class="py-2 pr-3 font-[var(--font-main)]">qwen3-vl-8b <span class="text-[10px] text-[var(--muted)]">★ найдешевша, локальна</span></td>
+              <td class="py-2 pr-3 text-right">5.4 с</td>
+              <td class="py-2 pr-3 text-right">$0.0248</td>
+              <td class="py-2 pr-3 text-right">59.1%</td>
+              <td class="py-2 pr-3 text-right">69.8%</td>
+              <td class="py-2 pr-3 text-right">7.1%</td>
+              <td class="py-2 text-right">так</td>
+            </tr>
+            <tr class="border-b border-[var(--hair)]">
+              <td class="py-2 pr-3 font-[var(--font-main)]">glm-4.6v</td>
+              <td class="py-2 pr-3 text-right">49.9 с</td>
+              <td class="py-2 pr-3 text-right">$0.0792</td>
+              <td class="py-2 pr-3 text-right">58.0%</td>
+              <td class="py-2 pr-3 text-right">66.2%</td>
+              <td class="py-2 pr-3 text-right">18.8%</td>
+              <td class="py-2 text-right">—</td>
+            </tr>
+            <tr class="border-b border-[var(--hair)]">
+              <td class="py-2 pr-3 font-[var(--font-main)]">qwen3-vl-30b</td>
+              <td class="py-2 pr-3 text-right">16.3 с</td>
+              <td class="py-2 pr-3 text-right">$0.0316</td>
+              <td class="py-2 pr-3 text-right">56.4%</td>
+              <td class="py-2 pr-3 text-right">67.5%</td>
+              <td class="py-2 pr-3 text-right">2.9%</td>
+              <td class="py-2 text-right">—</td>
+            </tr>
+            <tr class="border-b border-[var(--hair)]">
+              <td class="py-2 pr-3 font-[var(--font-main)]">nemotron-nano-12b</td>
+              <td class="py-2 pr-3 text-right">14.1 с</td>
+              <td class="py-2 pr-3 text-right">$0 <span class="text-[10px] text-[var(--muted)]">(free)</span></td>
+              <td class="py-2 pr-3 text-right">45.7%</td>
+              <td class="py-2 pr-3 text-right">51.7%</td>
+              <td class="py-2 pr-3 text-right">16.7%</td>
+              <td class="py-2 text-right">—</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-3 font-[var(--font-main)]">gemma-3-4b</td>
+              <td class="py-2 pr-3 text-right">25.8 с</td>
+              <td class="py-2 pr-3 text-right">$0.0035</td>
+              <td class="py-2 pr-3 text-right">18.9%</td>
+              <td class="py-2 pr-3 text-right">23.0%</td>
+              <td class="py-2 pr-3 text-right">0.0%</td>
+              <td class="py-2 text-right">—</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr class="border-t-2 border-[var(--ink)]">
+              <td class="py-2 pr-3 font-[var(--font-main)] text-[var(--muted)]" colspan="3">на найважчих 70 — голосування більшістю (5 моделей)</td>
+              <td class="py-2 pr-3"></td>
+              <td class="py-2 pr-3"></td>
+              <td class="py-2 pr-3 text-right">5.7%</td>
+              <td class="py-2"></td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-3 font-[var(--font-main)] text-[var(--muted)]" colspan="3">на найважчих 70 — хоч одна з 7 моделей права</td>
+              <td class="py-2 pr-3"></td>
+              <td class="py-2 pr-3"></td>
+              <td class="py-2 pr-3 text-right">80%</td>
+              <td class="py-2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p class="mt-2 text-[11px] text-[var(--muted)] max-w-[820px]">
+        † qwen3.5-9b на значній частині клітинок узагалі не відповіла — впиралась у ліміт
+        токенів. Її відсоток — тільки з тих клітинок, де відповідь узагалі була; це завищує
+        результат порівняно з іншими моделями, які відповідали завжди.<br>
+        ★ «локально» — модель настільки мала (8 ГБ пам'яті), що може працювати на звичайному
+        ноутбуці, без хмари й без відправки документів стороннім серверам.
+      </p>
+    </section>
+
+    <!-- WORKS / DOESN'T -->
+    <section class="mt-8 grid grid-cols-2 gap-6">
+      <div class="border border-[var(--ink)] p-4">
+        <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+          [ <span class="bg-[var(--ink)] text-[var(--bg)] px-1">04</span> ] Працює
+        </div>
+        <ul class="mt-3 space-y-2 text-[13px]">
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Одна сильна модель дає чернетку</li>
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Людині показують тільки розходження, не всю таблицю</li>
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Людина звіряє зі сканом і затверджує</li>
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Контрольну цифру ІПН рахує алгоритм, не тільки око — 30.07 так знайшли 2 помилки, які людина пропустила</li>
+        </ul>
+      </div>
+      <div class="border border-dashed border-[var(--ink)] p-4">
+        <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+          [ <span class="bg-[var(--ink)] text-[var(--bg)] px-1">05</span> ] Не працює
+        </div>
+        <ul class="mt-3 space-y-2 text-[13px]">
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Голосування кількома моделями на найважчих полях — 5.7%, гірше за одну модель окремо</li>
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Модель сама, без людини — навіть найкраща падає до 59% саме на підписах, паспорті, ІПН</li>
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Довіра «найкращій» моделі без перевірки — вона теж хибить на цифрах і прізвищах</li>
+          <li class="flex gap-2"><span class="text-[var(--muted)]">—</span>Звичайні програми розпізнавання тексту (без «зору» ШІ) — на рукописі дали 0%, перевірено окремою командою</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="mt-8 border-t border-[var(--hair)] pt-4 text-[11px] text-[var(--muted)] leading-relaxed">
+      Джерело: базові файли — локально в
+      results/2026-07-27_2148/ · точність по 408 і 338 клітинках — незалежний перерахунок
+      напряму з сирих відповідей моделей (ПОРІВНЯННЯ.md проти БАЗА_ЛЮДЕЙ_ФІНАЛ.xlsx),
+      точність по 70 найважчих — звірена вручну зі сканами · 27–31.07.2026.<br>
+      У документі — лише метрики та макет бланку. Без ПІБ, паспортних даних, РНОКПП і телефонів.
+    </footer>
+
+  </main>
+</body>
+</html>
