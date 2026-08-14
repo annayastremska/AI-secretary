@@ -17,6 +17,7 @@ import re
 
 from pipeline.extraction.extract import (
     NAME_PART_ROLES,
+    UNVERIFIED_METHOD,
     field_part,
     name_group_key,
     primary_name_group,
@@ -35,7 +36,17 @@ from pipeline.normalization.normalize import (
 # критичне поле з таким провенансом не дає документу статус confirmed.
 # Без цього LLM могла віддати "рядовий" у поле given_name, морфологія
 # відповідала not_a_name, значення лишалось -- і документ виходив confirmed.
-UNRELIABLE_METHODS = ("llm_split_vote",)
+UNRELIABLE_METHODS = ("llm_split_vote", UNVERIFIED_METHOD)
+# UNVERIFIED_METHOD ("unverified_foreign_edition") доданий 14.08.2026,
+# known-weak-spots.md розд. 8.6. Він означає рівно те, чого цей перелік і
+# стосується: детермінований шлях значення знайшов, але бланк не впізнаний,
+# тому підтвердити його НІЧИМ. Поки build_record цього методу не знав, поле
+# отримувало resolved: true, і facts[0]["confirmed"] міг лишитись true, тоді як
+# meta["status"] уже був needs_review (статус ставить run.py). Тобто провенанс
+# суперечив сам собі: поле, назване непідтвердженим, вважалось вирішеним, і
+# споживач, що фільтрує за facts.confirmed, а не за meta.status, узяв би його
+# в підрахунок. Імпорт із extract, а не літерал: рядок мусить мати одне
+# джерело -- інакше перейменування провенансу тихо вимкнуло б цей блокер.
 # no_morphology і ambiguous_case додані після верифікації проти БД-споживача.
 # Причина конкретна: обидва означають, що прізвище лишилось у відмінку
 # ДЖЕРЕЛА, а завантажувач зіставляє людину за точним рядком canonical_name --
