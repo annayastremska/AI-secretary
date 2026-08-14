@@ -154,6 +154,25 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-B1-03: часткова сума числівника не повертається ---------------------
+
+def test_partial_number_word_sum_is_refused():
+    """'двадцять одін' давав 20 з провенансом matched/0.9 -- значення,
+    складене з ПОЛОВИНИ входу, виглядало як повністю прочитане."""
+    from pipeline.normalization.normalize import number_from_words
+    assert number_from_words("двадцять одін") is None
+    assert number_from_words("двадцять фыва") is None
+    assert number_from_words("тринадцять днів") is None
+
+
+def test_full_number_words_still_parse():
+    from pipeline.normalization.normalize import number_from_words
+    assert number_from_words("тринадцять") == 13
+    assert number_from_words("двадцять одна") == 21
+    assert number_from_words("двадцять") == 20
+    assert number_from_words("13") == 13
+
+
 def test_instrument_catches_the_writeback_break(monkeypatch):
     """Зв'язка з R-A2-02: якби write-back знову зник, прилад мусить це
     покарати. Імітуємо регресію вручну й перевіряємо, що чисельник падає."""

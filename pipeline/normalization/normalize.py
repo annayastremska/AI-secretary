@@ -373,14 +373,20 @@ def number_from_words(raw_value):
     for ch in _APOSTROPHES:
         text = text.replace(ch, "'")
     tokens = [t for t in re.split(r"[\s\-]+", text) if t]
-    total, matched = 0, 0
-    for token in tokens[:2]:      # максимум "двадцять сім"
+    if not tokens or len(tokens) > 2:      # максимум "двадцять сім"
+        return None
+    total = 0
+    for token in tokens:
         value = UKR_NUMBER_WORDS.get(token)
         if value is None:
-            break
+            # ЧАСТКОВА сума не повертається (R-B1-03): "двадцять одін" давав
+            # 20 з провенансом matched/0.9, і наскрізно його зупиняла РІВНО
+            # одна перевірка days_span_inclusive -- одношаровий захист.
+            # Нерозпізнаний токен означає, що ми НЕ прочитали число цілком,
+            # тож чесна відповідь -- None (відмова краща за вигадку).
+            return None
         total += value
-        matched += 1
-    return total if matched else None
+    return total
 
 
 def lemmatize_phrase(text):
