@@ -194,6 +194,11 @@ how_verified: прямі виклики + наскрізний прогін.
 note: додатковий побічний ефект, який B1 не назвав: через відсутню дату
   duration_days отримує `unverifiable_dependency`, тобто одна описка гасить два
   поля, і жодне з них не каже, ЧОМУ.
+outcome: fixed — build_record тепер зберігає сирий збіг і для raw_value-dict
+  (regex-групи дати склеюються в рядок «31 лютого 2026» -> unresolved_values
+  + provenance.raw_text). ДО: resolved:false без сліду. ПІСЛЯ: рев'юер бачить,
+  що стояло в документі. Тест: test_impossible_date_keeps_raw_match_visible.
+  Корпуси: 192/192 ×2, 169/169 ×2, тестів 165.
 ```
 
 ```

@@ -459,6 +459,16 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
             raw_text = None
             if isinstance(raw_value, str) and raw_value.strip():
                 raw_text = raw_value.strip()
+            elif isinstance(raw_value, dict):
+                # Date-поле приходить regex-ГРУПАМИ ({day, month, year}), а не
+                # рядком -- через це сирий збіг неможливої дати («31 лютого»)
+                # не зберігався НІДЕ: unresolved_values порожній, warnings
+                # порожні, рев'юер бачив голе resolved:false без причини
+                # (R-B1-04). Групи склеюються в читабельний рядок у порядку
+                # оголошення -- «31 лютого 2026».
+                joined = " ".join(str(v).strip() for v in raw_value.values()
+                                  if v is not None and str(v).strip())
+                raw_text = joined or None
             elif (reason or "").startswith(("rank_not_in_dictionary:",
                                             NAME_TAIL_METHOD + ":")):
                 # Значення в документі Є (звання поза довідником / хвіст ПІБ

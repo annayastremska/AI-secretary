@@ -154,6 +154,26 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-B1-04: неможлива дата мусить лишати сирий збіг -----------------------
+
+def test_impossible_date_keeps_raw_match_visible():
+    """«31 лютого» гасило поле БЕЗ raw_text і з порожнім unresolved_values:
+    механізм вимагав isinstance(raw_value, str), а date-поле приходить
+    regex-групами (dict). Рев'юер бачив resolved:false без жодної причини."""
+    from pipeline.identification import load_schemas
+    from pipeline.build_record import build_record
+
+    schema = next(s for s in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas"))
+                  if s["template"] == "leave_ticket")
+    raw = {f["name"]: (None, "no_value") for f in schema["fields"]}
+    raw["leave_start_date"] = ({"day": "31", "month": "лютого", "year": "2026"},
+                               "matched")
+    record = build_record(schema, raw, {})
+    assert "leave_start_date" in record["unknown_critical_fields"]
+    assert record["unresolved_values"].get("leave_start_date") == "31 лютого 2026"
+    assert record["field_provenance"]["leave_start_date"]["raw_text"] == "31 лютого 2026"
+
+
 # --- R-B1-03: часткова сума числівника не повертається ---------------------
 
 def test_partial_number_word_sum_is_refused():
