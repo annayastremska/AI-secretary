@@ -439,6 +439,13 @@ def lookup_alias(candidate, alias_lookup: dict):
     return alias_lookup.get(lemma) if lemma else None
 
 
+#: Рядок-маркер «довідник не впізнав аліас» (розд. 3.4 ТЗ: не None і не 0).
+#: Константа, а не літерал у двох місцях (R-A2-07): build_record порівнює з
+#: цим маркером, і перейменування не сміє тихо розірвати зв'язок -- те саме
+#: правило, що для UNVERIFIED_METHOD/NAME_TAIL_METHOD.
+UNRESOLVED_TERM_MARKER = "термін не розпізнано"
+
+
 def match_dictionary(raw_text, alias_lookup: dict, tokens=None):
     """Точний рядковий збіг після нормалізації. Незнайдений термін -> рядок-
     маркер, не None і не 0 (розділ 3.4 ТЗ: нуль не можна відрізнити від
@@ -448,7 +455,7 @@ def match_dictionary(raw_text, alias_lookup: dict, tokens=None):
         return None
     normalized = re.sub(r"\s*за\s*\d{4}\s*рік\s*[,.;]?\s*$", "", raw_text.strip().lower())
     hit = lookup_alias(normalized, alias_lookup)
-    return {"code": hit[0], "label": hit[1]} if hit else "термін не розпізнано"
+    return {"code": hit[0], "label": hit[1]} if hit else UNRESOLVED_TERM_MARKER
 
 
 def resolve_category(value, alias_lookup: dict, tokens=None):

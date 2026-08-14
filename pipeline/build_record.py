@@ -24,6 +24,7 @@ from pipeline.extraction.extract import (
     primary_name_group,
 )
 from pipeline.normalization.normalize import (
+    UNRESOLVED_TERM_MARKER,
     detect_name_case,
     field_placeholder_tokens,
     normalize_field,
@@ -339,7 +340,7 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
         else:
             normalized, confirmed_empty = normalize_field(field, raw_value, dictionaries)
 
-        if normalized == "термін не розпізнано":
+        if normalized == UNRESOLVED_TERM_MARKER:
             # match_dictionary свідомо повертає цей рядок-маркер, не None, щоб
             # відрізнити "довідник не впізнав аліас" від "None" (розд. 3.4 ТЗ).
             # Але це сигнал ДЛЯ ПРОВЕНАНСУ (raw_text/unresolved_values нижче),
