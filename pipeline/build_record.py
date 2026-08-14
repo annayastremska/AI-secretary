@@ -17,6 +17,7 @@ import re
 
 from pipeline.extraction.extract import (
     NAME_PART_ROLES,
+    NAME_TAIL_METHOD,
     UNVERIFIED_METHOD,
     field_part,
     name_group_key,
@@ -458,7 +459,11 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
             raw_text = None
             if isinstance(raw_value, str) and raw_value.strip():
                 raw_text = raw_value.strip()
-            elif (reason or "").startswith("rank_not_in_dictionary:"):
+            elif (reason or "").startswith(("rank_not_in_dictionary:",
+                                            NAME_TAIL_METHOD + ":")):
+                # Значення в документі Є (звання поза довідником / хвіст ПІБ
+                # після по батькові, R-B1-02) -- рев'юер мусить бачити, що
+                # саме там стояло, а не голий null.
                 raw_text = reason.split(":", 1)[1].strip() or None
             if raw_text and not is_placeholder(raw_text, field_placeholder_tokens(field)):
                 unresolved_values[name] = raw_text

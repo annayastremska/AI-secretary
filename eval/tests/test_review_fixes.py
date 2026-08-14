@@ -101,6 +101,59 @@ def test_needs_review_gate_writes_back_into_facts(monkeypatch):
         [f["confirmed"] for f in meta["facts"]]
 
 
+# --- R-B1-02: 4-й токен ПІБ не сміє зникати мовчки -------------------------
+
+def _rank_lookup():
+    import yaml
+    from pipeline.normalization.normalize import build_alias_lookup
+    path = os.path.join(_PROJECT_ROOT, "pipeline", "dictionaries", "military_rank.yaml")
+    with open(path, encoding="utf-8") as f:
+        return build_alias_lookup(yaml.safe_load(f))
+
+
+def test_name_tail_token_is_not_silently_dropped():
+    """«кизи» -- частина імені, не сміття. Раніше вихід для входу З хвостом і
+    БЕЗ був побайтово однаковий (_leftover_before_surname=None, кінець)."""
+    from pipeline.extraction.extract import parse_rank_and_name
+    ranks = _rank_lookup()
+    _, with_tail = parse_rank_and_name(
+        "рядовий ЛЕМЕШКО Соломія Мустафа кизи", ranks)
+    _, without_tail = parse_rank_and_name(
+        "рядовий ЛЕМЕШКО Соломія Мустафа", ranks)
+    assert with_tail != without_tail, \
+        "входи з хвостом і без мусять давати РІЗНИЙ вихід"
+    assert with_tail["_leftover_after_patronymic"] == ["кизи"]
+    assert without_tail["_leftover_after_patronymic"] is None
+
+
+def test_name_tail_blocks_confirmed_and_keeps_raw_text():
+    """Поле з хвостом ПІБ мусить: не вирішитись, заблокувати confirmed
+    (критичне) і донести рев'юерові повний хвіст, а не голий null."""
+    from pipeline.extraction.extract import NAME_TAIL_METHOD
+    from pipeline.identification import load_schemas
+    from pipeline.build_record import build_record
+
+    schema = next(s for s in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas"))
+                  if s["template"] == "leave_ticket")
+    raw = {f["name"]: (None, "no_value") for f in schema["fields"]}
+    raw["patronymic"] = (None, f"{NAME_TAIL_METHOD}:Мустафа кизи")
+    record = build_record(schema, raw, {"military_rank": _rank_lookup()})
+    assert "patronymic" in record["unknown_critical_fields"]
+    assert record["facts"][0]["confirmed"] is False
+    assert record["unresolved_values"].get("patronymic") == "Мустафа кизи"
+    assert record["field_provenance"]["patronymic"]["raw_text"] == "Мустафа кизи"
+
+
+def test_three_token_names_unchanged():
+    """Звичайний ПІБ з трьох токенів розбирається як раніше -- фікс не сміє
+    зачепити основний шлях."""
+    from pipeline.extraction.extract import parse_rank_and_name
+    rank, parts = parse_rank_and_name("рядовий ЛЕМЕШКО Соломія Романівна", _rank_lookup())
+    assert rank == {"code": "soldier", "label": "Солдат"}
+    assert (parts["surname"], parts["given_name"], parts["patronymic"]) == \
+        ("ЛЕМЕШКО", "Соломія", "Романівна")
+
+
 def test_instrument_catches_the_writeback_break(monkeypatch):
     """Зв'язка з R-A2-02: якби write-back знову зник, прилад мусить це
     покарати. Імітуємо регресію вручну й перевіряємо, що чисельник падає."""

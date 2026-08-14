@@ -111,6 +111,14 @@ how_verified: прямий виклик з реальним довідником
 note: severity критична саме через асиметрію — код сам визнає (той самий
   докстрінг), що позиційний фолбек дає «не порожні, а тихо неправильні» поля, і
   для лівого боку сигнал зробив, а для правого ні.
+outcome: fixed — parse_rank_and_name повертає симетричний сигнал
+  `_leftover_after_patronymic`; extract_document при хвості не вирішує
+  patronymic мовчки, а віддає (None, "name_tail_unparsed:<повний хвіст>"),
+  рядок іде в підказку LLM (localized_gaps), build_record кладе хвіст у
+  unresolved_values/raw_text. Критичне поле блокує confirmed -> needs_review.
+  ДО: вихід для «Мустафа кизи» і «Мустафа» побайтово однаковий, confirmed.
+  ПІСЛЯ: patronymic нерозв'язаний, хвіст видно рев'юерові. Тести:
+  test_review_fixes.py (3 тести). Корпуси: 192/192, 192/192, 169/169, 169/169.
 ```
 
 ```

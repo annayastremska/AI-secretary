@@ -1183,6 +1183,12 @@ def parse_rank_and_name(raw_line, rank_alias_lookup):
         # префікс знято неповністю. Значення полів при цьому правильні, але
         # rank, найпевніше, втрачений -- і це має бути видно.
         "_leftover_before_surname": leftover_before or None,
+        # Симетричний сигнал ПРАВОРУЧ (R-B1-02): 4-й і подальші токени ПІБ
+        # раніше не читались ніде, і «Мустафа кизи» ставало «Мустафа» без
+        # жодної різниці у виході -- документ виходив confirmed з чужою
+        # ідентичністю особи. Хвіст тепер видно, а розріз after[0]/after[1]
+        # при ньому не вважається надійним (див. extract_document).
+        "_leftover_after_patronymic": after[2:] or None,
     }
 
 
@@ -1437,6 +1443,14 @@ UNANCHORED_MODES = ("regex", "first_block_matching", "rank_and_name_tokenized")
 #: `matched`.
 UNVERIFIED_METHOD = "unverified_foreign_edition"
 
+#: Провенанс ПІБ, у якому після по батькові лишилися неспожиті токени
+#: (R-B1-02: «ЛЕМЕШКО Соломія Мустафа кизи» -- 4-й токен частина імені, не
+#: сміття). Позиційний розріз after[0]/after[1] тут ненадійний за побудовою,
+#: тож поле не вирішується мовчки, а йде на розбір з повним хвостом у reason.
+#: Константа, не літерал: build_record читає цей префікс (raw_text для
+#: рев'юера), і перейменування не сміє тихо розірвати зв'язок.
+NAME_TAIL_METHOD = "name_tail_unparsed"
+
 
 def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries: dict,
                       llm_extract_batch=None, title_phrases=None,
@@ -1508,7 +1522,19 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
             rank_result, name_parts, rank_raw_line, rank_label_reason = \
                 name_groups[name_group_key(field)]
             value = rank_result if part == "rank" else name_parts.get(part)
-            if value:
+            if (part == "patronymic" and value
+                    and name_parts.get("_leftover_after_patronymic")):
+                # Після по батькові лишилися токени («Мустафа кизи») --
+                # позиційний розріз ненадійний, і віддати after[1] мовчки
+                # означало б чужу ідентичність особи зі статусом confirmed
+                # (R-B1-02). Поле не вирішується, повний хвіст іде в reason
+                # (рев'юер бачить, ЩО саме стояло в документі), рядок -- у
+                # підказку LLM, як і для звання поза довідником.
+                tail = " ".join([value] + name_parts["_leftover_after_patronymic"])
+                results[name] = (None, f"{NAME_TAIL_METHOD}:{tail}")
+                hints[name] = rank_raw_line or ""
+                localized_gaps.append(name)
+            elif value:
                 results[name] = (value, "matched")
             elif part == "rank" and name_parts.get("_leftover_before_surname"):
                 # Прізвище знайдене, але ліворуч від нього лишились неспожиті
