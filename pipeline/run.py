@@ -24,6 +24,7 @@ from pipeline.build_record import build_record
 from pipeline.classification.classify import load_domain_keyphrases
 from pipeline.extraction.extract import extract_document
 from pipeline.identification import (
+    blank_edition_verdict,
     identify_template,
     load_schemas,
     missing_dictionaries,
@@ -412,7 +413,13 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             raise ValueError(f"Шаблон '{force_template}' не знайдено серед {[s['template'] for s in res['schemas']]}")
         ident = {"schema": forced, "template": forced["template"], "domain": forced.get("domain"),
                  "source": "forced", "score": ident.get("score"), "scores": ident.get("scores"),
-                 "runner_up": ident.get("runner_up"), "reason": None}
+                 "runner_up": ident.get("runner_up"), "reason": None,
+                 # Вердикт про РЕДАКЦІЮ рахується й для примусового шаблону.
+                 # `--force-template` каже "це той бланк", а не "цей документ
+                 # дослівно збігається з бланком": підмінити перше другим
+                 # означало б, що ручне вказання шаблону мовчки вимикає рівно
+                 # ту перевірку, заради якої вона й потрібна.
+                 "blank_edition": blank_edition_verdict(text, forced)}
 
     if ident["schema"] is None:
         # Схеми немає -> рівні 2 і 3: мапінг «домен -> вид», далі (якщо ввімкнено
@@ -438,6 +445,15 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         return meta
 
     schema = ident["schema"]
+    # РЕДАКЦІЯ бланка -- ГОТОВИЙ вердикт ідентифікації, а не власний підрахунок:
+    # `identify_template` єдиний відповідає на питання «це наша форма», а решта
+    # пайплайна його читає (identification.blank_edition_verdict). Два джерела
+    # цієї відповіді розійшлися б, і ніхто не помітив би, яке з них право.
+    blank_edition = ident.get("blank_edition") or {}
+    # Відсутній вердикт -> форма вважається впізнаною. Схема без
+    # `blank_template:` перевірки не отримує взагалі (та сама межа, що в
+    # blank_form.py): мовчки не довіряти власним полям вона не має.
+    form_recognized = blank_edition.get("recognized", True)
     warnings = list(ingest_warnings)
     missing = missing_dictionaries(schema, res["dictionaries"])
     if missing:
@@ -460,6 +476,7 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             title_phrases=schema_title_phrases(schema),
             batch_size=llm_cfg.get("batch_size", 4),
             self_consistency_n=llm_cfg.get("self_consistency_n", 1),
+            form_recognized=form_recognized,
         )
         record = build_record(schema, raw_extraction, res["dictionaries"])
         for fact in record["facts"]:
@@ -483,6 +500,25 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             confirmed = False
             warnings.append("шаблон визначено моделлю, не анкорами -- потрібне "
                             "підтвердження людиною")
+
+        # ІНША РЕДАКЦІЯ БЛАНКА -- той самий клас, що template_by_llm, і той
+        # самий висновок: значення зберігаються повністю, але в підрахунки без
+        # людини не йдуть. Різниця в питанні до рев'юера: там "що це за бланк",
+        # тут "чи це той бланк, тільки іншої редакції". Причина пишеться
+        # словами з цифрами -- інакше рев'юер бачив би набір порожніх і
+        # непідтверджених полів без жодного пояснення, чому саме цей документ
+        # виглядає гірше за решту.
+        if not form_recognized:
+            confirmed = False
+            warnings.append(
+                "друкований текст документа збігається з оголошеним бланком "
+                f"лише на {blank_edition.get('found')} з "
+                f"{blank_edition.get('total')} рядків "
+                f"({blank_edition.get('coverage'):.2f} проти порога "
+                f"{blank_edition.get('threshold'):.2f}) -- ЙМОВІРНО ІНША "
+                "РЕДАКЦІЯ БЛАНКА: межі полів за бланком не відновлюються, тому "
+                "значення, знайдені без опори на друкований підпис поля, "
+                "перевірено моделлю й не підтверджено автоматично")
 
         subject = _person_identity(record["subject"])
         if not subject["person_complete"]:
@@ -528,23 +564,37 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
             domain=ident["domain"],
             template=ident["template"],
             identification={"source": ident["source"], "score": ident.get("score"),
-                             "runner_up": ident.get("runner_up")},
+                             "runner_up": ident.get("runner_up"),
+                             # Дрібніша міра тієї самої схожості -- у мету
+                             # цілком, разом із порогом: без цифр "ймовірно інша
+                             # редакція" неможливо ні перевірити, ні оскаржити.
+                             "blank_edition": ident.get("blank_edition")},
             # Позначка для черги ручного аудиту: навіть повністю впевнені записи
             # вибірково перевіряються, інакше рівень помилки системи невідомий
             # (architecture-proposal.md розд. 3).
             # Порядок причин = порядок первинності: невпізнаний ШАБЛОН старший
-            # за невідомий вид суб'єкта (вид беруть зі схеми, тож коли під
-            # питанням сама схема, вид під питанням похідно).
+            # за чужу РЕДАКЦІЮ того самого шаблону (якщо під питанням сама
+            # схема, редакція під питанням похідно); редакція, у свою чергу,
+            # старша за невідомий вид суб'єкта (вид беруть зі схеми, тож коли
+            # під питанням бланк, вид під питанням похідно) і за загальний
+            # needs_review, бо вона їх ПОЯСНЮЄ: поля виглядають гірше саме
+            # через бланк.
             review_reason=("template_by_llm" if template_by_llm else
-                           ("unknown_subject_kind" if unknown_kind else
-                            ("random_audit" if audit_sampled else
-                             (None if confirmed else "needs_review")))),
+                           ("foreign_form_edition" if not form_recognized else
+                            ("unknown_subject_kind" if unknown_kind else
+                             ("random_audit" if audit_sampled else
+                              (None if confirmed else "needs_review"))))),
             # Шаблон від моделі -> у черзі це саме "тип документа під питанням"
             # (unknown_type), а не "факт непідтверджений": рев'юер має спершу
             # сказати, ЩО це за бланк, і лише потім дивитись на поля. Невідомий
             # вид суб'єкта -- те саме питання іншими словами ("про КОГО це"),
             # тому та сама черга, а не unconfirmed_fact.
-            review_queue=("unknown_type" if (template_by_llm or unknown_kind)
+            # Чужа редакція -- теж питання "ЩО це за бланк" (а не "чи вірний
+            # факт"), тому та сама черга unknown_type: рев'юер має спершу
+            # сказати, чи це справді наша форма іншої редакції, і лише потім
+            # дивитись на поля.
+            review_queue=("unknown_type" if (template_by_llm or unknown_kind
+                                             or not form_recognized)
                           else _review_queue_type(status, source_kind, audit_sampled)),
             subject=subject,
             subject_kind=subject_kind,

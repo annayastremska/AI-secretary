@@ -19,6 +19,7 @@ import yaml
 
 from pipeline.build_record import CONSISTENCY_RULES, DERIVE_FUNCS
 from pipeline.classification.classify import classify_domain_rules, phrase_in_text
+from pipeline.extraction.blank_form import blank_line_coverage
 from pipeline.extraction.extract import NAME_PART_ROLES, field_part, name_group_key
 from pipeline.normalization.normalize import (
     PLACEHOLDER_TOKENS_EXCEPT_KEY, PLACEHOLDER_TOKENS_KEY)
@@ -38,6 +39,74 @@ DEFAULT_MIN_SCORE = 5
 # документ ставав confirmed з фактом, якого в ньому немає.
 # 2 = рівно один збіглий анкор: хоч один незалежний сигнал, що це той бланк.
 DEFAULT_LLM_FLOOR = ANCHOR_WEIGHT
+
+# --- РЕДАКЦІЯ бланка: та сама схожість, лише дрібнішою міркою --------------
+#
+# ЧОМУ ЦЕ ЖИВЕ ТУТ, А НЕ ОКРЕМИМ РОЗПІЗНАВАЧЕМ. `score_schema` вище вже
+# відповідає на питання «це наша форма?»: заголовок ×5, анкори ×2, поріг
+# `min_score`, обов'язковий щонайменше один анкор. Кількість знайдених
+# ДРУКОВАНИХ РЯДКІВ бланка -- те саме питання з кроком у один рядок замість
+# кроку у один анкор. Тримати це другим механізмом означало б мати два
+# твердження про одне й те саме: анкори кажуть «бланк той», рядки кажуть
+# «редакція інша», і при розходженні ніхто не знав би, яке з них право. Тому
+# `identify_template` рахує обидві міри й віддає ОДИН вердикт
+# (`form_recognized`), а екстракція його лише читає -- сама вона нічого про
+# схожість не рахує.
+#
+# НАВІЩО ДРІБНІША МІРА. Анкорів у схемі п'ять-шість, і вони підібрані як
+# найхарактерніші; інша РЕДАКЦІЯ форми (ті самі поля, перефразовані друковані
+# рядки) цілком може зберегти заголовок і кілька анкорів, тобто набрати повний
+# бал 15. А `pipeline/extraction/blank_form.py` стоїть не на анкорах, а на
+# ТОЧНОМУ тексті бланка: різак меж полів (`resegment_by_blank`) і негативна
+# перевірка (`is_printed_form_text`) обидва мовчки перестають працювати, щойно
+# формулювання розійшлись. Анкорний бал цього не бачить -- рядкове покриття
+# бачить.
+#
+# МЕЖА ВИВЕДЕНА З ДАНИХ, не з голови. Заміряно на всіх наших документах
+# (розподіл -- у docs/known-weak-spots.md розд. 8):
+#
+#   порожні бланки (leave, deployment) ..................... 1.000
+#   leave  docx 16 / pdf 16 ................................ 0.926
+#   leave  png (Surya) ..................................... 0.778
+#   deployment docx 14 / pdf 14 ............................ 0.852 - 0.889
+#
+# Фото -- найгірший клас, і це очікувано: розпізнавання губить кілька рядків
+# бланка з двадцяти семи. Саме воно, а не чужа редакція, і визначає, наскільки
+# низько мусить стояти поріг.
+#
+# Поріг стоїть СВІДОМО НИЖЧЕ за найгірший ВІДОМО-ДОБРИЙ документ набору, з
+# запасом на розпізнавання, тобто на нашому наборі правило не спрацьовує ЗА
+# ПОБУДОВОЮ -- інакше це була б регресія, а не захист. Штучно перефразована
+# редакція того самого бланка дає 0.148, тобто розділення між класами -- не на
+# межі, а в кілька разів. Обидві межі під тестом
+# (eval/tests/test_foreign_edition.py): найгірший добрий мусить лежати ще й на
+# 0.2 вище порога, а чужа редакція -- удвічі нижче.
+DEFAULT_MIN_BLANK_COVERAGE = 0.5
+#: Ключ у блоці `identification:` схеми -- поріг можна підняти під конкретний
+#: бланк, не правлячи код (той самий підхід, що `min_score` / `llm_floor`).
+MIN_BLANK_COVERAGE_KEY = "min_blank_coverage"
+
+
+def blank_edition_verdict(text: str, schema: dict) -> dict:
+    """Наскільки документ схожий на ОГОЛОШЕНИЙ бланк цієї схеми.
+
+    Повертає {found, total, coverage, threshold, recognized}.
+
+    `recognized: True` при `total == 0` -- НЕ поблажливість, а та сама межа, що
+    вже оголошена в докстрінгу `blank_form.py`: схема без `blank_template:` не
+    отримує перевірки взагалі. Новий бланк без оголошеного шаблону не має
+    почати мовчки не довіряти власним полям -- він має поводитись рівно так, як
+    поводився до цієї зміни.
+    """
+    found, total = blank_line_coverage(text, schema)
+    threshold = ((schema.get("identification") or {})
+                 .get(MIN_BLANK_COVERAGE_KEY, DEFAULT_MIN_BLANK_COVERAGE))
+    coverage = (found / total) if total else None
+    return {
+        "found": found, "total": total, "coverage": coverage,
+        "threshold": threshold,
+        "recognized": True if coverage is None else coverage >= threshold,
+    }
 
 
 # Режими екстракції, які двигун справді реалізує, і обов'язкові ключі кожного.
@@ -405,6 +474,11 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
                     якщо шаблон не визначено (корисно для черги unresolved)
       source     -- anchors | llm | None
       score, runner_up, scores, reason
+      blank_edition -- вердикт про РЕДАКЦІЮ бланка (blank_edition_verdict) для
+                    ОБРАНОЇ схеми, або None, якщо схему не обрано. Це ЄДИНЕ
+                    джерело істини про «це наша форма» для всього, що йде далі:
+                    екстракція його читає, але не рахує (див. коментар до
+                    DEFAULT_MIN_BLANK_COVERAGE).
 
     llm_choose(prompt, choices) -> str -- grammar-constrained вибір рівно
     одного з choices; "unknown" ЗАВЖДИ серед choices, інакше модель,
@@ -443,6 +517,7 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
             "schema": None, "template": None, "domain": coarse_domain,
             "source": None, "score": best_score, "runner_up": runner_up_score,
             "scores": scores, "reason": f"procedural_document:{coarse_domain}",
+            "blank_edition": None,
         }
 
     if best_template is not None:
@@ -477,6 +552,7 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
                 "schema": schema, "template": best_template, "domain": schema.get("domain"),
                 "source": "anchors", "score": best_score, "runner_up": runner_up_score,
                 "scores": scores, "reason": None,
+                "blank_edition": blank_edition_verdict(text, schema),
             }
 
     # Скільки схем упевнено збіглося. Документ, що містить ДЕКІЛЬКА бланків --
@@ -531,6 +607,7 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
                 "schema": schema, "template": answer, "domain": schema.get("domain"),
                 "source": "llm", "score": scores.get(answer, 0), "runner_up": runner_up_score,
                 "scores": scores, "reason": None,
+                "blank_edition": blank_edition_verdict(text, schema),
             }
 
     if llm_error:
@@ -551,7 +628,7 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
     return {
         "schema": None, "template": None, "domain": coarse_domain,
         "source": None, "score": best_score, "runner_up": runner_up_score,
-        "scores": scores, "reason": reason,
+        "scores": scores, "reason": reason, "blank_edition": None,
     }
 
 

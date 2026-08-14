@@ -1285,11 +1285,61 @@ def ground_llm_value(field: dict, value, document_text: str, printed=()):
         else (None, "ungrounded_llm_value")
 
 
+# --- Режими БЕЗ позитивної опори на друкований підпис поля ---------------
+#
+# Уся конструкція `blank_form.py` стоїть на ТОЧНОМУ тексті нашого бланка. Якщо
+# документ -- інша РЕДАКЦІЯ форми (ті самі поля, перефразовані друковані
+# рядки), обидва її механізми мовчки перестають працювати: різак меж полів
+# ріже не туди, а негативна перевірка `is_printed_form_text` не відхиляє
+# нічого, бо НАШИХ рядків у документі немає.
+#
+# Для полів із лейблом страховка від цього вже є, і вона позитивна: лейбл --
+# це друкований рядок бланка, тож інша редакція дає `no_label` (або
+# `ambiguous_label`), поле стає прогалиною й іде в LLM. Перевірено:
+# `block_before_label` і `rank_and_name_tokenized` обидва проходять через
+# `find_block_before_label`, яка без знайденого лейбла повертає рівно
+# `(None, "no_label")`.
+#
+# Режими нижче такої опори НЕ мають ЖОДНОЇ:
+#   * `regex` -- частина патернів схеми чисто формова, без жодного слова
+#     бланка ('№\\s*(?P<value>[\\w/\\-]+)\\s+від\\s+\\d{1,2}\\...' у
+#     `document_number`, 'з "DD" month YYYY' у датах). У чужій редакції такий
+#     патерн збігається з ПЕРШИМ, що схоже за формою -- напр. із номером
+#     ЗГАДАНОГО документа замість номера цього;
+#   * `first_block_matching` -- `starts_with` шукає перший блок із заданим
+#     початком, і в чужій верстці ним стає інший рядок;
+#   * `rank_and_name_tokenized` -- лейбл у нього є, але сам РОЗБІР рядка
+#     ("найдовший префікс токенів, що є званням; далі ВЕЛИКИМИ -- прізвище")
+#     від бланка не залежить узагалі, тож на рядку, який лейбл підібрав не з
+#     того місця, він однаково віддає правдоподібне ПІБ.
+#
+# Усі три віддають значення з провенансом `matched`, і документ через це міг
+# стати `confirmed` -- тобто тихо підтверджена вигадка. Коли форма НЕ впізнана
+# (`form_recognized=False`, вердикт приходить готовим з `identify_template`),
+# значення цих режимів не приймаються на віру: поле йде в LLM на перевірку, а
+# сам детермінований результат зберігається як відкат і носить провенанс
+# `unverified_foreign_edition`, який видно в рев'ю.
+UNANCHORED_MODES = ("regex", "first_block_matching", "rank_and_name_tokenized")
+
+#: Провенанс значення, яке детермінований шлях знайшов, але підтвердити
+#: нічим: бланк не впізнаний, а режим позитивної опори не має. Значення НЕ
+#: викидається (правило "не губимо дані"), лише перестає виглядати як
+#: `matched`.
+UNVERIFIED_METHOD = "unverified_foreign_edition"
+
+
 def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries: dict,
                       llm_extract_batch=None, title_phrases=None,
-                      batch_size=4, self_consistency_n=1):
+                      batch_size=4, self_consistency_n=1, form_recognized=True):
     """Повертає {field_name: (сире_значення, reason)}.
-    reason: matched | llm | no_value | derived | llm_error:<Тип>.
+    reason: matched | llm | no_value | derived | llm_error:<Тип> |
+            unverified_foreign_edition.
+
+    form_recognized -- ГОТОВИЙ вердикт `identify_template`
+    (`ident["blank_edition"]["recognized"]`), не власний підрахунок: див.
+    UNANCHORED_MODES і коментар до DEFAULT_MIN_BLANK_COVERAGE в
+    identification.py. `True` за замовчуванням, щоб викликач, який сигналу не
+    має (тест, скрипт), отримував рівно попередню поведінку.
 
     dictionaries: {category: alias_lookup} -- ПОВНИЙ набір довідників (не
     лише rank), бо build_json_schema_for_fields потребує їх для enum-ів
@@ -1448,6 +1498,33 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
         else:
             results[name] = (None, "no_value")
 
+    # ФОРМА НЕ ВПІЗНАНА -> значення режимів без опори перестають бути `matched`.
+    # Один прохід ПІСЛЯ головного циклу, а не гілка в кожному режимі: правило
+    # тут одне («опори немає -> на віру не беремо»), і розписане по трьох
+    # місцях воно розійшлося б при наступній зміні будь-якого з них.
+    #
+    # `unverified` -- відкат, а не дубль: якщо LLM не віддасть нічого (або її
+    # значення не заземлиться), поле повертає детермінований результат із
+    # провенансом UNVERIFIED_METHOD. Без цього перевірка ПЕРЕТВОРЮВАЛАСЬ БИ на
+    # знищення даних: `run_group` на порожній відповіді пише (None, "no_value"),
+    # тобто чуже формулювання бланка коштувало б нам усіх полів цих режимів.
+    unverified = {}
+    if not form_recognized:
+        for field in schema["fields"]:
+            name = field["name"]
+            if field.get("extraction") not in UNANCHORED_MODES:
+                continue
+            value, reason = results.get(name, (None, "no_value"))
+            if value is None or reason != "matched":
+                continue
+            unverified[name] = (value, UNVERIFIED_METHOD)
+            results[name] = (value, UNVERIFIED_METHOD)
+            if name not in global_gaps and name not in localized_gaps:
+                # Саме global_gaps: підказка тут була б шкідлива за тією самою
+                # логікою, що й для відхиленого кандидата -- ми не знаємо, чи
+                # знайдене місце взагалі те, тож у LLM іде ПОВНИЙ текст.
+                global_gaps.append(name)
+
     if llm_extract_batch is None:
         return results
 
@@ -1458,12 +1535,18 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                        for _ in range(max(1, self_consistency_n))]
         except Exception as exc:
             for name in batch_names:
-                results[name] = (None, f"llm_error:{type(exc).__name__}")
+                # Збій моделі не має ЗАБИРАТИ те, що детермінований шлях уже
+                # знайшов: непідтверджене значення чесніше за порожнє поле,
+                # доки провенанс каже, що воно непідтверджене.
+                results[name] = unverified.get(
+                    name, (None, f"llm_error:{type(exc).__name__}"))
             return
         for name in batch_names:
             voted, split = majority_vote([s.get(name) for s in samples if isinstance(s, dict)])
             if voted is None:
-                results[name] = (None, "no_value")
+                # `unverified` порожній для всіх звичайних прогонів, тому це
+                # рівно попередня поведінка всюди, крім чужої редакції бланка.
+                results[name] = unverified.get(name, (None, "no_value"))
                 continue
             # Заземлення ДО прийняття значення: значення, якого в документі
             # немає, -- це здогадка, не витяг (див. ground_llm_value).
@@ -1474,7 +1557,7 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
             grounded, ungrounded_reason = ground_llm_value(
                 fields_by_name.get(name, {}), voted, ocr_text, printed)
             if grounded is None:
-                results[name] = (None, ungrounded_reason)
+                results[name] = unverified.get(name, (None, ungrounded_reason))
                 continue
             # llm_split_vote -- голоси розділились навпіл, переможець
             # обраний фактично випадково; для рев'юера це має виглядати

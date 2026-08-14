@@ -4,8 +4,10 @@ template: deployment_certificate
 domain: deployment
 fact_type: deployment_location   # -> dictionaries/fact_type_registry.yaml (validity_model: ranged)
 
-# ПОРОЖНІЙ бланк цієї ж форми, шлях від кореня репозиторію. Див. коментар у
-# leave_ticket.yaml і pipeline/extraction/blank_form.py.
+# ПОРОЖНІЙ бланк цієї ж форми, шлях від кореня репозиторію. Той самий файл несе
+# ТРИ задачі (відхилення друкованого тексту як значення, межі полів у злитому
+# блоці OCR, сигнал «це наша РЕДАКЦІЯ бланка») -- розклад у leave_ticket.yaml і
+# в pipeline/extraction/blank_form.py.
 blank_template: data/eval/samples/deployment/посвідчення_відрядження.docx
 
 # ВИД СУБ'ЄКТА цього бланка. Оголошення схеми, старше за мапінг
