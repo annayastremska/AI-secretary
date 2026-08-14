@@ -154,6 +154,52 @@ def test_three_token_names_unchanged():
         ("ЛЕМЕШКО", "Соломія", "Романівна")
 
 
+# --- R-A2-06: документ, що впав необробленою помилкою, лишає слід -----------
+
+def test_crashed_document_is_persisted_and_archived(tmp_path, monkeypatch):
+    """Раніше виняток у process_target давав запис ЛИШЕ в консолі: id=None,
+    нуль нових файлів у сховищі, нуль рядків індексу, а continue минав
+    архівацію -- файл лишався в папці-приймачі й падав на кожному запуску."""
+    import shutil
+    import pipeline.run as run_mod
+    from pipeline.config import load_config
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    shutil.copy(_LEAVE_DOCX, inbox / "LEAVE-001.docx")
+
+    cfg = load_config(os.path.join(_PROJECT_ROOT, "config.yaml"))
+    cfg["paths"] = dict(cfg["paths"], input_dir=str(inbox))
+    cfg["storage"] = dict(cfg["storage"], local_root=str(tmp_path / "output"))
+    cfg["intake"] = dict(cfg["intake"], archive=True,
+                         processed_dir=str(tmp_path / "processed"),
+                         failed_dir=str(tmp_path / "failed"))
+
+    res = run_mod.build_resources(cfg, force_no_llm=True)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("штучний збій")
+
+    monkeypatch.setattr(run_mod, "process_file", boom)
+    results, _skipped = run_mod.process_target(str(inbox), res, cfg)
+
+    assert len(results) == 1
+    meta = results[0]
+    assert meta["status"] == "unresolved"
+    assert meta["id"] is not None, "запис мусить мати id"
+    assert meta["file_hash"] is not None
+    assert meta["storage_key"] is not None
+    # слід у сховищі: файл запису існує
+    stored = tmp_path / "output" / meta["storage_key"].replace("/", os.sep)
+    assert stored.exists(), "запис про збій мусить лежати у сховищі"
+    # рядок в індексі: наступний прогін побачить документ як оброблений
+    index = tmp_path / "output" / "index" / "processed.jsonl"
+    assert index.exists() and meta["file_hash"] in index.read_text(encoding="utf-8")
+    # файл пішов з папки-приймача у failed (вічний цикл розірвано)
+    assert not (inbox / "LEAVE-001.docx").exists()
+    assert meta.get("archived_to")
+
+
 # --- R-A1-02: відсутній blank_template не сміє давати recognized:True -------
 
 def test_missing_blank_template_is_not_recognized():

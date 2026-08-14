@@ -746,14 +746,32 @@ def process_target(target: str, res: dict, cfg: dict, force_template=None,
             # але це остання лінія -- вона мусить бути, бо гарантія "вихід
             # існує завжди" не може залежати від того, що ми передбачили всі
             # можливі помилки всередині.
-            results.append(blank_meta(
+            #
+            # Запис МУСИТЬ існувати й у сховищі (R-A2-06): раніше тут було лише
+            # results.append + continue, тобто документ, що впав, не мав ні id,
+            # ні файла у сховищі, ні рядка індексу -- сліду ніде, крім консолі.
+            # А continue минав archive_input_file, тож файл лишався в
+            # папці-приймачі й падав так само на КОЖНОМУ наступному запуску.
+            meta = blank_meta(
+                id=str(uuid.uuid4()),
                 status="unresolved",
                 source_file=os.path.basename(path),
                 uploaded_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 review_queue="unknown_type", review_reason="unresolved",
                 reason=f"необроблена помилка: {type(exc).__name__}: {exc}",
-            ))
-            continue
+            )
+            try:
+                meta["file_hash"] = file_sha256(path)
+            except OSError:
+                meta["file_hash"] = None
+            try:
+                _persist(meta, "", res)
+            except Exception as persist_exc:
+                # Збій самого сховища не має валити решту батчу, але й не має
+                # бути німим: причина йде в запис, який побачить викликач.
+                meta["warnings"] = list(meta.get("warnings") or []) + [
+                    f"не вдалося зберегти запис про збій: "
+                    f"{type(persist_exc).__name__}: {persist_exc}"]
         if is_directory_mode and res.get("store") is not None:
             try:
                 moved_to = archive_input_file(path, meta, cfg)

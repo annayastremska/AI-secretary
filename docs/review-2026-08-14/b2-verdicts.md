@@ -244,6 +244,12 @@ how_verified: repro_04, підмінений process_file кидає RuntimeErro
   archive_input_file, тож файл лишається в папці-приймачі.
 note: підтверджую і «вічний цикл»: без архівації і без рядка в індексі той
   самий файл падатиме на кожному наступному запуску.
+outcome: fixed — except-гілка process_target тепер створює повний запис
+  (id=uuid, file_hash, _persist у сховище + рядок індексу) і НЕ минає
+  архівацію: файл їде у failed_dir. Збій самого _persist не валить батч,
+  а пишеться у warnings запису. Тест:
+  test_crashed_document_is_persisted_and_archived (штучний RuntimeError,
+  сховище в tmp). Корпуси: 192/192 ×2, 169/169 ×2, тестів 173.
 ```
 
 ```
