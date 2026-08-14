@@ -48,7 +48,7 @@ def phrase_in_text(text_low: str, phrase: str, is_stem: bool = False) -> bool:
     тому "додаток 28" (номер, не стем) хибно збігався всередині "додаток
     289"/"додаток 28а", а "діб" (ціле слово) -- всередині "дібрати"/
     "дібраний". Обидва підтверджено як реальний false positive у скорингу
-    домену/шаблону (research-round-2026-08-12.md).
+    домену/шаблону (docs/research/2026-08-12_ocr-geometry-speed/research-round-2026-08-12.md).
     """
     phrase = normalize_ws(phrase).lower()
     if not phrase:

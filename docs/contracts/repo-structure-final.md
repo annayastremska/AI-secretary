@@ -67,8 +67,8 @@ docflow-expertise/
 | `schemas/` (2 файли) | `pipeline/schemas/` |
 | `dictionaries/` (4 файли) | `pipeline/dictionaries/` |
 | `notebooks/` (5 ipynb) | `pipeline/notebooks/` |
-| `scripts/download_model.py` | `pipeline/scripts/` |
-| `run_pipeline.py` · `config.example.yaml` · `requirements*.txt` | корінь |
+| `pipeline/scripts/download_model.py` | `pipeline/scripts/` |
+| `pipeline/run_pipeline.py` · `config.example.yaml` · `requirements*.txt` | корінь |
 
 `pipeline_trial_leave_colab.ipynb` зі списку **видалено** 11.08 — викликав
 старий API і вводив в оману.
@@ -77,8 +77,8 @@ docflow-expertise/
 
 | Зараз | Куди |
 |---|---|
-| `scripts/evaluate.py` | `eval/evaluate.py` |
-| `data/eval/field-mapping.yaml` | `eval/field-mapping.yaml` |
+| `eval/evaluate.py` | `eval/evaluate.py` |
+| `eval/field-mapping.yaml` | `eval/field-mapping.yaml` |
 | `tests/test_regressions.py` · `tests/test_evaluator.py` | `eval/tests/` |
 
 Прилад мусить лишатися незалежним від того, що міряє. Приклад із цього тижня:
@@ -91,14 +91,14 @@ docflow-expertise/
 
 | Зараз | Куди |
 |---|---|
-| `data/eval/synthetic-2026-05/` (32 файли) | без змін |
-| `data/samples/leave/` · `deployment/` (127 файлів) | `data/eval/samples/` |
-| `data/samples/normative/` (12 файлів) | `data/eval/samples/normative/` |
-| `data/samples/equipment/` · `staffing/` (6 файлів) | `data/eval/samples/` |
+| `eval/expected/synthetic-2026-05/` (32 файли) | без змін |
+| `eval/synthetic/leave/` · `deployment/` (127 файлів) | `eval/samples/` |
+| `eval/synthetic/normative/` (12 файлів) | `eval/samples/normative/` |
+| `eval/synthetic/equipment/` · `staffing/` (6 файлів) | `eval/samples/` |
 | `data/inbox/.gitkeep` | без змін |
-| `data/eval/reports/` | не їде — прибрано з git 14.08.2026, див. нижче |
+| `eval/reports/` | не їде — прибрано з git 14.08.2026, див. нижче |
 
-**Норм-акти не дублюємо.** Файл лежить один раз у `data/eval/samples/normative/`
+**Норм-акти не дублюємо.** Файл лежить один раз у `eval/samples/normative/`
 (ми використовуємо його як тестовий вхід), а `answer/knowledge-base/README.md`
 на нього посилається. Копія в двох місцях розійдеться.
 
@@ -107,31 +107,31 @@ docflow-expertise/
 Дев'ятнадцять файлів — стільки ж, скільки в початковій пропозиції, але склад
 інший: додались раунди досліджень 12-13.08, а три документи-листування
 (дві відповіді команді й приклад виводу) видалено 14.08 — чинне з них зведено
-в `db-handoff-notes.md`, розд. 9.
+в `docs/contracts/2026-08-11_database-handoff.md`, розд. 9.
 
 | Файл | Куди |
 |---|---|
-| `known-weak-spots.md` | `docs/` — живий список |
-| `open-questions.md` | `docs/` — живий список |
-| `collaboration-rules.md` | `docs/` |
-| `ТЗ_AI-секретар.docx` | `docs/spec/` |
-| `project-overview.md` · `project-expectations.md` | `docs/spec/` |
-| `scale-and-users.md` · `security-constraints.md` | `docs/spec/` |
-| `data-and-sources.md` | `docs/spec/` — це обмеження проєкту, не опис вмісту папки |
-| `architecture-proposal.md` | `docs/architecture/` |
-| `extraction-pipeline-prototype.md` | `docs/architecture/` |
-| `normative-docs-subsystem.md` | `docs/architecture/` — це проєкт підсистеми, не нормативний акт |
-| `agent-pipeline.md` | `docs/architecture/` |
-| `research-insights.md` | `docs/research/` |
-| `research-round-2026-08-11.md` | `docs/research/2026-08-11_pipeline-audit/` |
-| `research-round-2026-08-12.md` | `docs/research/2026-08-12_ocr-geometry-speed/` |
-| `research-round-2026-08-13.md` | `docs/research/2026-08-13_weak-spots-clusters/` |
-| `db-handoff-notes.md` | `docs/contracts/2026-08-11_database-handoff.md` |
-| `repo-structure-final.md` | `docs/contracts/` |
+| `docs/known-weak-spots.md` | `docs/` — живий список |
+| `docs/open-questions.md` | `docs/` — живий список |
+| `docs/collaboration-rules.md` | `docs/` |
+| `docs/spec/ТЗ_AI-секретар.docx` | `docs/spec/` |
+| `docs/spec/project-overview.md` · `docs/spec/project-expectations.md` | `docs/spec/` |
+| `docs/spec/scale-and-users.md` · `docs/spec/security-constraints.md` | `docs/spec/` |
+| `docs/spec/data-and-sources.md` | `docs/spec/` — це обмеження проєкту, не опис вмісту папки |
+| `docs/architecture/architecture-proposal.md` | `docs/architecture/` |
+| `docs/architecture/extraction-pipeline-prototype.md` | `docs/architecture/` |
+| `docs/architecture/normative-docs-subsystem.md` | `docs/architecture/` — це проєкт підсистеми, не нормативний акт |
+| `docs/architecture/agent-pipeline.md` | `docs/architecture/` |
+| `docs/research/research-insights.md` | `docs/research/` |
+| `docs/research/2026-08-11_pipeline-audit/research-round-2026-08-11.md` | `docs/research/2026-08-11_pipeline-audit/` |
+| `docs/research/2026-08-12_ocr-geometry-speed/research-round-2026-08-12.md` | `docs/research/2026-08-12_ocr-geometry-speed/` |
+| `docs/research/2026-08-13_weak-spots-clusters/research-round-2026-08-13.md` | `docs/research/2026-08-13_weak-spots-clusters/` |
+| `docs/contracts/2026-08-11_database-handoff.md` | `docs/contracts/2026-08-11_database-handoff.md` |
+| `docs/contracts/repo-structure-final.md` | `docs/contracts/` |
 
 ## Що прибираємо з git
 
-`data/eval/reports/` — дев'ять файлів відстежувались, хоч папка вже була в
+`eval/reports/` — дев'ять файлів відстежувались, хоч папка вже була в
 `.gitignore`. Це виходи прогонів, які перезаписуються щоразу; самі цифри й що
 вони означають живуть у `docs/`. Прибрано через `git rm --cached` 14.08.2026
 (файли лишились на диску).
@@ -146,14 +146,14 @@ docflow-expertise/
 ## Два правила, які додаємо
 
 **1. Заборона реальних документів — перевіркою, а не рядком у README.**
-У проєкті це найдорожче обмеження (`security-constraints.md`: питання
+У проєкті це найдорожче обмеження (`docs/spec/security-constraints.md`: питання
 кримінальної відповідальності). Правило в README тримається на увазі людини о
 другій ночі перед демо. Pre-commit або CI-крок, що відхиляє коміт із файлами
 під `data/inbox/`, `data/output/`, `.env`, `*.zip` і дампами бази — десять
 рядків, і обмеження діє саме тоді, коли на нього перестають дивитись.
 
 **2. Еталонний набір не редагується, щоб цифри зійшлися.**
-`data/eval/synthetic-2026-05/` — це відповіді. Коли результат не збігається,
+`eval/expected/synthetic-2026-05/` — це відповіді. Коли результат не збігається,
 змінюють правило порівняння або код, але не відповіді.
 
 Живий приклад: 13.08 виявилось, що оцінювач карав пайплайн за чесний `null` і

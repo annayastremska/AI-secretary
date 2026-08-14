@@ -7,8 +7,8 @@ Project Context Folder. Examine carefully, pay close attention, follow the state
 
 ## Precedence
 
-If this file and `context/collaboration-rules.md` ever disagree, **this file
-wins** — it is the short operating contract, `collaboration-rules.md` is the
+If this file and `docs/collaboration-rules.md` ever disagree, **this file
+wins** — it is the short operating contract, `docs/collaboration-rules.md` is the
 longer rationale behind it. They overlap on purpose; the overlap is not a
 contradiction unless the instructions actually conflict.
 
@@ -24,7 +24,7 @@ contradiction unless the instructions actually conflict.
   вибрати або підтвердити. Не описувати варіанти на пів екрана.
 - Якщо нічого не потрібно — сказати «нічого не потрібно» і не імітувати
   питання.
-- Деталі, обґрунтування, цифри — у `context/*.md` і в коміт-меседжі, не в чат.
+- Деталі, обґрунтування, цифри — у `docs/` і в коміт-меседжі, не в чат.
 
 Причина: 14.08.2026 Анна сказала прямо — «розписуєш дуже детально, але
 абсолютно не зрозуміло… не розумію що ти у мене питаєш конкретно».

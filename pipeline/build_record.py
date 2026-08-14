@@ -3,7 +3,7 @@
 extraction, type, normalization, criticality).
 
 Повертає record-словник під структуру БД, погоджену в
-context/project-expectations.md розд. 4:
+docs/spec/project-expectations.md розд. 4:
   subject           -> реєстр об'єктів (люди/техніка)
   facts             -> таблиця фактів (СПИСОК, бо один документ може дати
                        кілька фактів -- напр. кілька зупинок у посвідченні

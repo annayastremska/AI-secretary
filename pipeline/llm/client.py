@@ -153,7 +153,7 @@ class LlamaClient:
         # "дата повернення") -- і note, якщо є, обидва йдуть в опис поля.
         # Раніше LLM бачила ЛИШЕ внутрішнє (латинське) ім'я поля з YAML
         # (напр. "unit_to_report") без жодного орієнтира в тексті бланка --
-        # виміряний провал (research-round-2026-08-12.md): полю без note
+        # виміряний провал (docs/research/2026-08-12_ocr-geometry-speed/research-round-2026-08-12.md): полю без note
         # LLM не мала за що зачепитися серед кількох схожих сусідніх значень
         # (три дати поруч -- яка з них "дата повернення", а не "початок"?).
         #
@@ -164,7 +164,7 @@ class LlamaClient:
         # модель повернула `captain`, хоча в тексті це звання не
         # згадувалось УЗАГАЛІ. Мітка йде в ТЕКСТ інструкції, не в сам enum:
         # офіційна порада Google (Gemini structured output) -- коротші
-        # назви значень enum, не довші (research-round-2026-08-12.md).
+        # назви значень enum, не довші (docs/research/2026-08-12_ocr-geometry-speed/research-round-2026-08-12.md).
         field_descriptions = "\n".join(
             f"- {f['name']}"
             + (f" (лейбл на бланку: «{f['label_before'].strip()}»)" if f.get("label_before") else "")

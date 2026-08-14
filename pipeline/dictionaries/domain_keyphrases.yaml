@@ -139,7 +139,7 @@ domains:
       нормативні й процедурні документи (інструкції, накази загальної дії,
       методичні рекомендації) -- не джерело фактів про особу чи техніку, а
       правила, за якими інші документи складаються. Окрема підсистема:
-      context/normative-docs-subsystem.md
+      docs/architecture/normative-docs-subsystem.md
 
   equipment:
     subject_kind: equipment
@@ -163,7 +163,7 @@ domains:
     # Штатно-посадовий облік -- це БАГАТО осіб в одному документі, тобто
     # `subject` (плаский, одна особа) для нього замалий. Мапінг тут не бреше:
     # вид справді person; кількість -- окрема, ще не вирішена задача
-    # (`multiple: true` у схемі, context/open-questions.md).
+    # (`multiple: true` у схемі, docs/open-questions.md).
     subject_kind: person
     title: ["електронний журнал", "обліку особового складу", "штатно-посадовий облік"]
     body:

@@ -1,11 +1,11 @@
-<!-- Це README ділянки `pipeline/` (власник -- Аня). Верхні два розділи --
-     з каркасу репо, далі -- опис самої ділянки, перенесений із власного
-     репозиторію 14.08.2026. Шляхи у прикладах приводяться до структури KSE
-     наступними комітами цієї ж гілки. -->
+<!-- Це README ділянки `pipeline/` (власник -- Аня). Перші два розділи -- з
+     каркасу репо, далі -- опис самої ділянки, перенесений із власного
+     репозиторію 14.08.2026. -->
 
 # pipeline — розбір документа
 
 Власник: Аня.
+
 ## Правило даних
 
 Реальні документи замовника сюди **не кладемо** — ні для тестів, ні тимчасово.
@@ -22,7 +22,7 @@
 # AI-секретар
 
 Чатбот для зведених запитів по документообігу організації. Технічне
-завдання: [`context/ТЗ_AI-секретар.docx`](context/ТЗ_AI-секретар.docx).
+завдання: [`docs/spec/ТЗ_AI-секретар.docx`](../docs/spec/ТЗ_AI-секретар.docx).
 
 Ця частина роботи — **пайплайн обробки документів**: файл на вході,
 структурований запис на виході. Зовнішнє сховище (MinIO) і база даних — поза
@@ -30,25 +30,48 @@
 
 ## Структура
 
-- `context/` — ТЗ, план і нотатки з обговорення вимог та архітектури.
-- `data/samples/<domain>/` — приклади документів по доменах (leave,
-  deployment, equipment, staffing), для розробки й тестування пайплайна.
-- `data/inbox/` — папка-приймач: `python run_pipeline.py` без аргументів
-  обробляє все, що лежить безпосередньо в ній (без підпапок), і переносить
-  оброблене далі, щоб приймач спорожнявся.
-- `data/processed/<дата>/`, `data/failed/<дата>/` — куди переносяться
-  оброблені файли; `failed` — це `unresolved`, тобто ті, чий шаблон не
-  впізнано й на які має глянути людина.
-- `data/output/` — витягнуті записи: `documents/<domain>/<id>.md` з YAML-шапкою
-  (`subject`, `facts`, провенанс кожного поля); `unresolved` — окремою текою.
-- `dictionaries/` — довідники допустимих значень категоріальних полів.
-- `schemas/` — схема полів на кожен тип бланка (regex/LLM/дата/category/
-  object_ref) + блок `identification`, за яким пайплайн сам упізнає бланк.
+Код ділянки:
+
 - `pipeline/` — інжест → ідентифікація шаблону → екстракція → нормалізація
   → збірка запису → локальне сховище.
-- `scripts/download_model.py` — завантаження ваг моделі (pip цього не вміє).
-- `notebooks/` — експерименти з моделями й OCR (джерело рішень про Surya та вибір моделі).
-  канонічний шлях — `run_pipeline.py`.
+- `pipeline/run_pipeline.py` — вхідна точка. Запуск **з кореня репо як модуль**:
+  `python -m pipeline.run_pipeline`. Не `python pipeline/run_pipeline.py` —
+  тоді на `sys.path` потрапляє сам `pipeline/`, і `import pipeline` не
+  знаходиться.
+- `pipeline/schemas/` — схема полів на кожен тип бланка (regex/LLM/дата/
+  category/object_ref) + блок `identification`, за яким пайплайн сам упізнає
+  бланк.
+- `pipeline/dictionaries/` — довідники допустимих значень категоріальних полів.
+- `pipeline/scripts/download_model.py` — завантаження ваг моделі (pip цього не вміє).
+- `pipeline/notebooks/` — експерименти з моделями й OCR (джерело рішень про
+  Surya та вибір моделі).
+
+Дані й вимірювання (ділянка `eval/`, та сама власниця):
+
+- `eval/synthetic/<домен>/` — зразки документів по доменах (leave, deployment,
+  normative, equipment, staffing). **Єдине місце в репо, куди пускають файли
+  документів**: каркасний `.gitignore` блокує `*.docx`/`*.pdf`/`*.png` усюди,
+  крім `eval/synthetic/**`.
+- `eval/expected/synthetic-2026-05/` — еталонні відповіді до набору.
+- `eval/evaluate.py` — вимірювальний прилад (`python -m eval.evaluate`),
+  `eval/field-mapping.yaml` — як поля виводу зіставляються з еталоном.
+- `eval/tests/` — регресійні тести пайплайна й тести на сам прилад.
+
+Локальний стан прогону (у `.gitignore`, у git не їде):
+
+- `data/inbox/` — папка-приймач: `python -m pipeline.run_pipeline` без
+  аргументів обробляє все, що лежить безпосередньо в ній (без підпапок), і
+  переносить оброблене далі, щоб приймач спорожнявся.
+- `data/processed/<дата>/`, `data/failed/<дата>/` — куди переносяться оброблені
+  файли; `failed` — це `unresolved`, тобто ті, чий шаблон не впізнано й на які
+  має глянути людина.
+- `data/output/` — витягнуті записи: `documents/<domain>/<id>.md` з YAML-шапкою
+  (`subject`, `facts`, провенанс кожного поля); `unresolved` — окремою текою.
+- `eval/reports/` — JSON-звіти прогонів оцінювача.
+
+Написане — у `docs/`: контракт із базою (`docs/contracts/`), архітектура
+(`docs/architecture/`), дослідження (`docs/research/`), два живі списки
+`docs/known-weak-spots.md` і `docs/open-questions.md`.
 
 ## Встановлення
 
@@ -56,14 +79,14 @@
 
 ```bash
 pip install -r requirements.txt
-python scripts/download_model.py        # ваги MamayLM 12B (~6.8 ГБ) у models/
+python pipeline/scripts/download_model.py        # ваги MamayLM 12B (~6.8 ГБ) у models/
 cp config.example.yaml config.yaml
 ```
 
 `config.example.yaml` вказує саме туди, куди скрипт кладе ваги, тому конфіг
 правити не потрібно. Ваги окремим кроком, бо pip їх встановити не може: це
 файл на кілька ГБ, а не пакет. Якщо машина не тягне 12B, є
-`python scripts/download_model.py --size 4b` (~2.5 ГБ) і одна правка
+`python pipeline/scripts/download_model.py --size 4b` (~2.5 ГБ) і одна правка
 `model_path` у `config.yaml`.
 
 **Про `llama-cpp-python`:** на PyPI лежить лише source distribution, тому
@@ -105,12 +128,12 @@ ocr:
 Перевірка, що обидва компоненти справді підключені:
 
 ```bash
-python run_pipeline.py --input data/samples/leave/synthetic-2026-05/png/LEAVE-001.png
+python -m pipeline.run_pipeline --input eval/synthetic/leave/synthetic-2026-05/png/LEAVE-001.png
 ```
 
 Вивід має показати `LLM: увімкнено | OCR: surya` перед списком документів.
 Очікуваний час: **кілька хвилин на документ** на CPU (детальний розклад --
-[`context/known-weak-spots.md`](context/known-weak-spots.md), розд. 2.11c).
+[`docs/known-weak-spots.md`](../docs/known-weak-spots.md), розд. 2.11c).
 
 ## Запуск
 
@@ -118,7 +141,7 @@ python run_pipeline.py --input data/samples/leave/synthetic-2026-05/png/LEAVE-00
 результат буде в `data/output/documents/deployment/`:
 
 ```bash
-python run_pipeline.py --input data/samples/deployment/посвідчення_відрядження_заповнений.docx
+python -m pipeline.run_pipeline --input eval/synthetic/deployment/посвідчення_відрядження_заповнений.docx
 ```
 
 Файл, переданий через `--input`, **не** переміщується, тому цю команду можна
@@ -129,14 +152,14 @@ python run_pipeline.py --input data/samples/deployment/посвідчення_в
 Решта режимів:
 
 ```bash
-python run_pipeline.py                     # обробити все з data/inbox (і перенести оброблене)
-python run_pipeline.py --no-llm            # лише детермінований прохід
-python run_pipeline.py --template leave_ticket   # примусова схема
-python run_pipeline.py --dry-run           # нічого не зберігати
+python -m pipeline.run_pipeline                     # обробити все з data/inbox (і перенести оброблене)
+python -m pipeline.run_pipeline --no-llm            # лише детермінований прохід
+python -m pipeline.run_pipeline --template leave_ticket   # примусова схема
+python -m pipeline.run_pipeline --dry-run           # нічого не зберігати
 ```
 
 `config.yaml` у `.gitignore` — це налаштування конкретної машини; у
-репозиторії лежить лише [`config.example.yaml`](config.example.yaml).
+репозиторії лежить лише [`config.example.yaml`](../config.example.yaml).
 
 Прогін **без моделі** — неповний режим: поля `extraction: llm` лишаються
 порожніми, тому запис виходить `needs_review`, а не `confirmed`. Флаг
@@ -145,7 +168,7 @@ python run_pipeline.py --dry-run           # нічого не зберігат�
 від одного.
 
 Деталі, інваріанти й відомі обмеження —
-[`context/extraction-pipeline-prototype.md`](context/extraction-pipeline-prototype.md).
+[`docs/architecture/extraction-pipeline-prototype.md`](../docs/architecture/extraction-pipeline-prototype.md).
 
 ## Підключення до PostgreSQL
 
@@ -153,12 +176,12 @@ python run_pipeline.py --dry-run           # нічого не зберігат�
 (`grep -r postgres/psycopg` по всьому проєкту не дав жодного результату), і
 це навмисно: "Зовнішнє сховище (MinIO) і база даних — поза її межами" (вище
 в цьому файлі). Завантажувач у БД (`ai_secretary_loader.py`,
-`schema_dump.sql`, згадані в `context/db-handoff-notes.md`) — код команди
+`schema_dump.sql`, згадані в `docs/contracts/2026-08-11_database-handoff.md`) — код команди
 БД, не цієї частини роботи.
 
 Що тут ЄСТЬ: повний контракт полів, мапінг на таблиці БД і перелік
 невирішеного на боці завантажувача (розд. 9) —
-[`context/db-handoff-notes.md`](context/db-handoff-notes.md). Приклад запису
+[`docs/contracts/2026-08-11_database-handoff.md`](../docs/contracts/2026-08-11_database-handoff.md). Приклад запису
 дивіться не в документації, а в самому виводі: `data/output/documents/` після
 прогону — переказаний приклад старіє непомітно.
 
@@ -169,11 +192,11 @@ python run_pipeline.py --dry-run           # нічого не зберігат�
 
 Перш ніж продовжувати роботу над цією частиною, прочитайте:
 
-- [`context/known-weak-spots.md`](context/known-weak-spots.md) — живий перелік
+- [`docs/known-weak-spots.md`](../docs/known-weak-spots.md) — живий перелік
   знайдених слабких місць і багів: що вже закрито, що досі відкрито (з
   позначкою, чому не виправлено -- підозра, потрібне рішення офіцерів, чи
   чужа сторона), і як кожна проблема проявляється на практиці.
-- [`context/open-questions.md`](context/open-questions.md) — питання, що
+- [`docs/open-questions.md`](../docs/open-questions.md) — питання, що
   потребують рішення Анни, офіцерів чи команди БД, а не коду.
-- [`context/db-handoff-notes.md`](context/db-handoff-notes.md) — контракт
+- [`docs/contracts/2026-08-11_database-handoff.md`](../docs/contracts/2026-08-11_database-handoff.md) — контракт
   виводу пайплайна й перелік невирішеного на боці команди БД.

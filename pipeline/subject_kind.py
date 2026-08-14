@@ -9,7 +9,7 @@
   2. вид суб'єкта -- це не той самий висновок, що ШАБЛОН: шаблон визначається
      текстом документа, а вид суб'єкта -- ОГОЛОШЕННЯМ (схеми або довідника).
 
-Порядок розв'язання (узгоджено, context/extraction-pipeline-prototype.md,
+Порядок розв'язання (узгоджено, docs/architecture/extraction-pipeline-prototype.md,
 розділ «Визначення суб'єкта документа»), від найнадійнішого до найслабшого:
 
     є схема               -> subject_kind зі схеми (ОГОЛОШЕННЯ, не висновок)
@@ -40,7 +40,7 @@
 """
 
 # Види, які існують як рядки в `object_kinds` на боці БД
-# (context/db-handoff-notes.md, розд. 4 п.16): `person` / `equipment` / `task`
+# (docs/contracts/2026-08-11_database-handoff.md, розд. 4 п.16): `person` / `equipment` / `task`
 # були від початку, `unit` команда БД додала на нашу пропозицію (рішення
 # 13.08.2026) -- саме він потрібен для `registry: military_unit`
 # (`destination_org`, `unit_to_report`), яке досі йшло текстом у `facts.value`.
