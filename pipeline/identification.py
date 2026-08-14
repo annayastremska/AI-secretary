@@ -375,6 +375,30 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
     if domains:
         coarse_domain, _ = classify_domain_rules(text, domains)
 
+    # ЗВІД ПРАВИЛ НЕ Є БЛАНКОМ, скільком би анкорам він не відповідав.
+    # Перевірка стоїть ПЕРЕД вибором шаблону навмисно, і це виправлення
+    # заміряного дефекту, а не обережність:
+    #
+    # "Положення про проходження військової служби" і "Статут гарнізонної та
+    # вартової служб" ОДИН РАЗ згадують фразу "посвідчення про відрядження"
+    # (вони ж описують правила щодо цього бланка) -- це дає бал рівно 5 при
+    # НУЛІ анкорів, тобто рівно min_score, і документ визнавався посвідченням
+    # про відрядження. Далі домен брався зі схеми (`deployment`), suject_kind
+    # ставав `person`, і нормативний документ створював об'єкт-людину в
+    # реєстрі. Гейт subject_kind його не ловив, бо гейт спирається на домен, а
+    # домен уже був підмінений схемою.
+    #
+    # Раніше цей клас закривало правило multiple_templates_matched -- але воно
+    # ловить лише документ, що впізнається як КІЛЬКА бланків одночасно
+    # (Інструкція з діловодства містить обидва додатки). Документ, що згадує
+    # ЛИШЕ один бланк, проходив мимо.
+    if coarse_domain and (domains.get(coarse_domain) or {}).get("kind") == "procedural":
+        return {
+            "schema": None, "template": None, "domain": coarse_domain,
+            "source": None, "score": best_score, "runner_up": runner_up_score,
+            "scores": scores, "reason": f"procedural_document:{coarse_domain}",
+        }
+
     if best_template is not None:
         ident = by_template[best_template].get("identification") or {}
         min_score = ident.get("min_score", DEFAULT_MIN_SCORE)

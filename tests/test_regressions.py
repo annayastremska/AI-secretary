@@ -1142,6 +1142,40 @@ def test_procedural_fallback_needs_both_length_and_phrases():
     assert classify_domain_rules("Ці правила набирає чинності.", domains)[0] != "normative"
 
 
+def test_rules_document_is_not_identified_as_the_blank_it_describes():
+    """Звід правил, що ЗГАДУЄ бланк, не є цим бланком.
+
+    Заміряно на реальних документах (14.08.2026): "Положення про проходження
+    військової служби" і "Статут гарнізонної та вартової служб" один раз
+    згадують фразу "посвідчення про відрядження" -- вони ж описують правила
+    щодо цього бланка. Це давало бал рівно 5 при НУЛІ анкорів, тобто рівно
+    min_score, і документ визнавався посвідченням про відрядження. Далі домен
+    брався зі схеми, subject_kind ставав `person`, і нормативний документ
+    створював об'єкт-людину в реєстрі БД.
+
+    Правило multiple_templates_matched цього не ловило: воно спрацьовує лише
+    коли документ упізнається як КІЛЬКА бланків (Інструкція з діловодства
+    містить обидва додатки), а тут згаданий лише один.
+    """
+    from pipeline.identification import identify_template
+    schemas = [{"template": "deployment_certificate", "fields": [], "domain": "deployment",
+                "identification": {"title": ["посвідчення про відрядження"],
+                                    "anchors": ["термін відрядження"], "min_score": 5}}]
+    domains = {
+        "normative": {"kind": "procedural", "title": ["статут гарнізонної"],
+                      "body": ["набирає чинності", "загальні положення"],
+                      "procedural_fallback": {"min_body_hits": 2, "min_chars": 100}},
+        "deployment": {"title": ["посвідчення про відрядження"], "body": []},
+    }
+    rules = ("Статут гарнізонної та вартової служб. Загальні положення. "
+             "Набирає чинності з дня опублікування. Порядок видачі документа "
+             "посвідчення про відрядження визначається окремо. " + "текст " * 40)
+    result = identify_template(rules, schemas, domains=domains)
+    assert result["schema"] is None, result["template"]
+    assert result["domain"] == "normative"
+    assert result["reason"].startswith("procedural_document")
+
+
 def _run_all():
     failures = []
     for name, fn in sorted(globals().items()):
