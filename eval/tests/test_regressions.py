@@ -15,7 +15,11 @@
 import os
 import sys
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Три рівні вгору, не два: після переносу в структуру KSE файл лежить у
+# eval/tests/, а не в tests/ у корені. Два dirname() давали _PROJECT_ROOT =
+# .../eval, тому config.yaml, dictionaries/ і зразки не знаходились.
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _PROJECT_ROOT)
 
 from pipeline.build_record import build_record
@@ -973,7 +977,8 @@ def test_normative_domain_has_no_subject_and_creates_no_object():
     from pipeline.classification.classify import load_domain_keyphrases
     from pipeline.subject_kind import creates_object, resolve_subject_kind
     domains = load_domain_keyphrases(
-        os.path.join(_PROJECT_ROOT, "dictionaries", "domain_keyphrases.yaml"))
+        os.path.join(_PROJECT_ROOT, "pipeline", "dictionaries",
+                     "domain_keyphrases.yaml"))
     got = resolve_subject_kind(schema=None, domain="normative", domains=domains)
     assert got["kind"] == "none"
     assert creates_object(got["kind"]) is False
@@ -991,7 +996,8 @@ def test_every_domain_and_schema_declares_subject_kind():
     from pipeline.subject_kind import (
         DECLARABLE_SUBJECT_KINDS, domain_subject_kind_problems)
     domains = load_domain_keyphrases(
-        os.path.join(_PROJECT_ROOT, "dictionaries", "domain_keyphrases.yaml"))
+        os.path.join(_PROJECT_ROOT, "pipeline", "dictionaries",
+                     "domain_keyphrases.yaml"))
     assert domain_subject_kind_problems(domains) == []
     for schema in load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas")):
         assert schema.get("subject_kind") in DECLARABLE_SUBJECT_KINDS, schema["template"]
@@ -1195,7 +1201,7 @@ def test_degraded_ocr_is_not_confused_with_unknown_document():
     # заглушка замість Surya: імітує саме деградацію -- один крихітний блок
     res["ocr"] = lambda path: [{"text": "абв", "bbox": (0, 0, 1, 1)}]
     meta = process_file(
-        os.path.join(_PROJECT_ROOT, "data", "samples", "leave",
+        os.path.join(_PROJECT_ROOT, "data", "eval", "samples", "leave",
                      "synthetic-2026-05", "png", "LEAVE-001.png"), res, cfg)
 
     assert meta["status"] == "unresolved"

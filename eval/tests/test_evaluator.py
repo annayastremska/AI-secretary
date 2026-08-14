@@ -14,9 +14,16 @@ import io
 import os
 import sys
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Три рівні вгору, не два: після переносу в структуру KSE файл лежить у
+# eval/tests/, а не в tests/ у корені. Два dirname() давали _PROJECT_ROOT =
+# .../eval, і всі шляхи до даних мовчки ставали .../eval/data/... -- тести
+# падали з FileNotFoundError, хоча ні прилад, ні пайплайн не змінювались.
+_EVAL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = os.path.dirname(_EVAL_DIR)
 sys.path.insert(0, _PROJECT_ROOT)
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "scripts"))
+# evaluate.py тепер живе в eval/, а не в scripts/ -- саме звідси `import
+# evaluate as ev` нижче й бере прилад.
+sys.path.insert(0, _EVAL_DIR)
 
 import yaml
 
@@ -64,8 +71,10 @@ def _leave_011_truth():
 
 
 def _mapping():
-    with io.open(os.path.join(_PROJECT_ROOT, "data", "eval",
-                              "field-mapping.yaml"), encoding="utf-8") as f:
+    # field-mapping.yaml -- частина ПРИЛАДУ, тому переїхав у eval/ разом із
+    # evaluate.py; у data/eval/ лишились тільки зразки й еталонні відповіді.
+    with io.open(os.path.join(_EVAL_DIR, "field-mapping.yaml"),
+                 encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
