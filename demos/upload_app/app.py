@@ -274,6 +274,27 @@ def index():
     return FileResponse(os.path.join(APP_DIR, "static", "index.html"))
 
 
+# ── Чат (друга сторінка тієї самої апки) ─────────────────────────────────────
+# Уся логіка -- у demos/upload_app/chat.py: каталог SQL-шаблонів + локальна
+# модель. Чат ходить у базу read-only користувачем і нічого не змінює.
+
+@app.get("/chat")
+def chat_page():
+    return FileResponse(os.path.join(APP_DIR, "static", "chat.html"))
+
+
+@app.post("/api/chat")
+def chat_api(payload: dict):
+    question = payload.get("question", "")
+    if not isinstance(question, str) or not question.strip():
+        return JSONResponse(status_code=400, content={"error": "порожнє питання"})
+    from demos.upload_app import chat
+    # Синхронний виклик у threadpool FastAPI: відповідь шаблоном -- частки
+    # секунди, з моделлю -- секунди. Модельні виклики і так серіалізовані
+    # локом усередині chat.py.
+    return chat.answer_question(question)
+
+
 @app.post("/api/upload")
 async def upload(file: UploadFile):
     name = os.path.basename(file.filename or "")

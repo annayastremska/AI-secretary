@@ -87,6 +87,12 @@
   pre.log { background: #f0f2f5; border-radius: 8px; padding: 10px;
             overflow-x: auto; font-size: 0.78rem; max-height: 240px; }
   .hidden { display: none; }
+  /* Повернення до чату: плаваюча, ненав'язлива */
+  a.tochat { position: fixed; right: 18px; bottom: 18px; background: var(--card);
+             border: 1px solid var(--line); border-radius: 999px;
+             padding: 8px 16px; color: var(--accent); text-decoration: none;
+             font-size: 0.9rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  a.tochat:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -126,6 +132,8 @@
     <div id="db-body" aria-live="polite"></div>
   </section>
 </main>
+
+<a class="tochat" href="/chat">Повернутися до чату</a>
 
 <script>
 "use strict";

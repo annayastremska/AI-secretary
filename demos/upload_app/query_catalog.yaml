@@ -1,0 +1,185 @@
+# Каталог SQL-шаблонів чату (ярус 1).
+#
+# Правила каталогу:
+#   - SQL написаний людиною заздалегідь; модель НІКОЛИ не редагує текст
+#     запиту, лише обирає id шаблону і подає параметри
+#   - тільки іменовані плейсхолдери psycopg (%(name)s) -- жодних f-string
+#   - фільтр підтвердженості (facts.status = 'confirmed') зашитий літералом
+#     у кожен підрахунковий SQL; для непідтверджених -- ОКРЕМИЙ sql_unconfirmed,
+#     його результат показується поруч, а не змішується
+#   - джерела при складанні: схема БД Андрія (db/migrations/,
+#     db/README_for_chatbot_team.md), тестові питання Колі
+#     (answer/chat/test-questions.md), демо-питання замовниці
+#
+# Параметри, які вміє витягати маршрутизатор:
+#   state      -- leave | deployment | absent (обидва виміри)
+#   on_date    -- YYYY-MM-DD ("зараз"/"сьогодні" -> сьогодні)
+#   date_from / date_to -- період (місяць, діапазон)
+#   name_pattern -- ПІБ або його частина (ILIKE-шаблон, будує код)
+#   doc_number -- номер документа без «№»
+#
+# Мапа станів -> кодів вимірів (dims) живе в chat.py, не тут: у SQL завжди
+# приходить готовий список кодів через ANY(%(dims)s).
+
+templates:
+
+  - id: count_by_state_on_date
+    title: Скільки людей у стані (відпустка/відрядження/відсутні) на дату
+    examples:
+      - Скільки людей зараз у відпустці?
+      - Скільки людей у відпустці на 6 травня 2026?
+      - Скільки зараз у відрядженні?
+      - Скільки людей відсутні сьогодні?
+    params: [dims, on_date]
+    sql: >
+      SELECT COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+    sql_unconfirmed: >
+      SELECT COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+
+  - id: count_by_state_period
+    title: Скільки людей були у стані протягом періоду
+    examples:
+      - Скільки людей були у відпустці у травні 2026?
+      - Скільки відряджень було з 1 по 31 травня?
+    params: [dims, date_from, date_to]
+    sql: >
+      SELECT COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(date_to)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+    sql_unconfirmed: >
+      SELECT COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(date_to)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+
+  - id: list_by_state
+    title: Список осіб у стані на дату або за період
+    examples:
+      - Хто зараз у відпустці?
+      - Хто був у відпустці 6 травня 2026?
+      - Хто був у відрядженні у травні 2026?
+      - Хто відсутній сьогодні?
+    params: [dims, date_from, date_to]
+    sql: >
+      SELECT o.canonical_name AS name, d.code AS dim, f.value,
+             f.valid_from, f.valid_to, f.source_doc_id
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN objects o ON o.id = f.object_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(date_to)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+      ORDER BY o.canonical_name, f.valid_from
+    sql_unconfirmed: >
+      SELECT o.canonical_name AS name, d.code AS dim, f.value,
+             f.valid_from, f.valid_to, f.source_doc_id
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN objects o ON o.id = f.object_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(date_to)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+      ORDER BY o.canonical_name, f.valid_from
+
+  - id: person_status
+    title: Стан конкретної особи (всі факти про неї)
+    examples:
+      - Що відомо про Усика?
+      - Де зараз Рубець?
+      - Стан Омеляна Володимира
+    params: [name_pattern]
+    sql: >
+      SELECT o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
+             f.value, f.valid_from, f.valid_to, f.status, f.confidence,
+             f.source_doc_id
+      FROM facts f
+      JOIN objects o ON o.id = f.object_id
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE o.canonical_name ILIKE %(name_pattern)s
+      ORDER BY o.canonical_name, f.source_doc_id, d.id
+
+  - id: doc_by_number
+    title: Пошук за номером документа (всі факти документа)
+    examples:
+      - Покажи документ № 109
+      - Що в документі №204?
+      - Документ 473
+    params: [doc_number]
+    sql: >
+      SELECT o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
+             f.value, f.valid_from, f.valid_to, f.status, f.confidence,
+             f.source_doc_id
+      FROM facts f
+      JOIN objects o ON o.id = f.object_id
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE f.source_doc_id IN (
+        SELECT f2.source_doc_id
+        FROM facts f2
+        JOIN dimensions d2 ON d2.id = f2.dimension_id
+        WHERE d2.code = 'document_number'
+          AND btrim(f2.value) = %(doc_number)s)
+      ORDER BY f.source_doc_id, d.id
+
+  - id: review_queue_count
+    title: Скільки документів у черзі перевірки (нерозв'язані)
+    examples:
+      - Скільки документів чекають перевірки?
+      - Скільки в черзі рев'ю?
+      - Що в черзі перевірки?
+    params: []
+    sql: >
+      SELECT rq.queue_type, COUNT(*) AS n
+      FROM review_queue rq
+      WHERE rq.resolved_at IS NULL
+      GROUP BY rq.queue_type
+      ORDER BY rq.queue_type
+
+  - id: unconfirmed_count
+    title: Скільки непідтверджених фактів у базі
+    examples:
+      - Скільки непідтверджених фактів?
+      - Скільки записів не підтверджено?
+    params: []
+    sql: >
+      SELECT COUNT(*) AS n, COUNT(DISTINCT f.source_doc_id) AS docs
+      FROM facts f
+      WHERE f.status = 'unconfirmed'
+
+  - id: documents_count
+    title: Скільки документів у базі (за доменами)
+    examples:
+      - Скільки документів у базі?
+      - Скільки документів оброблено?
+    params: []
+    sql: >
+      SELECT COALESCE(dc.domain, '(без домену)') AS domain, COUNT(*) AS n
+      FROM documents dc
+      GROUP BY dc.domain
+      ORDER BY dc.domain
