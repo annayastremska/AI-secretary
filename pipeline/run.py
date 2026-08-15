@@ -174,8 +174,17 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
     if cfg["ocr"].get("engine") == "surya":
         from pipeline.ocr.surya_reader import make_surya_reader
         try:
+            # УСІ чотири ключі ocr.* з конфіга, не два: n_gpu_layers і
+            # hub_offline були оголошені в pipeline/config.py (з коментарями,
+            # що описують їхню дію), але сюди не передавались -- тобто
+            # `ocr.n_gpu_layers: 0` у конфізі мовчки не діяв, і внутрішній
+            # llama-server Surya все одно йшов на Vulkan (99 шарів), де на
+            # цій машині вмирає з vk::ErrorDeviceLost
+            # (docs/research/2026-08-14_ocr-ngl0-control-run.md).
             res["ocr"] = make_surya_reader(cfg["ocr"].get("llama_server_path"),
-                                           cfg["ocr"].get("inference_parallel"))
+                                           cfg["ocr"].get("inference_parallel"),
+                                           n_gpu_layers=cfg["ocr"].get("n_gpu_layers"),
+                                           hub_offline=cfg["ocr"].get("hub_offline", False))
         except Exception as exc:
             res["warnings"].append(f"OCR недоступний ({type(exc).__name__}: {exc}) -- зображення не обробляться")
 
