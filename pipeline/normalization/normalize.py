@@ -540,6 +540,33 @@ def _restore_case(original: str, value: str) -> str:
     return value
 
 
+_SURNAME_PART_BOUNDARY = re.compile(r"([\s-]+)")
+
+
+def surname_display_case(value):
+    """«Перша велика, решта малі» -- фінальний ВИГЛЯД прізвища на виході.
+
+    Це навмисно окремий крок від _restore_case, і різниця принципова:
+    _restore_case зберігає регістр ДЖЕРЕЛА, бо він несе інформацію для
+    РОЗПІЗНАВАННЯ (parse_rank_and_name відрізняє прізвище від імені саме за
+    ВЕЛИКИМИ в анкеті). Тут же -- лише представлення вже розпізнаного значення
+    перед записом у subject: «ОБЕРЕМКО» і «оберемко» обидва стають «Оберемко».
+    Викликати ПІСЛЯ визначення відмінка, ніколи -- на вході розпізнавання.
+
+    Межі частин -- дефіс і пробіл (кожна частина з великої:
+    «Петренко-Іваненко», «Де Вітт»). Апостроф межею НЕ є: «Дем'янюк», а не
+    «Дем'Янюк» -- тому str.title() тут непридатний.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return value
+    parts = _SURNAME_PART_BOUNDARY.split(value.strip())
+    return "".join(
+        part if _SURNAME_PART_BOUNDARY.fullmatch(part)
+        else part[:1].upper() + part[1:].lower()
+        for part in parts
+    )
+
+
 def _name_parses(token, role=None):
     """Розбори pymorphy3, обмежені граммемою частини імені (Surn/Name/Patr)."""
     morph = _get_morph()

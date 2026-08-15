@@ -567,8 +567,11 @@ def test_field_names_are_free_roles_are_declared():
     }
     assert field_part(schema["fields"][0]) == "surname"
     record = build_record(schema, {"prizvyshche": ("БЕВЗЕНКА", "matched")}, {})
-    # ключ у subject -- РОЛЬ, бо контракт з БД мусить лишатись стабільним
-    assert record["subject"]["surname"] == "БЕВЗЕНКО"
+    # ключ у subject -- РОЛЬ, бо контракт з БД мусить лишатись стабільним.
+    # «Бевзенко», не «БЕВЗЕНКО»: з 15.08.2026 вихідний вигляд прізвища --
+    # Title Case (surname_display_case), і він застосовується ПІСЛЯ
+    # морфології -- саме тому нижче morphology == "normalized" не змінився.
+    assert record["subject"]["surname"] == "Бевзенко"
     assert record["field_provenance"]["prizvyshche"]["morphology"] == "normalized"
 
 
@@ -617,10 +620,13 @@ def test_primary_subject_is_first_group_in_schema():
     }
     record = build_record(schema, {"a_surname": ("ІВАНЕНКО", "matched"),
                                    "c_surname": ("КОВАЛЬЧУК", "matched")}, {})
-    assert record["subject"]["surname"] == "ІВАНЕНКО"
-    assert record["extra_subjects"]["commander"]["surname"] == "КОВАЛЬЧУК"
+    # З 15.08.2026 прізвище на ВИХОДІ завжди «Перша велика, решта малі»
+    # (surname_display_case) -- регістр джерела лишається лише сигналом для
+    # розпізнавання. Тому очікування тут Title Case, хоч на вході ВЕЛИКІ.
+    assert record["subject"]["surname"] == "Іваненко"
+    assert record["extra_subjects"]["commander"]["surname"] == "Ковальчук"
     # друга особа не перетирає першу й не губиться
-    assert record["subject"].get("surname") != "КОВАЛЬЧУК"
+    assert record["subject"].get("surname") != "Ковальчук"
 
 
 def test_validator_rejects_unknown_part_and_duplicate_role():

@@ -31,6 +31,7 @@ from pipeline.normalization.normalize import (
     normalize_nominative_case,
     is_placeholder,
     resolve_category,
+    surname_display_case,
 )
 
 # Провенанс, який НЕ вважається надійним підтвердженням значення. Значення
@@ -359,6 +360,16 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
             # з БД мусить лишатись стабільним, поки схема вільна називати поля
             # applicant_surname чи commander_rank.
             part = field_part(field)
+            if part == "surname" and isinstance(normalized, str):
+                # Фінальний вигляд прізвища -- «Перша велика, решта малі»,
+                # незалежно від друку в документі. Саме тут, а не в
+                # _restore_case: регістр джерела ще потрібен розпізнаванню
+                # (яке слово -- прізвище), а це -- лише представлення на
+                # виході. Формат до розгалуження, щоб друга особа документа
+                # (extra_subjects) і додаткові поля отримали той самий вигляд;
+                # person_alias складається з subject пізніше (run.py), тому
+                # успадковує його автоматично.
+                normalized = surname_display_case(normalized)
             subject_key = part if part in NAME_PART_ROLES else name
             group = name_group_key(field)
             if group != primary_group:
