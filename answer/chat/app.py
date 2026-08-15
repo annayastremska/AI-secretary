@@ -1,31 +1,32 @@
-# Вікно чата тестового стенду. Капстоун №21, епік corp-study#84 «Чат».
+# Вікно чата тестового стенду — варіант на локальній MamayLM (Ollama) замість
+# OpenRouter. Дубльовано з ../app.py (Денис), щоб не чіпати основний файл --
+# порівняти окремо, перш ніж міняти дефолт (латентність CPU-моделі реальна,
+# див. коментар біля mamaylm_json нижче).
 #
-# Схема роботи:
-#   питання → маршрутизація (окремий виклик моделі через OpenRouter або правила)
+# Схема роботи -- та сама, що в оригіналі, тільки маршрутизатор ходить у
+# локальну Ollama, не в хмару:
+#   питання → маршрутизація (окремий виклик MamayLM через Ollama або правила)
 #           → дорога: підрахунок | довідник | цитата | діагностика | відмова
 #   Живі дороги: підрахунок (сім функцій db.py), довідник (search_reference),
 #   відмова. «Цитата» і «діагностика» розпізнаються, але відповідь чесна:
 #   таких даних на стенді немає.
 #
-# Рішення, прийняті самостійно (Ден недоступний):
+# Рішення з оригіналу, лишені без змін (Ден недоступний):
 #   - Текст КОЖНОЇ відповіді формує код (шаблонні рядки), не модель.
 #     Модель робить лише два структуровані виклики: маршрут і параметри.
 #     Так модель фізично не може вигадати цифру чи цитату.
 #   - Порядок перебору доріг у правилах: діагностика → довідник → цитата →
-#     підрахунок → відмова (як у постановці задачі; у ТЗ #52 помилка).
-#     Виняток: явні сутності підрахунку (№ документа, дата ISO) перемагають
-#     ключові слова інших доріг, інакше «Хто у відпустці за квитком №301»
-#     пішов би в довідник через слово «відпустка».
-#   - Дата в правилах розпізнається лише як YYYY-MM-DD. Словесні дати
-#     («15 травня») без моделі не розбираються — тоді одне уточнення.
+#     підрахунок → відмова. Виняток: явні сутності підрахунку (№ документа,
+#     дата ISO) перемагають ключові слова інших доріг.
 #   - Якщо після уточнення дати все одно немає — чесна відмова, дефолтну
 #     дату не підставляємо.
+#   - Дані стенду -- травень 2026: якщо в питанні рік не названо, модель
+#     сама підставляє 2026 (виправлення від 14.08, перенесено сюди теж).
 
 import os
 import sys
 import json
 import re
-import ssl
 import urllib.request
 import urllib.error
 
@@ -36,10 +37,14 @@ sys.path.insert(0, HERE)
 
 import db  # noqa: E402  (сім функцій стику, docs/contracts/2026-08-14_chat-db-interface.md)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "google/gemini-2.5-flash"
-WARN_FALLBACK = "⚠️ модель недоступна, маршрут обрано правилами"
+WARN_FALLBACK = "⚠️ локальна модель недоступна, маршрут обрано правилами"
 CLARIFY_MARK = "🔎 уточнення"
+
+# Військовий етикет доповіді: вітання на вході, кожна відповідь — з «Доповідаю».
+# Це обгортка над текстом, а не частина фактів: шаблони відповідей нижче не
+# чіпаємо, інакше довелось би правити кожен із них і тест на них.
+GREETING = "Бажаю здоров'я! Готовий доповідати за обліком особового складу."
+REPORT_MARK = "Доповідаю"
 
 ROUTES = ["діагностика", "довідник", "цитата", "підрахунок", "відмова"]
 INTENTS = ["хто_відсутній", "хто_повертається", "документи_людини",
@@ -49,19 +54,7 @@ SUBDIVISIONS = ["1-ша механізована рота", "2-га механі
                 "3-тя механізована рота", "Взвод забезпечення",
                 "Управління батальйону"]
 
-# ── OpenRouter ───────────────────────────────────────────────────────────────
-
-
-def build_ssl_context():
-    """Python з python.org часто не має кореневих сертифікатів — беремо з certifi."""
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        return ssl.create_default_context()
-
-
-SSL_CONTEXT = build_ssl_context()
+# ── MamayLM через Ollama (локально, без хмари) ───────────────────────────────
 
 
 def _read_env_file():
@@ -79,35 +72,55 @@ def _read_env_file():
 
 _ENV = _read_env_file()
 
-
-def get_api_key():
-    # Ключ ніколи не друкується і не логується
-    return (os.environ.get("OPENROUTER_API_KEY", "").strip()
-            or _ENV.get("OPENROUTER_API_KEY", ""))
+DEFAULT_MODEL = "mamaylm-4b"  # ~2х швидше за 12B на CPU (виміряно: ~44с проти ~90с
+                              # на два виклики маршрут+параметри), та сама якість
+                              # на перевірених питаннях. Повернутись на 12B --
+                              # OLLAMA_MODEL=mamaylm в .env або env-змінній.
+OLLAMA_HOST = (os.environ.get("OLLAMA_HOST", "").strip()
+               or _ENV.get("OLLAMA_HOST", "") or "http://localhost:11434")
 
 
 def get_model():
-    return (os.environ.get("OPENROUTER_MODEL", "").strip()
-            or _ENV.get("OPENROUTER_MODEL", "") or DEFAULT_MODEL)
+    return (os.environ.get("OLLAMA_MODEL", "").strip()
+            or _ENV.get("OLLAMA_MODEL", "") or DEFAULT_MODEL)
 
 
-def openrouter_json(system, user, schema, schema_name):
-    """Один структурований виклик: json_schema (strict), temperature 0."""
+def ollama_available():
+    """Швидка перевірка -- Ollama взагалі відповідає, ще до дорогого виклику
+    моделі. Так само чесно, як і перевірка ключа в оригіналі: без цього
+    мережу навіть не пробуємо."""
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def mamaylm_json(system, user, schema, schema_name):
+    """Один структурований виклик до локальної Ollama: та сама ідея, що
+    openrouter_json в оригіналі (system, user, schema) -> розпарсений dict,
+    тільки JSON-схема йде в параметр format (Ollama-нативний механізм), не в
+    OpenAI-стиль response_format.
+
+    Таймаут навмисно великий (120с, не 60): 12B на CPU без GPU реально
+    повільніший за хмарну модель -- одне структуроване рішення тут коштує
+    секунди, не долі секунди. schema_name не використовується (Ollama не
+    вимагає імені схеми), лишений у сигнатурі для сумісності виклику з
+    оригіналом."""
     body = json.dumps({
         "model": get_model(),
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
-        "temperature": 0,
-        "response_format": {"type": "json_schema", "json_schema": {
-            "name": schema_name, "strict": True, "schema": schema}},
+        "stream": False,
+        "format": schema,
+        "options": {"temperature": 0},
     }).encode("utf-8")
     req = urllib.request.Request(
-        OPENROUTER_URL, data=body,
-        headers={"Content-Type": "application/json",
-                 "Authorization": "Bearer " + get_api_key()})
-    with urllib.request.urlopen(req, timeout=60, context=SSL_CONTEXT) as r:
+        f"{OLLAMA_HOST}/api/chat", data=body,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as r:
         data = json.load(r)
-    return json.loads(data["choices"][0]["message"]["content"])
+    return json.loads(data["message"]["content"])
 
 
 ROUTE_SCHEMA = {
@@ -155,10 +168,21 @@ PARAMS_SYSTEM = """Витягни параметри запиту до бази 
 - документи_людини: документи конкретної людини (є ПІБ або UNIT-XXXX)
 - документ_за_номером: питання про документ №NNN (квиток, наказ)
 - зведення_по_підрозділах: скільки відсутніх по кожному підрозділу
-date — у форматі YYYY-MM-DD або null. subdivision — назва підрозділу як у \
-питанні або null. name — ПІБ чи його частина, або UNIT-XXXX, або null. \
-doc_number — номер документа разом зі знаком №, або null.
+date — у форматі YYYY-MM-DD або null. Дані стенду охоплюють ТРАВЕНЬ 2026 РОКУ: \
+якщо в питанні названо день і місяць без року («24 травня», «15-го»), рік — \
+2026, склади дату сам, не став null і не проси уточнення лише через \
+відсутність року. subdivision — назва підрозділу як у питанні або null. \
+name — ПІБ чи його частина, або UNIT-XXXX, або null. doc_number — номер \
+документа разом зі знаком №, або null.
+Якщо запит складається з кількох рядків — це попереднє питання і коротке \
+уточнення до нього. Тоді date, subdivision, name, doc_number бери ЛИШЕ з \
+ОСТАННЬОГО рядка (він головний і скасовує старі значення з попередніх \
+рядків -- ігноруй дати/номери з попередніх рядків повністю), а intent — з \
+останнього рядка, якщо там є явний намір, інакше — успадкуй з попередніх \
+рядків.
 Приклади:
+- «Скільки людей повернуться 24 травня?» → intent=хто_повертається, \
+date=2026-05-24 (рік не назвали — підставили 2026, бо весь стенд про цей рік)
 - «Хто з 2-ї роти буде на місці 2026-05-15?» → intent=хто_відсутній, \
 subdivision=2-ї роти, date=2026-05-15. «Буде на місці» питає командир, що \
 складає наряд, — йому потрібен список відсутніх, не присутніх.
@@ -244,7 +268,9 @@ def rules_params(question):
         params["intent"] = "зведення_по_підрозділах"
     elif params["name"]:
         params["intent"] = "документи_людини"
-    elif "хто" in low and re.search(r"відсутн|поза частин|відпустк|відрядж", low):
+    elif "хто" in low and re.search(r"відсутн|поза частин|відпуст|відрядж", low):
+        # "відпуст" не "відпустк" -- місцевий відмінок «у відпустці» не містить
+        # «к», інакше ця гілка мовчки не спрацьовує на відмінювані форми
         params["intent"] = "хто_відсутній"
     elif "скільки" in low and "відсутн" in low:
         params["intent"] = "зведення_по_підрозділах"
@@ -287,10 +313,13 @@ def rules_route(question):
 
 
 def footer(route, source="—", cut=None):
-    lines = [f"дорога: {route}", f"джерело: {source}"]
+    """Джерело не зникає (правило ТЗ #52), але й не лізе поперед відповіді:
+    перший екран — цифра й пояснення, посилання розгортається кліком."""
+    lines = [f"джерело: {source}", f"дорога: {route}"]
     if cut:
-        lines.append(cut)
-    return "\n\n" + "\n".join(lines)
+        lines.insert(1, cut)
+    return ("\n\n<details class=\"src\"><summary>джерело</summary>"
+            + "<br>".join(lines) + "</details>")
 
 
 def unconfirmed_note(date):
@@ -311,24 +340,44 @@ def doc_source(rows):
     return ", ".join(f"{r['doc_number']} ({r['source_file']})" for r in rows) or "—"
 
 
+CRITICAL_FIELDS = [("service_id", "service_id"), ("person_name_raw", "ПІБ"),
+                   ("date_from", "дата початку"), ("date_to", "дата завершення")]
+
+
+def empty_fields(r):
+    return [label for key, label in CRITICAL_FIELDS if not r[key]]
+
+
+def doc_lead(r):
+    """Перше речення про документ: що з нього випливає, а не перелік полів.
+    Дефект даних — це і є відповідь, тому він іде першим, не приміткою."""
+    if empty_fields(r):
+        return (f"**Установити не можна** — у {r['doc_number']} не заповнені: "
+                f"{', '.join(empty_fields(r))}. Нічого не підставляємо.")
+    if r["date_to"] < r["date_from"]:
+        return (f"**У {r['doc_number']} суперечність** — завершення "
+                f"({r['date_to']}) раніше за початок ({r['date_from']}). "
+                "Показано як є, не виправляємо.")
+    who = r["person_name_raw"] or "ПІБ не вказано"
+    tail = "" if r["status"] == "чинний" else f", {r['status']}"
+    return (f"**{who}** — {r['doc_type']} {r['doc_number']}, "
+            f"{r['date_from']} – {r['date_to']}{tail}.")
+
+
 def describe_doc(r):
-    """Один документ: рядок фактів + чесні позначки про дефекти даних."""
-    period = f"{r['date_from']} – {r['date_to']}" if (r["date_from"] or r["date_to"]) else "період не вказано"
-    out = [f"{r['doc_number']} від {r['doc_date']} · {r['doc_type']} · "
-           f"{period} · {r['place']} · статус: {r['status']}"]
-    if r["reason"]:
-        out.append(f"  підстава: {r['reason']}")
-    empty = [label for key, label in [
-        ("service_id", "service_id"), ("person_name_raw", "ПІБ"),
-        ("date_from", "дата початку"), ("date_to", "дата завершення")]
-        if not r[key]]
-    if empty:
-        out.append(f"  ⚠️ порожні поля: {', '.join(empty)} — з документа їх "
-                   "встановити не можна, нічого не підставляємо")
+    """Картка документа списком — для випадків, коли документів кілька."""
+    period = (f"{r['date_from']} – {r['date_to']}"
+              if (r["date_from"] or r["date_to"]) else "період не вказано")
+    out = [f"- **{r['doc_number']}** · {r['doc_type']} · {period} · {r['status']}"]
+    detail = " · ".join(x for x in (r["reason"], r["place"]) if x)
+    if detail:
+        out.append(f"  {detail}")
+    if empty_fields(r):
+        out.append(f"  ⚠️ порожні поля: {', '.join(empty_fields(r))} — з "
+                   "документа їх встановити не можна")
     if r["date_from"] and r["date_to"] and r["date_to"] < r["date_from"]:
-        out.append(f"  ⚠️ суперечність у документі: дата завершення "
-                   f"({r['date_to']}) раніше за дату початку ({r['date_from']}). "
-                   "Показано як є, не виправляємо")
+        out.append(f"  ⚠️ суперечність: завершення ({r['date_to']}) раніше за "
+                   f"початок ({r['date_from']}). Показано як є")
     if r["status"] == "скасований":
         why = (f"скасований документом {r['superseded_by']}"
                if r["superseded_by"] else "скасований")
@@ -339,63 +388,77 @@ def describe_doc(r):
 # ── Дорога «підрахунок»: диспетчер intent → функція db.py ────────────────────
 
 
+def plural_people(n):
+    """«3 особи» / «5 осіб» — цифра має читатись як фраза, не як «3 людина»."""
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} особа"
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return f"{n} особи"
+    return f"{n} осіб"
+
+
 def answer_absent(date, subdivision, not_returned=False):
     rows = db.absences_on_date(date, subdivision=subdivision)
-    where = f" з підрозділу «{subdivision}»" if subdivision else ""
-    items = [f"- {person_label(r)} · {r['doc_type']} {r['doc_number']}, "
-             f"{r['date_from']} – {r['date_to']}, {r['place']}" for r in rows]
-    if not_returned:
-        # питання №3 замовника: відмітки про фактичне повернення в даних
-        # немає (docs/contracts/2026-08-14_chat-db-interface.md, «Що з цього НЕ покривається») — застереження першим
-        head = ("У документах немає відмітки про фактичне повернення, тому "
-                "відповісти точно система не може. За документами відсутність "
-                "ще триває у:")
-        tail = "\n".join(items) if items else (
-            f"— ні в кого: на {date}{where} чинних документів про "
-            "відсутність немає.")
-        body = head + "\n" + tail
-    elif not rows:
-        body = f"На {date}{where} чинних документів про відсутність немає."
+    where = f" ({subdivision})" if subdivision else ""
+    items = [f"- {person_label(r)} — {r['doc_type']} {r['doc_number']}, "
+             f"до {r['date_to']}" for r in rows]
+    if not rows:
+        body = f"0 — на {date}{where} чинних документів про відсутність немає."
     else:
-        body = f"Поза частиною {date}{where} — {len(rows)}:\n" + "\n".join(items)
+        body = (f"**{plural_people(len(rows))}** поза частиною на {date}{where}.\n"
+                + "\n".join(items))
+    if not_returned:
+        # питання №3 замовника: відмітки про фактичне повернення в даних немає
+        # (контракт, «Що з цього НЕ покривається») — застереження одним рядком
+        body += ("\n\nЦе ті, у кого відсутність триває за документами; "
+                 "відмітки про фактичне повернення в даних немає.")
     return body + footer("підрахунок", doc_source(rows), unconfirmed_note(date))
 
 
 def answer_returning(date, subdivision):
     rows = db.returning_on_date(date, subdivision=subdivision)
-    where = f" по підрозділу «{subdivision}»" if subdivision else ""
+    where = f" ({subdivision})" if subdivision else ""
     if not rows:
-        body = (f"На {date}{where} немає чинних документів, у яких цього дня "
-                "закінчується відсутність.")
+        body = f"0 — на {date}{where} нічия відсутність не завершується."
     else:
-        items = [f"- {person_label(r)} · {r['doc_type']} {r['doc_number']}, "
-                 f"відсутність до {r['date_to']}" for r in rows]
-        body = f"Повертаються {date}{where}:\n" + "\n".join(items)
-    body += ("\n\nВажливо: це дата завершення за документом. Відмітки про "
-             "фактичне повернення в даних немає.")
+        items = [f"- {person_label(r)} — {r['doc_type']} {r['doc_number']}"
+                 for r in rows]
+        body = (f"**{plural_people(len(rows))}** повертаються {date}{where}.\n"
+                + "\n".join(items)
+                + "\n\nЦе дата завершення за документом; фактичне повернення "
+                  "в даних не фіксується.")
     return body + footer("підрахунок", doc_source(rows), unconfirmed_note(date))
 
 
 def answer_person(name):
     people = db.find_people(name=name)
     rows = db.absences_for_person(name, only_active=False)
+    active = [r for r in rows if r["status"] == "чинний"]
     parts = []
+    # Перший рядок — стан людини, не перелік документів
+    if not rows:
+        parts.append("**За документами у частині** — документів про "
+                     "відсутність немає.")
+    elif active:
+        a = active[0]
+        parts.append(f"**Поза частиною** — {a['doc_type']} {a['doc_number']}"
+                     + (f", до {a['date_to']}." if a["date_to"] else "."))
+    else:
+        parts.append("**За документами у частині** — всі документи на цю "
+                     "людину скасовані.")
     if people:
         p = people[0]
-        parts.append(f"У реєстрі: {p['full_name']}, {p['rank']}, "
-                     f"{p['position_title']}, {p['subdivision']}.")
+        parts.append(f"{p['full_name']} · {p['rank']} · {p['position_title']} · "
+                     f"{p['subdivision']}.")
         if len(people) > 1:
-            parts.append(f"(збігів у реєстрі за «{name}»: {len(people)}, "
-                         "показано першого; уточніть ПІБ повніше)")
+            parts.append(f"У реєстрі {len(people)} збіги за «{name}» — "
+                         "уточніть ПІБ повніше.")
     else:
-        parts.append(f"У реєстрі частини людини за «{name}» немає." + (
-            " Документи нижче знайдено за ПІБ у самому документі — "
-            "реєстром вони не підтверджені." if rows else ""))
-    if not rows:
-        parts.append("Документів про відсутність немає — отже, за документами "
-                     "людина у частині. Це нормальна відповідь, не помилка.")
-    else:
-        parts.append(f"Документи ({len(rows)}):")
+        parts.append(f"У реєстрі частини людини за «{name}» немає"
+                     + (" — документи знайдено за ПІБ у самому документі, "
+                        "реєстром вони не підтверджені." if rows else "."))
+    if rows:
+        parts.append(f"\nДокументи ({len(rows)}):")
         parts += [describe_doc(r) for r in rows]
     return "\n".join(parts) + footer("підрахунок", doc_source(rows))
 
@@ -419,29 +482,32 @@ def answer_doc(doc_number):
             body += "\n" + warn
         return body + footer("підрахунок", "—")
     parts = []
-    if warn:
-        parts.append(warn)
     if len(rows) > 1:
-        parts.append(f"Знайдено {len(rows)} документи з номером {doc_number} — "
-                     "показуємо обидва:")
-        parts += [describe_doc(r) for r in rows]
         active = [r for r in rows if r["status"] == "чинний"]
         latest = max(active or rows, key=lambda r: r["doc_date"])
-        parts.append(f"Чинним вважається пізніший — від {latest['doc_date']} "
-                     f"({latest['source_file']}).")
+        parts.append(f"**Два документи з номером {doc_number}** — діє пізніший, "
+                     f"від {latest['doc_date']}.")
+        parts += [describe_doc(r) for r in rows]
     else:
-        parts.append(describe_doc(rows[0]))
+        r = rows[0]
+        parts.append(doc_lead(r))
+        detail = " · ".join(x for x in (r["doc_type"], r["reason"], r["place"],
+                                        r["status"]) if x)
+        parts.append(detail)
+        if r["status"] == "скасований" and r["superseded_by"]:
+            parts.append(f"Не діє: скасований документом {r['superseded_by']}.")
+    if warn:
+        parts.append(warn)
     return "\n".join(parts) + footer("підрахунок", doc_source(rows))
 
 
 def answer_summary(date):
     rows = db.count_absent_by_subdivision(date)
-    items = [f"- {r['subdivision']}: відсутні {r['absent']} з {r['total']}"
-             for r in rows]
     total_abs = sum(r["absent"] for r in rows)
     total = sum(r["total"] for r in rows)
-    body = (f"Зведення по підрозділах на {date}:\n" + "\n".join(items) +
-            f"\nРазом: відсутні {total_abs} з {total}.")
+    items = [f"- {r['subdivision']} — {r['absent']} з {r['total']}"
+             for r in rows]
+    body = (f"**{total_abs} з {total}** відсутні на {date}.\n" + "\n".join(items))
     src = "absences + people (розрахунок по чинних документах)"
     return body + footer("підрахунок", src, unconfirmed_note(date))
 
@@ -519,32 +585,101 @@ def answer_reference(question):
     best = hits[0]
     src = (f"{best['doc_title']}, розділ {best['section_number']} "
            f"({best['source_note']})")
-    quote = "\n".join("> " + line for line in best["text"].splitlines() if line)
-    body = (f"Найближчий розділ довідника — «{best['section_title']}» "
-            f"(розділ {best['section_number']}):\n\n{quote}")
+    # Конкретика першою: перші два речення розділу — це, як правило, сама
+    # норма (строк, хто дозволяє), решта — умови й винятки. Текст не
+    # переписуємо й не переказуємо: ріжемо по крапці, обидві частини — дослівні.
+    text = " ".join(best["text"].split())
+    parts_sent = re.split(r"(?<=[.!?])\s+", text)
+    lead, rest = parts_sent[0], " ".join(parts_sent[1:])
+    body = f"**{lead}**\n\n_{best['section_title']}, розділ {best['section_number']}_"
+    if rest:
+        body += ("\n\n<details class=\"src\"><summary>повний текст розділу"
+                 "</summary>" + rest + "</details>")
+    cut = None
     if len(hits) > 1:
-        more = "; ".join(f"{h['doc_title']}, розділ {h['section_number']}"
-                         for h in hits[1:])
-        body += f"\n\nЩе дотичні розділи: {more}."
-    return body + footer("довідник", src)
+        cut = "ще дотичні: " + "; ".join(
+            f"{h['doc_title']}, розділ {h['section_number']}" for h in hits[1:])
+    return body + footer("довідник", src, cut)
 
 
 # ── Головна функція. Викликається і з Gradio, і без нього ────────────────────
 
 
+def _history_text(content):
+    """Gradio 6 віддає content або рядком, або мультимодальним списком
+    [{'text': ..., 'type': 'text'}, ...] (навіть для звичайного тексту без
+    жодних файлів). Без цієї розпаковки isinstance(content, str) мовчки
+    відкидає всю історію -- саме так злиття нижче ніколи не спрацьовувало."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return ""
+
+
+def _is_followup(question):
+    """Чи це коротке допитування до попереднього питання («а 23 травня?»,
+    «а по 2 роті?»), а не самостійне питання.
+
+    Ознака — питання несе сутність підрахунку (дату, підрозділ, номер
+    документа), але не несе власного наміру. Без цієї перевірки склейка
+    спрацьовувала на КОЖНОМУ питанні без наміру, а це всі питання до
+    довідника: «За скільки днів подавати рапорт?» після будь-якого
+    підрахунку клеїлось із ним і йшло в підрахунок, віддаючи зведення
+    замість цитати з документа.
+    """
+    return bool(extract_date(question)
+                or normalize_subdivision(question)
+                or extract_doc_number(question))
+
+
 def _merge_clarification(question, history):
     """Попередня відповідь бота — уточнення? Склеїти з питанням до нього.
-    Стану не тримаємо: все читається з history. Друге уточнення заборонене."""
+    Стану не тримаємо: все читається з history. Друге уточнення заборонене.
+
+    Другий випадок -- коротке допитування без власного наміру («а 23
+    травня?», «а по 2 роті?»): rules_params на ньому самому дає intent=None.
+    Тоді шукаємо назад останнє повідомлення користувача, де намір був явний,
+    і клеїмо їх -- інакше роутер/екстрактор параметрів бачать лише «а 23
+    травня?» і підставляють дефолтний намір замість того, що мав на увазі
+    користувач.
+
+    ВАЖЛИВО (задокументовано в docs/known-issues/... -- дивись файл, перш ніж
+    міняти цю функцію): пробував прибрати цей regex-гейт і завжди давати
+    моделі контекст (і повну історію, і лише останній рядок) -- емпірично
+    ГІРШЕ: 4B-модель на 2+ рядках зливаного тексту ненадійно бере не ту
+    дату/номер (з першого рядка чи з прикладу в системному промпті, а не з
+    останнього рядка), незалежно від формулювання інструкції. Тобто ця
+    regex-псевдокласифікація, при всій крихкості на сленг і відмінки, зараз
+    надійніша за повне довірення моделі -- це empірично виміряний компроміс,
+    не лінь дописати промпт."""
     msgs = []
     for m in history or []:
         role = m.get("role") if isinstance(m, dict) else None
-        content = m.get("content") if isinstance(m, dict) else None
-        if role in ("user", "assistant") and isinstance(content, str):
+        content = _history_text(m.get("content")) if isinstance(m, dict) else ""
+        if role in ("user", "assistant") and content:
             msgs.append((role, content))
     if msgs and msgs[-1][0] == "assistant" and msgs[-1][1].startswith(CLARIFY_MARK):
         prev_user = next((c for r, c in reversed(msgs[:-1]) if r == "user"), "")
         return f"{prev_user}\n{question}", True
+    if rules_params(question)["intent"] is None and _is_followup(question):
+        for role, content in reversed(msgs):
+            if role == "user" and rules_params(content)["intent"] is not None:
+                return f"{content}\n{question}", False
     return question, False
+
+
+def _as_report(text):
+    """«Доповідаю: …» перед першим рядком відповіді. Уточнення лишається
+    уточненням (це запит, не доповідь), решта — доповідь по формі."""
+    if text.startswith(CLARIFY_MARK) or text.startswith(REPORT_MARK):
+        return text
+    head, sep, tail = text.partition("\n")
+    head = head[0].lower() + head[1:] if head[:1].isupper() else head
+    return f"{REPORT_MARK}: {head}{sep}{tail}"
 
 
 def answer(question, history=None):
@@ -556,15 +691,15 @@ def answer(question, history=None):
         # детерміновано, без моделі: причина відмови відома наперед
         return ANSWER_NO_QUOTA
 
-    model_ok = bool(get_api_key())  # без ключа мережу навіть не пробуємо
+    model_ok = ollama_available()  # без Ollama мережу навіть не пробуємо
     route, clarify_hint, params, fallback = None, None, None, not model_ok
     if model_ok:
         try:
-            r = openrouter_json(ROUTE_SYSTEM, merged, ROUTE_SCHEMA, "route")
+            r = mamaylm_json(ROUTE_SYSTEM, merged, ROUTE_SCHEMA, "route")
             route = r.get("route") if r.get("route") in ROUTES else None
             clarify_hint = r.get("clarify_question") or None
             if route == "підрахунок":
-                p = openrouter_json(PARAMS_SYSTEM, merged, PARAMS_SCHEMA, "params")
+                p = mamaylm_json(PARAMS_SYSTEM, merged, PARAMS_SCHEMA, "params")
                 if p.get("intent") in INTENTS:
                     params = p
         except Exception:
@@ -599,6 +734,8 @@ def answer(question, history=None):
     else:
         out = ANSWER_REFUSE
 
+    out = _as_report(out)
+
     if fallback:
         if out.startswith(CLARIFY_MARK):
             out = CLARIFY_MARK + "\n" + WARN_FALLBACK + out[len(CLARIFY_MARK):]
@@ -609,32 +746,193 @@ def answer(question, history=None):
 
 # ── Вікно ────────────────────────────────────────────────────────────────────
 
+# Шар представлення. Нічого з логіки вище він не змінює: answer() повертає той
+# самий текст, що й раніше, а тут він лише розкладається по блоках і стилях.
+#
+# Стиль тримають дві речі й більше нічого:
+#   1. gr.themes.Base(...) — токени, які Gradio вміє роздати компонентам;
+#   2. theme.css — усе інше, через CSS-змінні на :root.
+# Inline-стилів по компонентах немає навмисно: два місця для одного кольору
+# розходяться на першій же правці.
+
+ASSETS = os.path.join(HERE, "assets")
+MARK = os.path.join(ASSETS, "mark.svg")
+THEME_CSS = os.path.join(HERE, "theme.css")
+
+TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
+
+
+def _note(kind, text):
+    return f'<div class="note note--{kind}">{text}</div>'
+
+
+def render_reply(text):
+    """Той самий текст answer(), розкладений на блоки.
+
+    Емодзі-маркери (⚠️ у рядку, попередження про правила у шапці) виводяться
+    з тіла відповіді в окремі блоки: усередині абзацу вони читаються як шум,
+    а окремим блоком із семантичним кольором — як стан системи. Сам текст
+    не переписується, тому відповідь лишається тією самою.
+    """
+    notes = []
+    if text.startswith(WARN_FALLBACK):
+        text = text[len(WARN_FALLBACK):].lstrip("\n")
+        notes.append(("info", "Локальна модель недоступна — маршрут обрано "
+                              "правилами, дані з бази ті самі."))
+    body = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("⚠️"):
+            notes.append(("warn", stripped.lstrip("⚠️").strip()))
+        else:
+            body.append(line)
+    out = "\n".join(body).strip()
+    for kind, msg in notes:
+        out += "\n\n" + _note(kind, msg)
+    return out
+
 
 def main():
     import gradio as gr
 
-    status = (f"модель: {get_model()} (OpenRouter)" if get_api_key()
-              else "ключа OPENROUTER_API_KEY немає — працюють правила (⚠️ у відповідях)")
-
-    demo = gr.ChatInterface(
-        fn=answer,
-        title="Чат обліку особового складу — тестова версія",
-        description=(
-            "Питання звичайними словами — відповідь із документів, з назвою "
-            "джерела. Всі дані вигадані, за травень 2026. "
-            "Приклади питань — під полем вводу. "
-            f"Технічний стан: {status}."),
-        examples=[
-            "Хто з 2-ї механізованої роти буде поза частиною 2026-05-15?",
-            "Хто повертається 2026-05-24?",
-            "Хто у відпустці за квитком №301?",
-            "Скільки відсутніх по підрозділах на 2026-05-15?",
-            "За скільки днів подавати рапорт на відпустку?",
-            "Що робити, якщо захворів у відпустці?",
-        ],
+    theme = gr.themes.Base(
+        font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+        font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace",
+                   "monospace"],
+        radius_size=gr.themes.sizes.radius_sm,
+        spacing_size=gr.themes.sizes.spacing_md,
     )
-    demo.launch(server_name="127.0.0.1", server_port=7860, share=False,
-                inbrowser=False)
+
+    EXAMPLES = [
+        "Хто з 2-ї механізованої роти буде поза частиною 2026-05-15?",
+        "Хто повертається 2026-05-24?",
+        "Хто у відпустці за квитком №301?",
+        "Скільки відсутніх по підрозділах на 2026-05-15?",
+        "За скільки днів подавати рапорт на відпустку?",
+        "Що робити, якщо захворів у відпустці?",
+    ]
+
+    def respond(message, history):
+        """Генератор: спершу крапки на місці відповіді, потім сама відповідь.
+        Дає чесний стан очікування там, де він буде видимий, — локальна модель
+        на CPU думає десятки секунд."""
+        message = (message or "").strip()
+        history = history or []
+        if not message:
+            yield "", history, gr.update(), gr.update(visible=False), message
+            return
+        asked = history + [{"role": "user", "content": message}]
+        yield ("", gr.update(value=asked + [{"role": "assistant",
+                                             "content": TYPING_HTML}],
+                             visible=True),
+               gr.update(visible=False), gr.update(visible=False), message)
+        try:
+            reply = answer(message, history)
+            # Попередження про правила — один раз за сесію: у лівій панелі воно
+            # висить постійно, у кожній відповіді лише глушить текст. Шукаємо в
+            # історії вже відрендерений блок, а не сирий маркер: після
+            # render_reply() сирого тексту в історії не лишається.
+            if reply.startswith(WARN_FALLBACK) and any(
+                    "note--info" in _msg_text(m) for m in history):
+                reply = reply[len(WARN_FALLBACK):].lstrip("\n")
+            rendered, failed = render_reply(reply), False
+        except Exception as exc:                       # noqa: BLE001
+            rendered = _note("error", "Запит не вдалося виконати: "
+                                      f"{type(exc).__name__}. Дані не змінено.")
+            failed = True
+        yield ("", gr.update(value=asked + [{"role": "assistant",
+                                             "content": rendered}],
+                             visible=True),
+               gr.update(visible=False), gr.update(visible=failed), message)
+
+    def _msg_text(m):
+        if isinstance(m, dict):
+            return str(m.get("content") or "")
+        return str(getattr(m, "content", "") or "")
+
+    def reset():
+        """Порожній екран назад: стрічка ховається цілком, інакше під героєм
+        лишається порожня сіра область, а поле вводу з'їжджає за екран."""
+        return ("", gr.update(value=[], visible=False),
+                gr.update(visible=True), gr.update(visible=False), "")
+
+    # Gradio 6.23 скоупить усе, що прийшло через css_paths: `:root` переписується
+    # в `.gradio-container… .contain :root` і не збігається ні з чим, тому токени
+    # теми (і весь блок prefers-color-scheme) мовчки не застосовуються.
+    # Той самий один файл підключаємо через head — там скоупінгу немає.
+    with open(THEME_CSS, encoding="utf-8") as fh:
+        css_head = f"<style>{fh.read()}</style>"
+
+    with gr.Blocks(title="Чат обліку особового складу",
+                   fill_height=True) as demo:
+        last_q = gr.State("")
+
+        with gr.Row(equal_height=False):
+            with gr.Column(scale=0, min_width=272, elem_id="sidebar"):
+                gr.HTML(
+                    f'<div id="brand">'
+                    f'<img src="/gradio_api/file={MARK}" alt="">'
+                    f'<div><div class="brand-name">Облік особового складу</div>'
+                    f'<div class="brand-sub">тестова версія</div></div></div>')
+                new_chat = gr.Button("＋  Новий чат", elem_id="new-chat")
+                gr.Markdown("Приклади питань", elem_classes="side-heading")
+                with gr.Column(elem_id="examples"):
+                    side_btns = [gr.Button(q) for q in EXAMPLES]
+                dot, state_text = (("ok", f"модель {get_model()} — локально")
+                                   if ollama_available()
+                                   else ("rules", "модель недоступна — "
+                                                  "працюють правила"))
+                gr.HTML(f'<div id="side-status"><p>Дані вигадані, травень 2026.'
+                        f'</p><p><span class="dot dot--{dot}"></span>'
+                        f'{state_text}</p></div>', elem_id="side-status")
+
+            with gr.Column(scale=1, elem_id="main-col"):
+                with gr.Column(elem_id="topbar"):
+                    gr.Markdown("Чат обліку особового складу")
+
+                with gr.Column(elem_id="hero", visible=True) as hero:
+                    gr.HTML(
+                        '<div class="hero-title">Бажаю здоров\'я!</div>'
+                        '<div class="hero-sub">Готовий доповідати за обліком '
+                        'особового складу. Питання звичайними словами — '
+                        'відповідь із документів, із джерелом.</div>')
+                    with gr.Row(elem_id="hero-cards"):
+                        hero_col_a = [gr.Button(q) for q in EXAMPLES[:3]]
+                    with gr.Row(elem_id="hero-cards"):
+                        hero_col_b = [gr.Button(q) for q in EXAMPLES[3:]]
+
+                chat = gr.Chatbot(
+                    value=[],
+                    visible=False,
+                    show_label=False,
+                    elem_id="chat-area",
+                    elem_classes="chatbot",
+                    avatar_images=(None, MARK),
+                    buttons=["copy"],
+                    height="100%",
+                )
+                with gr.Row(elem_id="composer"):
+                    box = gr.Textbox(
+                        placeholder="Поставте питання про особовий склад…",
+                        show_label=False, lines=1, max_lines=6,
+                        container=False, scale=1, autofocus=True)
+                    send = gr.Button("➤", elem_id="send-btn")
+                retry = gr.Button("Спробувати ще", elem_id="retry-btn",
+                                  visible=False)
+                gr.HTML('<div id="hint">Відповідь формується з документів; '
+                        'джерело — під кожною відповіддю.</div>')
+
+        outs = [box, chat, hero, retry, last_q]
+        box.submit(respond, [box, chat], outs)
+        send.click(respond, [box, chat], outs)
+        retry.click(respond, [last_q, chat], outs)
+        new_chat.click(reset, None, outs)
+        for btn, q in zip(side_btns + hero_col_a + hero_col_b, EXAMPLES * 3):
+            btn.click(respond, [gr.State(q), chat], outs)
+
+    demo.launch(server_name="127.0.0.1", server_port=7861, share=False,
+                inbrowser=False, theme=theme, head=css_head,
+                allowed_paths=[ASSETS])
 
 
 if __name__ == "__main__":
