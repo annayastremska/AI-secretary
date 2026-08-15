@@ -1,34 +1,40 @@
-# Вікно чата тестового стенду — варіант на локальній MamayLM (Ollama) замість
-# OpenRouter. Дубльовано з ../app.py (Денис), щоб не чіпати основний файл --
-# порівняти окремо, перш ніж міняти дефолт (латентність CPU-моделі реальна,
-# див. коментар біля mamaylm_json нижче).
+# джерело: answer/chat@andriy-followup-context (коміт 9b9ad91),
+# адаптація під Postgres. Що змінено відносно оригіналу:
+#   - db.py поруч -- ті самі сім функцій стику, але проти нашої РЕАЛЬНОЇ
+#     Postgres (documents/objects/facts/dimensions), не SQLite-стенду;
+#   - Ollama -> llama-cpp-python з локальними вагами
+#     models/mamaylm-4b-q4_k_m.gguf; модель РЕЗИДЕНТНА (singleton у
+#     demos/upload_app/chat.py, вантажиться один раз і гріється при старті);
+#   - Google Fonts вирізано (усе локально, жодних зовнішніх запитів);
+#   - вікно монтується в FastAPI апки (gr.mount_gradio_app, /chat), окремий
+#     запуск лишився для дебагу (python demos/upload_app/chat_gradio/app.py);
+#   - додано ярус 2 з demos/upload_app/chat.py: перед чесною відмовою --
+#     спроба каталогу SQL-шаблонів (query_catalog.yaml) і вільного SELECT
+#     під рейками (read-only, валідатор, LIMIT, таймаут, SQL у згортці).
 #
-# Схема роботи -- та сама, що в оригіналі, тільки маршрутизатор ходить у
-# локальну Ollama, не в хмару:
-#   питання → маршрутизація (окремий виклик MamayLM через Ollama або правила)
+# Схема роботи (оригінальна, без змін):
+#   питання → маршрутизація (структурований виклик MamayLM або правила)
 #           → дорога: підрахунок | довідник | цитата | діагностика | відмова
-#   Живі дороги: підрахунок (сім функцій db.py), довідник (search_reference),
-#   відмова. «Цитата» і «діагностика» розпізнаються, але відповідь чесна:
-#   таких даних на стенді немає.
+#   Порядок доріг у нас: правила → модель-маршрут → каталог/сім функцій →
+#   ярус 2 → чесна відмова.
 #
-# Рішення з оригіналу, лишені без змін (Ден недоступний):
+# Рішення з оригіналу, лишені без змін:
 #   - Текст КОЖНОЇ відповіді формує код (шаблонні рядки), не модель.
-#     Модель робить лише два структуровані виклики: маршрут і параметри.
+#     Модель робить лише структуровані виклики: маршрут і параметри.
 #     Так модель фізично не може вигадати цифру чи цитату.
-#   - Порядок перебору доріг у правилах: діагностика → довідник → цитата →
-#     підрахунок → відмова. Виняток: явні сутності підрахунку (№ документа,
-#     дата ISO) перемагають ключові слова інших доріг.
+#   - Механізм follow-up цілком: перенесення слотів кодом (INTENT_SLOTS,
+#     _carry_over), стан у прихованому HTML-коментарі повідомлення,
+#     словесні дати в extract_date.
 #   - Якщо після уточнення дати все одно немає — чесна відмова, дефолтну
 #     дату не підставляємо.
-#   - Дані стенду -- травень 2026: якщо в питанні рік не названо, модель
-#     сама підставляє 2026 (виправлення від 14.08, перенесено сюди теж).
+#   - Документи в нашій базі -- травень 2026: якщо рік не названо,
+#     підставляється 2026 (правило стенду доречне й для нашої бази).
 
 import os
 import sys
 import json
 import re
-import urllib.request
-import urllib.error
+import threading
 
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
 
@@ -36,6 +42,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import db  # noqa: E402  (сім функцій стику, docs/contracts/2026-08-14_chat-db-interface.md)
+
+# Ярус 2 і каталог шаблонів -- наш chat.py (лишається модулем, стара
+# сторінка /api/chat прибрана). Звідти ж береться резидентна llama-cpp
+# модель: один екземпляр на процес, спільний для маршрутизатора і ярусу 2.
+_UP = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+if _UP not in sys.path:
+    sys.path.insert(0, _UP)
+from demos.upload_app import chat as tier_chat  # noqa: E402
 
 WARN_FALLBACK = "⚠️ локальна модель недоступна, маршрут обрано правилами"
 CLARIFY_MARK = "🔎 уточнення"
@@ -54,73 +68,51 @@ SUBDIVISIONS = ["1-ша механізована рота", "2-га механі
                 "3-тя механізована рота", "Взвод забезпечення",
                 "Управління батальйону"]
 
-# ── MamayLM через Ollama (локально, без хмари) ───────────────────────────────
-
-
-def _read_env_file():
-    vals = {}
-    path = os.path.join(HERE, ".env")
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    vals[k.strip()] = v.strip().strip("\"'")
-    return vals
-
-
-_ENV = _read_env_file()
-
-DEFAULT_MODEL = "mamaylm-4b"  # ~2х швидше за 12B на CPU (виміряно: ~44с проти ~90с
-                              # на два виклики маршрут+параметри), та сама якість
-                              # на перевірених питаннях. Повернутись на 12B --
-                              # OLLAMA_MODEL=mamaylm в .env або env-змінній.
-OLLAMA_HOST = (os.environ.get("OLLAMA_HOST", "").strip()
-               or _ENV.get("OLLAMA_HOST", "") or "http://localhost:11434")
+# ── MamayLM через llama-cpp-python (локально, без хмари і без Ollama) ────────
+#
+# Модель РЕЗИДЕНТНА: singleton у demos/upload_app/chat.py (_get_model),
+# вантажиться з диска один раз на процес -- головна причина гальм старої
+# версії була саме в перезавантаженні ваг. Прогрів робить warm_up() нижче
+# (його кличе апка при старті у фоновому потоці).
 
 
 def get_model():
-    return (os.environ.get("OLLAMA_MODEL", "").strip()
-            or _ENV.get("OLLAMA_MODEL", "") or DEFAULT_MODEL)
+    return os.path.basename(tier_chat.MODEL_PATH)
 
 
-def ollama_available():
-    """Швидка перевірка -- Ollama взагалі відповідає, ще до дорогого виклику
-    моделі. Так само чесно, як і перевірка ключа в оригіналі: без цього
-    мережу навіть не пробуємо."""
-    try:
-        with urllib.request.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=3) as r:
-            return r.status == 200
-    except Exception:
-        return False
+def model_available():
+    """Швидка перевірка -- чи є ваги і чи не падало завантаження. Без ваг
+    дорогі виклики навіть не пробуємо: чат живе на правилах і чесно каже це."""
+    return (os.path.exists(tier_chat.MODEL_PATH)
+            and not tier_chat._MODEL_FAILED)
 
 
 def mamaylm_json(system, user, schema, schema_name):
-    """Один структурований виклик до локальної Ollama: та сама ідея, що
-    openrouter_json в оригіналі (system, user, schema) -> розпарсений dict,
-    тільки JSON-схема йде в параметр format (Ollama-нативний механізм), не в
-    OpenAI-стиль response_format.
+    """Один структурований виклик до резидентної llama-cpp моделі: та сама
+    ідея, що в оригіналі (system, user, schema) -> розпарсений dict, тільки
+    JSON-схема йде в response_format (llama-cpp перетворює її на граматику --
+    відповідь фізично не може вийти за схему). schema_name не
+    використовується, лишений у сигнатурі для сумісності з оригіналом.
+    None від _model_json означає «модель не відповіла» -- обробляється
+    вище як fallback на правила."""
+    return tier_chat._model_json(system, user, schema)
 
-    Таймаут навмисно великий (120с, не 60): 12B на CPU без GPU реально
-    повільніший за хмарну модель -- одне структуроване рішення тут коштує
-    секунди, не долі секунди. schema_name не використовується (Ollama не
-    вимагає імені схеми), лишений у сигнатурі для сумісності виклику з
-    оригіналом."""
-    body = json.dumps({
-        "model": get_model(),
-        "messages": [{"role": "system", "content": system},
-                     {"role": "user", "content": user}],
-        "stream": False,
-        "format": schema,
-        "options": {"temperature": 0},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{OLLAMA_HOST}/api/chat", data=body,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        data = json.load(r)
-    return json.loads(data["message"]["content"])
+
+def warm_up():
+    """Прогрів при старті апки: завантажити ваги і зробити крихітний виклик,
+    щоб перший користувач не платив за перше завантаження (~30 с)."""
+    try:
+        if tier_chat._get_model() is not None:
+            tier_chat._model_json(
+                "Поверни JSON {\"ok\": true}.", "ок",
+                {"type": "object", "properties": {"ok": {"type": "boolean"}},
+                 "required": ["ok"], "additionalProperties": False})
+    except Exception:
+        pass
+
+
+def warm_up_async():
+    threading.Thread(target=warm_up, daemon=True).start()
 
 
 ROUTE_SCHEMA = {
@@ -354,16 +346,17 @@ def footer(route, source="—", cut=None):
 
 
 def unconfirmed_note(date):
-    """Скільки чинних записів на дату без service_id — їх не видно
-    в розбивці по підрозділах."""
-    n = sum(1 for r in db.absences_on_date(date) if not r["service_id"])
-    return (f"зріз: {date} · непідтверджених записів (без service_id): {n} — "
-            "їх не видно в розбивці по підрозділах")
+    """Склад відповіді формує код: зріз, знаменник, непідтверджені окремо.
+    Непідтверджені (чернетки) у підрахунок НЕ входять -- правило продукту."""
+    n = db.unconfirmed_absences_on_date(date)
+    total = db.people_total()
+    return (f"зріз: {date} · у реєстрі {total} осіб · непідтверджених записів "
+            f"(чернетки, у підрахунок не входять): {n}")
 
 
 def person_label(row):
     name = row["person_name_raw"] or "(ПІБ у документі порожній)"
-    mark = "" if row["service_id"] else " — не підтверджено реєстром"
+    mark = "" if row["service_id"] else " — факт не підтверджено (чернетка)"
     return name + mark
 
 
@@ -371,7 +364,9 @@ def doc_source(rows):
     return ", ".join(f"{r['doc_number']} ({r['source_file']})" for r in rows) or "—"
 
 
-CRITICAL_FIELDS = [("service_id", "service_id"), ("person_name_raw", "ПІБ"),
+# service_id зі списку критичних прибрано: у нашій схемі «непідтверджено» --
+# це статус факту (показується позначкою біля статусу), а не порожнє поле.
+CRITICAL_FIELDS = [("person_name_raw", "ПІБ"),
                    ("date_from", "дата початку"), ("date_to", "дата завершення")]
 
 
@@ -428,7 +423,16 @@ def plural_people(n):
     return f"{n} осіб"
 
 
+NO_SUBDIVISION = ("База цього не знає: у схемі немає зв'язку особа→підрозділ "
+                  "(db/README_for_chatbot_team.md, п.8), тож відповісти по "
+                  "конкретному підрозділу не можна. Можу порахувати по всій "
+                  "частині — спитайте без підрозділу." + "")
+
+
 def answer_absent(date, subdivision, not_returned=False):
+    if subdivision:
+        # чесна відмова, не мовчазне ігнорування фільтра
+        return NO_SUBDIVISION + footer("відмова")
     rows = db.absences_on_date(date, subdivision=subdivision)
     where = f" ({subdivision})" if subdivision else ""
     items = [f"- {person_label(r)} — {r['doc_type']} {r['doc_number']}, "
@@ -447,6 +451,8 @@ def answer_absent(date, subdivision, not_returned=False):
 
 
 def answer_returning(date, subdivision):
+    if subdivision:
+        return NO_SUBDIVISION + footer("відмова")
     rows = db.returning_on_date(date, subdivision=subdivision)
     where = f" ({subdivision})" if subdivision else ""
     if not rows:
@@ -479,8 +485,11 @@ def answer_person(name):
                      "людину скасовані.")
     if people:
         p = people[0]
-        parts.append(f"{p['full_name']} · {p['rank']} · {p['position_title']} · "
-                     f"{p['subdivision']}.")
+        # у нашому реєстрі можуть бути не всі поля (посади/підрозділа немає) --
+        # показуємо лише те, що є, порожнє не підставляємо
+        card = " · ".join(x for x in (p["full_name"], p["rank"],
+                                      p["position_title"], p["subdivision"]) if x)
+        parts.append(card + ".")
         if len(people) > 1:
             parts.append(f"У реєстрі {len(people)} збіги за «{name}» — "
                          "уточніть ПІБ повніше.")
@@ -534,6 +543,15 @@ def answer_doc(doc_number):
 
 def answer_summary(date):
     rows = db.count_absent_by_subdivision(date)
+    if not rows:
+        # наша схема не зберігає зв'язок особа→підрозділ -- зведення по
+        # підрозділах чесно неможливе; замість нього -- загальне число
+        n = len(db.absences_on_date(date))
+        body = (NO_SUBDIVISION
+                + f"\nПо всій частині на {date}: {plural_people(n)} поза "
+                  "частиною (за підтвердженими фактами).")
+        return body + footer("підрахунок (без розбивки)", "facts + dimensions",
+                             unconfirmed_note(date))
     total_abs = sum(r["absent"] for r in rows)
     total = sum(r["total"] for r in rows)
     items = [f"- {r['subdivision']} — {r['absent']} з {r['total']}"
@@ -580,19 +598,20 @@ def dispatch_count(params, clarified, clarify_hint, question=""):
 # ── Нежива дорога і відмова — чесні шаблони ──────────────────────────────────
 
 
-ANSWER_QUOTE = ("Такого типу даних на стенді немає: повних текстів наказів і "
-                "документів система не зберігає. Є лише облікові поля "
-                "(номер, дати, тип, статус, місце, файл-джерело). Бракує: "
-                "самі тексти документів." + footer("цитата"))
+ANSWER_QUOTE = ("Дослівно цитувати накази система не береться: у базі є лише "
+                "розпізнаний OCR-текст документів і облікові поля (номер, "
+                "дати, тип, статус, місце). Цитата з OCR-тексту без звірки з "
+                "оригіналом була б видана за дослівну — цього не робимо."
+                + footer("цитата"))
 
-ANSWER_DIAG = ("Такого типу даних на стенді немає: телеметрії, журналів стану "
-               "техніки й систем стенд не має. Є реєстр людей, документи про "
-               "відсутність і три довідкові документи. Бракує: дані про "
+ANSWER_DIAG = ("Такого типу даних у базі немає: телеметрії й журналів стану "
+               "техніки система не зберігає. Є реєстр осіб, документи про "
+               "відпустки й відрядження та черга перевірки. Бракує: дані про "
                "фактичний стан техніки." + footer("діагностика"))
 
 ANSWER_REFUSE = ("На це система відповісти не може, бо питання не лягає на "
                  "жодну з її доріг: підрахунок відсутностей за документами, "
-                 "довідник внутрішніх документів, цитати чи діагностика."
+                 "довідник, цитати чи діагностика."
                  + footer("відмова"))
 
 # питання №6 замовника (docs/contracts/2026-08-14_chat-db-interface.md): відмова з конкретною причиною
@@ -609,9 +628,10 @@ def is_quota_question(low):
 def answer_reference(question):
     hits = db.search_reference(question, limit=3)
     if not hits:
-        return ("У довіднику частини нічого не знайшлося за цим питанням. "
-                "У ньому лише три документи: порядок оформлення відпустки, "
-                "підключення до службової мережі, техпаспорт ДГУ-10."
+        return ("У базі поки немає нормативних документів (domain = "
+                "'normative'), тож довідкову відповідь дати нема з чого. "
+                "Коли пайплайн завантажить нормативку — пошук запрацює "
+                "через Ukrainian FTS без змін у чаті."
                 + footer("довідник"))
     best = hits[0]
     src = (f"{best['doc_title']}, розділ {best['section_number']} "
@@ -747,6 +767,18 @@ def _drop_invented_date(params, question):
     return params
 
 
+def _drop_invented_name(params, question):
+    """Аналог _drop_invented_date для імені: модель бачили на тому, що
+    підставляє «Петренко» з прикладу в системному промпті. Ім'я, перших
+    чотирьох літер якого немає в питанні, -- вигадане (перевірка префіксом,
+    бо ПІБ у питанні стоїть у відмінку: «про Усика» -> «Усик»)."""
+    n = (params.get("name") or "").strip()
+    if n and n[:4].lower() not in question.lower():
+        params = dict(params)
+        params["name"] = None
+    return params
+
+
 def _carry_over(params, prev):
     """Порожні слоти -- з попереднього ходу, але лише ті, що доречні наміру."""
     if not prev:
@@ -800,6 +832,69 @@ def _as_report(text):
     return f"{REPORT_MARK}: {head}{sep}{tail}"
 
 
+# ── Додаткові дороги нашої апки: каталог SQL-шаблонів і ярус 2 ──────────────
+#
+# Викликаються, коли сім функцій не впорались (dispatch повернув None) або
+# маршрут -- «відмова»: спершу каталог query_catalog.yaml (SQL написаний
+# людиною, звірений з базою), потім вільний SELECT під рейками з chat.py
+# (read-only сесія, валідатор, LIMIT 200, таймаут 5 с, SQL у згортці).
+# Не склалось -- None, і вище лишається чесна відмова.
+
+
+def _fmt_source_block(source_lines, route_label):
+    body = "<br>".join(str(s).replace("<", "&lt;") for s in source_lines)
+    return ("\n\n<details class=\"src\"><summary>джерело</summary>"
+            + body + f"<br>дорога: {route_label}</details>")
+
+
+def _catalog_tier(question):
+    """Каталог шаблонів (правила з chat.py: регекси, звірений SQL) -> текст
+    або None. Детерміновано, без моделі."""
+    try:
+        routed = tier_chat.rules_route(question)
+    except Exception:
+        routed = None
+    if not routed:
+        return None
+    tid, params = routed
+    try:
+        text, source = tier_chat.run_template(tid, params)
+    except Exception:
+        return None
+    return text + _fmt_source_block(source, f"каталог шаблонів ({tid})")
+
+
+def _tier2_tier(question):
+    """Ярус 2: вільний SELECT під рейками (read-only, валідатор, LIMIT 200,
+    таймаут 5 с, SQL у згортці) -> текст або None."""
+    if not (model_available() and tier_chat._get_model() is not None):
+        return None
+    try:
+        text, source = tier_chat.tier2_answer(question)
+    except Exception:
+        return None
+    if text.startswith("Відповідь на нешаблонний запит"):
+        return ("⚠️ нешаблонний запит: SQL склала модель, виконано "
+                "read-only з валідатором\n" + text
+                + _fmt_source_block(source, "ярус 2 (вільний SELECT)"))
+    return None
+
+
+# Ярус 2 при відмові вмикається лише для питань, які взагалі схожі на
+# питання про дані бази: «Яка погода завтра?» не має платити хвилину
+# модельного часу за спробу скласти SELECT, якому нема з чого вийти.
+_DBISH = re.compile(
+    r"відпуст|відрядж|документ|наказ|факт|званн|особ|людей|осіб|черг|"
+    r"переві|підрозділ|баз[аіи]|скільки|хто\b|реєстр", re.I)
+
+
+def _extra_tiers(question):
+    out = _catalog_tier(question)
+    if out is None and _DBISH.search(question):
+        out = _tier2_tier(question)
+    return out
+
+
 def answer(question, history=None):
     question = (question or "").strip()
     if not question:
@@ -808,12 +903,67 @@ def answer(question, history=None):
     if is_quota_question(merged.lower()):
         # детерміновано, без моделі: причина відмови відома наперед
         return ANSWER_NO_QUOTA
+    if tier_chat._DESTRUCTIVE.search(merged):
+        # явно деструктивне прохання ріжеться правилами ще ДО бази й моделі:
+        # чат ходить у базу read-only користувачем і нічого не змінює
+        return ("Відхилено: чат працює з базою лише в режимі читання і не "
+                "змінює та не видаляє дані. Зміни в базі — через сторінку "
+                "завантаження і перевірку людиною."
+                + footer("відмова (guard до бази й моделі)"))
 
-    model_ok = ollama_available()  # без Ollama мережу навіть не пробуємо
+    model_ok = model_available()  # без ваг модель навіть не пробуємо
     route, clarify_hint, params, fallback = None, None, None, not model_ok
-    if model_ok:
+
+    # Швидкий шлях ПЕРЕД моделлю (скарга замовниці на латентність): якщо
+    # правила впевнено впізнали підрахунок із власним наміром -- модель не
+    # потрібна, відповідь за частки секунди. Питання без власного наміру
+    # («а 4 травня?») сюди не потрапляє -- ним займеться модель із
+    # позначеним контекстом або перенесення слотів нижче.
+    rp = rules_params(merged)
+    if rp["intent"] and rules_route(merged) == "підрахунок":
+        # fallback лишається True, лише якщо моделі взагалі немає (чесна
+        # позначка «працюють правила»); з моделлю це не деградація, а
+        # свідомий швидкий шлях
+        route, params = "підрахунок", rp
+    elif (route is None and not rp["intent"] and _read_state(history)
+            and (rp["date"] or rp["subdivision"] or rp["doc_number"]
+                 or rp["name"])):
+        # Коротке допитування («а 4 травня?», «а по 2 роті?»): є сутність
+        # підрахунку, немає власного наміру, а в історії лежать слоти
+        # попереднього ходу -- намір добере _carry_over детерміновано, без
+        # моделі. Це головний удар по латентності: друге питання відповідає
+        # за частки секунди, а не за два виклики моделі. Модельний шлях із
+        # позначеним «Попереднє:/Поточне:» лишається для формулювань, які
+        # правила не розібрали.
+        route, params = "підрахунок", rp
+
+    # Правила перед моделлю, крок 2: каталог SQL-шаблонів (query_catalog.yaml,
+    # регекси з chat.py). Ловить те, чого сім функцій не мають: черга
+    # перевірки, непідтверджені факти, кількість документів, «зараз/сьогодні».
+    # Без цього модель тягла такі питання в найближчий знайомий шаблон і
+    # відповідала уточненням не по темі (бачили на «Скільки непідтверджених
+    # фактів?»).
+    if route is None:
+        cat = _catalog_tier(merged)
+        if cat is not None:
+            return _as_report(cat)
+
+    # Агрегати (середнє, мін/макс, суми) — шаблонів для них немає ні тут, ні
+    # в каталозі: одразу ярус 2, як робить chat.py, інакше маленька модель
+    # тягне їх у випадкову дорогу (бачили «цитату» на «в середньому діб»).
+    if route is None and tier_chat._AGGREGATE.search(merged.lower()):
+        t2 = _tier2_tier(merged)
+        if t2 is not None:
+            return _as_report(t2)
+        if model_ok:
+            return _as_report(
+                "Не знайшла: скласти безпечний запит для цього агрегатного "
+                "питання не вдалося. Спробуйте перефразувати."
+                + footer("ярус 2 (не склалось)"))
+
+    if route is None and model_ok:
         try:
-            r = mamaylm_json(ROUTE_SYSTEM, merged, ROUTE_SCHEMA, "route")
+            r = mamaylm_json(ROUTE_SYSTEM, merged, ROUTE_SCHEMA, "route") or {}
             route = r.get("route") if r.get("route") in ROUTES else None
             clarify_hint = r.get("clarify_question") or None
             if route == "підрахунок":
@@ -821,10 +971,10 @@ def answer(question, history=None):
                 # «Попереднє:/Поточне:», щоб сутності бралися з поточного
                 # питання, а намір міг успадкуватись
                 p = mamaylm_json(PARAMS_SYSTEM, _params_input(question, history),
-                                 PARAMS_SCHEMA, "params")
+                                 PARAMS_SCHEMA, "params") or {}
                 # None теж приймаємо: це «наміру в питанні немає», його
                 # добере _carry_over. Відкидаємо лише сміття поза enum.
-                if p.get("intent") in INTENTS or p.get("intent") is None:
+                if p and (p.get("intent") in INTENTS or p.get("intent") is None):
                     params = p
         except Exception:
             route = None
@@ -832,6 +982,14 @@ def answer(question, history=None):
             fallback = True
     if fallback or route is None:
         route = rules_route(merged)
+        # Без моделі коротке допитування («а 4 травня?») правила відкинули б:
+        # у ньому є сутність підрахунку, але немає наміру. Якщо в історії є
+        # збережені слоти -- перенесення (_carry_over нижче) добере намір
+        # детерміновано, тож маршрут чесно лишається підрахунком.
+        if (route == "відмова" and _read_state(history)
+                and (extract_date(merged) or extract_doc_number(merged)
+                     or normalize_subdivision(merged))):
+            route = "підрахунок"
     elif route == "відмова" and extract_doc_number(merged):
         # явна сутність підрахунку (№ документа) перемагає — див. шапку.
         # Модель інколи відмовляє на номер із шумом OCR (№3О4)
@@ -847,6 +1005,7 @@ def answer(question, history=None):
         if not params.get("date"):
             params = dict(params, date=extract_date(merged))
         params = _drop_invented_date(params, merged)
+        params = _drop_invented_name(params, merged)
         params = _carry_over(params, _read_state(history))
         # Запобіжник проти зайвого успадкування: якщо ПОТОЧНЕ питання само
         # однозначно називає намір (№документа, ПІБ, «хто повертається»...),
@@ -866,9 +1025,11 @@ def answer(question, history=None):
         if isinstance(result, tuple) and result[0] == "clarify":
             out = f"{CLARIFY_MARK}\n{result[1]}" + footer("підрахунок (потрібне уточнення)")
         elif result is None:
-            # порядок перебору: підрахунок не підійшов → цитата, відмова остання
-            out = ("Порахувати це за наявними полями не можна (у документах "
-                   "немає таких даних).\n" + ANSWER_QUOTE)
+            # сім функцій не підійшли → каталог шаблонів → ярус 2 → чесна
+            # відмова (порядок доріг з шапки файлу)
+            out = _extra_tiers(merged) or (
+                "Порахувати це за наявними полями не можна (у документах "
+                "немає таких даних).\n" + ANSWER_REFUSE)
         else:
             out = result
     elif route == "довідник":
@@ -878,7 +1039,9 @@ def answer(question, history=None):
     elif route == "діагностика":
         out = ANSWER_DIAG
     else:
-        out = ANSWER_REFUSE
+        # перед чесною відмовою -- каталог шаблонів і ярус 2 (вільний SELECT
+        # під рейками); якщо і вони не впорались, відмова лишається відмовою
+        out = _extra_tiers(merged) or ANSWER_REFUSE
 
     out = _as_report(out)
 
@@ -941,24 +1104,27 @@ def render_reply(text):
     return out
 
 
-def main():
+def build_blocks():
     import gradio as gr
 
+    # Google Fonts вирізано свідомо: gr.themes.GoogleFont тягне css/шрифти з
+    # fonts.googleapis.com -- зовнішній запит, порушення «все локально».
+    # Системні шрифти, жодного звернення назовні.
     theme = gr.themes.Base(
-        font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
-        font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace",
-                   "monospace"],
+        font=["system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        font_mono=["ui-monospace", "Consolas", "monospace"],
         radius_size=gr.themes.sizes.radius_sm,
         spacing_size=gr.themes.sizes.spacing_md,
     )
 
+    # приклади -- під нашу реальну базу (3 демо-документи, травень 2026)
     EXAMPLES = [
-        "Хто з 2-ї механізованої роти буде поза частиною 2026-05-15?",
-        "Хто повертається 2026-05-24?",
-        "Хто у відпустці за квитком №301?",
-        "Скільки відсутніх по підрозділах на 2026-05-15?",
-        "За скільки днів подавати рапорт на відпустку?",
-        "Що робити, якщо захворів у відпустці?",
+        "Хто був у відпустці 5 травня?",
+        "Хто повертається 2026-05-09?",
+        "Що відомо про Усика?",
+        "Покажи документ №109",
+        "Скільки непідтверджених фактів?",
+        "Скільки документів чекають перевірки?",
     ]
 
     def respond(message, history):
@@ -1012,7 +1178,13 @@ def main():
     with open(THEME_CSS, encoding="utf-8") as fh:
         css_head = f"<style>{fh.read()}</style>"
 
-    with gr.Blocks(title="Чат обліку особового складу",
+    # знак системи -- інлайном: шлях /gradio_api/file=... під монтуванням у
+    # FastAPI (root_path=/chat) не резолвиться, а інлайн-SVG не залежить від
+    # того, де живе апка
+    with open(MARK, encoding="utf-8") as fh:
+        mark_svg = fh.read()
+
+    with gr.Blocks(title="AI-секретар", theme=theme, head=css_head,
                    fill_height=True) as demo:
         last_q = gr.State("")
 
@@ -1020,18 +1192,22 @@ def main():
             with gr.Column(scale=0, min_width=272, elem_id="sidebar"):
                 gr.HTML(
                     f'<div id="brand">'
-                    f'<img src="/gradio_api/file={MARK}" alt="">'
-                    f'<div><div class="brand-name">Облік особового складу</div>'
-                    f'<div class="brand-sub">тестова версія</div></div></div>')
+                    f'{mark_svg}'
+                    f'<div><div class="brand-name">AI-секретар</div>'
+                    f'<div class="brand-sub">дані з Postgres, локально</div>'
+                    f'</div></div>')
                 new_chat = gr.Button("＋  Новий чат", elem_id="new-chat")
+                gr.HTML('<a href="/" id="upload-link">⬆&nbsp; Завантажити '
+                        'документ</a>')
                 gr.Markdown("Приклади питань", elem_classes="side-heading")
                 with gr.Column(elem_id="examples"):
                     side_btns = [gr.Button(q) for q in EXAMPLES]
                 dot, state_text = (("ok", f"модель {get_model()} — локально")
-                                   if ollama_available()
+                                   if model_available()
                                    else ("rules", "модель недоступна — "
                                                   "працюють правила"))
-                gr.HTML(f'<div id="side-status"><p>Дані вигадані, травень 2026.'
+                gr.HTML(f'<div id="side-status"><p>У підрахунках — лише '
+                        f'підтверджені факти; чернетки окремим числом.'
                         f'</p><p><span class="dot dot--{dot}"></span>'
                         f'{state_text}</p></div>', elem_id="side-status")
 
@@ -1079,12 +1255,20 @@ def main():
         for btn, q in zip(side_btns + hero_col_a + hero_col_b, EXAMPLES * 3):
             btn.click(respond, [gr.State(q), chat], outs)
 
-    # порт з env -- щоб прототип піднімався поруч із основним стендом
+    # черга: виклик моделі не блокує інші запити (сам виклик серіалізований
+    # локом у chat.py, але шаблонні відповіді йдуть паралельно)
+    demo.queue(default_concurrency_limit=4)
+    return demo
+
+
+def main():
+    """Окремий запуск для дебагу; бойовий шлях -- монтування в FastAPI апки
+    (demos/upload_app/app.py, gr.mount_gradio_app(..., path='/chat'))."""
+    demo = build_blocks()
+    warm_up_async()
     demo.launch(server_name="127.0.0.1",
                 server_port=int(os.environ.get("CHAT_PORT", "7861")),
-                share=False,
-                inbrowser=False, theme=theme, head=css_head,
-                allowed_paths=[ASSETS])
+                share=False, inbrowser=False)
 
 
 if __name__ == "__main__":

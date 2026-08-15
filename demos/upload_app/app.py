@@ -274,25 +274,18 @@ def index():
     return FileResponse(os.path.join(APP_DIR, "static", "index.html"))
 
 
-# ── Чат (друга сторінка тієї самої апки) ─────────────────────────────────────
-# Уся логіка -- у demos/upload_app/chat.py: каталог SQL-шаблонів + локальна
-# модель. Чат ходить у базу read-only користувачем і нічого не змінює.
+# ── Чат (друга сторінка тієї самої апки, /chat) ──────────────────────────────
+# Вікно -- Gradio-чат команди (demos/upload_app/chat_gradio/, джерело:
+# answer/chat@andriy-followup-context, адаптація під Postgres), змонтований у
+# цю саму FastAPI: один процес, один порт. Стара саморобна сторінка
+# static/chat.html і /api/chat прибрані; chat.py лишається модулем -- звідти
+# чат бере каталог шаблонів, ярус 2 і резидентну модель.
 
-@app.get("/chat")
-def chat_page():
-    return FileResponse(os.path.join(APP_DIR, "static", "chat.html"))
+from demos.upload_app.chat_gradio import app as chat_app  # noqa: E402
 
-
-@app.post("/api/chat")
-def chat_api(payload: dict):
-    question = payload.get("question", "")
-    if not isinstance(question, str) or not question.strip():
-        return JSONResponse(status_code=400, content={"error": "порожнє питання"})
-    from demos.upload_app import chat
-    # Синхронний виклик у threadpool FastAPI: відповідь шаблоном -- частки
-    # секунди, з моделлю -- секунди. Модельні виклики і так серіалізовані
-    # локом усередині chat.py.
-    return chat.answer_question(question)
+# Прогрів моделі у фоні при старті: перший користувач не платить ~30 с
+# за завантаження ваг (модель резидентна, вантажиться один раз на процес).
+chat_app.warm_up_async()
 
 
 @app.post("/api/upload")
@@ -363,3 +356,10 @@ def commit(job_id: str):
             "error": f"запис у базу можливий лише після перегляду (стан: {job['state']})"})
     threading.Thread(target=_commit_job, args=(job_id,), daemon=True).start()
     return {"ok": True}
+
+
+# Монтування Gradio-чату останнім: він додає власні маршрути під /chat,
+# API-маршрути апки вище лишаються як були.
+import gradio as gr  # noqa: E402
+
+app = gr.mount_gradio_app(app, chat_app.build_blocks(), path="/chat")

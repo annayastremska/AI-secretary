@@ -3,7 +3,9 @@
 fastapi
 uvicorn
 python-multipart
-# Чат (сторінка /chat): read-only запити до Postgres + каталог шаблонів.
+# Чат (сторінка /chat): Gradio-вікно (chat_gradio/) + read-only запити до
+# Postgres + каталог шаблонів.
 # llama-cpp-python НЕ дублюємо: він уже в кореневому requirements.txt пайплайна.
 psycopg[binary]
 PyYAML
+gradio
