@@ -1,0 +1,557 @@
+/* Візуальний шар стенду чата. Тільки представлення: логіки, правил і текстів
+   відповідей цей файл не знає й не змінює.
+
+   Правило файлу: жодного кольору, радіуса чи тіні поза :root. Якщо значення
+   треба «трохи інше» — це сигнал, що бракує токена, а не привід вписати hex
+   у місці використання.
+
+   Класи Gradio (.message, .message-row, .bubble-wrap, .icon-button-wrapper …)
+   зняті інспектуванням DOM Gradio 6.23, не з документації. */
+
+:root {
+    /* ── Радіуси: рівно три ─────────────────────────────────────────────── */
+    --r-sm: 8px;
+    --r-md: 12px;   /* поле вводу і кнопки — спільний радіус */
+    --r-lg: 16px;
+    --r-full: 50%;  /* коло: крапка стану, крапки очікування */
+
+    /* ── Шкала відступів 4/8/12/16/24/32 ────────────────────────────────── */
+    --s-1: 4px;
+    --s-2: 8px;
+    --s-3: 12px;
+    --s-4: 16px;
+    --s-5: 24px;
+    --s-6: 32px;
+
+    /* ── Нейтральна база: п'ять відтінків ───────────────────────────────── */
+    --c-bg:       #ffffff;
+    --c-surface:  #f7f8fa;
+    --c-border:   #e4e6eb;
+    --c-muted:    #6b7280;
+    --c-text:     #16181d;
+
+    /* ── Акцент: приглушений, не насичений ──────────────────────────────── */
+    --c-accent:      #4a6fa5;
+    --c-accent-soft: rgba(74, 111, 165, 0.08);
+    --c-accent-line: rgba(74, 111, 165, 0.22);
+    --c-on-accent:   #ffffff;  /* текст на залитому акценті */
+
+    /* ── Семантичні: успіх / попередження / помилка ─────────────────────── */
+    --c-success:      #2f7d5d;
+    --c-success-soft: rgba(47, 125, 93, 0.05);
+    --c-warn:         #b45309;
+    --c-warn-soft:    rgba(180, 83, 9, 0.05);
+    --c-error:        #b42318;
+    --c-error-soft:   rgba(180, 35, 24, 0.05);
+
+    /* ── Одна тінь ──────────────────────────────────────────────────────── */
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+
+    /* ── Розкладка ──────────────────────────────────────────────────────── */
+    --col: 760px;          /* ширина колонки чата */
+    --header-h: 57px;
+    --composer-h: 104px;
+
+    --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+    color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --c-bg:       #16181d;
+        --c-surface:  #1e2027;
+        --c-border:   #2c2f38;
+        --c-muted:    #9aa0aa;
+        --c-text:     #e8eaed;
+
+        --c-accent:      #8aabdc;
+        --c-accent-soft: rgba(138, 171, 220, 0.10);
+        --c-accent-line: rgba(138, 171, 220, 0.28);
+        --c-on-accent:   #16181d;
+
+        --c-success:      #5cb98d;
+        --c-success-soft: rgba(92, 185, 141, 0.08);
+        --c-warn:         #e0a35c;
+        --c-warn-soft:    rgba(224, 163, 92, 0.08);
+        --c-error:        #e07a70;
+        --c-error-soft:   rgba(224, 122, 112, 0.08);
+
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+
+        color-scheme: dark;
+    }
+}
+
+/* Gradio тримає власний набір змінних і під body.dark підмінює їх на темні.
+   Прив'язуємо їх до наших токенів — інакше компоненти живуть своїм життям. */
+body, body.dark, .gradio-container, .gradio-container.dark {
+    --body-text-color: var(--c-text);
+    --body-text-color-subdued: var(--c-muted);
+    --body-background-fill: var(--c-bg);
+    --background-fill-primary: var(--c-bg);
+    --background-fill-secondary: var(--c-surface);
+    --block-background-fill: var(--c-bg);
+    --block-label-text-color: var(--c-muted);
+    --border-color-primary: var(--c-border);
+    --input-background-fill: var(--c-bg);
+}
+
+/* ── Каркас ─────────────────────────────────────────────────────────────── */
+
+html, body {
+    background: var(--c-bg);
+    color: var(--c-text);
+    font-family: var(--font);
+    overflow: hidden;              /* єдиний скрол — усередині стрічки */
+}
+
+.gradio-container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    background: var(--c-bg);
+}
+
+footer,
+button[title="Use via API"],
+label.float,
+.icon-button-wrapper.top-panel {    /* кошик у правому верхньому куті */
+    display: none !important;
+}
+
+/* ── Сайдбар ────────────────────────────────────────────────────────────── */
+
+#sidebar {
+    background: var(--c-surface);
+    border-right: 1px solid var(--c-border);
+    padding: var(--s-4) var(--s-3);
+    gap: var(--s-1);
+    height: 100dvh;
+    overflow-y: auto;
+}
+
+#brand {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-1) var(--s-2) var(--s-4);
+}
+#brand img { width: 36px; height: 36px; flex: none }
+#brand .brand-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--c-text);
+    line-height: 1.3;
+}
+#brand .brand-sub { font-size: 12px; color: var(--c-muted) }
+
+/* Вторинна кнопка: бордер + прозорий фон, без насиченої заливки */
+#new-chat {
+    width: 100%;
+    justify-content: flex-start;
+    gap: var(--s-2);
+    background: transparent;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 10px var(--s-3);
+    box-shadow: none;
+    cursor: pointer;
+}
+#new-chat:hover { background: var(--c-accent-soft) }
+
+.side-heading, .side-heading p {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--c-muted) !important;
+    margin: 0 !important;
+    padding: var(--s-4) var(--s-2) var(--s-2) !important;
+}
+
+/* Приклади — кнопки, не текст. Розділових ліній між ними немає */
+#examples { gap: 2px !important }
+#examples button {
+    width: 100%;
+    text-align: left;
+    justify-content: flex-start;
+    white-space: normal;
+    background: transparent;
+    border: none;
+    border-radius: var(--r-sm);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.45;
+    padding: 10px var(--s-3);
+    box-shadow: none;
+    min-height: 0;
+    cursor: pointer;
+}
+#examples button:hover { background: var(--c-accent-soft) }
+
+#side-status {
+    margin-top: auto !important;
+    padding: var(--s-3) var(--s-2) var(--s-1) !important;
+    border-top: 1px solid var(--c-border);
+}
+#side-status p {
+    margin: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.5;
+    color: var(--c-muted) !important;
+}
+.dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: var(--r-full);
+    margin-right: var(--s-2);
+    vertical-align: 1px;
+}
+.dot--ok { background: var(--c-success) }
+.dot--rules { background: var(--c-warn) }
+
+/* ── Шапка: лінія рівно по ширині колонки, не на все вікно ─────────────── */
+
+#topbar {
+    padding: var(--s-4) 0 !important;
+    background: var(--c-bg);
+    flex: none !important;
+}
+#topbar > * {
+    max-width: var(--col);
+    margin: 0 auto !important;
+    padding: 0 var(--s-5);
+    border-bottom: 1px solid var(--c-border);
+    padding-bottom: var(--s-4);
+}
+#topbar h3, #topbar p {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--c-muted) !important;
+    margin: 0 !important;
+}
+
+/* ── Стрічка повідомлень: єдиний скрол ──────────────────────────────────── */
+
+#chat-area {
+    max-width: var(--col) !important;
+    margin: 0 auto !important;
+    padding: var(--s-5) var(--s-5) 0 !important;
+    height: calc(100dvh - var(--header-h) - var(--composer-h)) !important;
+    border: none !important;
+    background: var(--c-bg) !important;
+    box-shadow: none !important;
+}
+.chatbot, .bubble-wrap {
+    background: var(--c-bg) !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+.bubble-wrap { padding: 0 !important }
+
+::-webkit-scrollbar { width: 8px; height: 8px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb {
+    background: var(--c-border);
+    border-radius: var(--r-sm);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--c-muted) }
+::-webkit-scrollbar-button { display: none }
+* { scrollbar-width: thin; scrollbar-color: var(--c-border) transparent }
+
+/* ── Ролі: бот — світлий із бордером, користувач — акцент 8%, без бордера ─ */
+
+/* Gradio дає рядку max-width: calc(100% - 60px) — через це права межа
+   бульбашки не сходилась із полем вводу на 20px. Знімаємо. */
+.message-row {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 0 var(--s-4) 0 !important;   /* Gradio додає бічні 20px */
+}
+.message-row.user-row { justify-content: flex-end !important }
+
+/* Обмежуємо міру тексту (68ch), а не саму бульбашку: інакше права межа
+   відповіді не сходиться з полем вводу, і колонка виглядає косою. */
+.message {
+    font-size: 15px !important;
+    line-height: 1.6 !important;
+    box-shadow: none !important;
+}
+.message.bot { flex: 1 1 auto !important }
+.message.user { max-width: 68ch !important }
+.message-content { max-width: 68ch }
+.message.bot {
+    background: var(--c-bg) !important;
+    border: 1px solid var(--c-border) !important;
+    border-radius: var(--r-lg) !important;
+    padding: var(--s-4) var(--s-4) !important;
+    color: var(--c-text) !important;
+}
+.message.user {
+    background: var(--c-accent-soft) !important;
+    border: none !important;
+    border-radius: var(--r-lg) !important;
+    padding: var(--s-3) var(--s-4) !important;
+    color: var(--c-text) !important;
+}
+
+.avatar-container {
+    width: 28px !important;
+    height: 28px !important;
+    border: none !important;
+    background: transparent !important;
+    align-self: flex-start;
+    margin-top: var(--s-1);
+}
+.avatar-container img { width: 28px !important; height: 28px !important }
+
+/* ── Типографіка відповіді ──────────────────────────────────────────────── */
+
+.message-content {
+    font-size: 15px !important;
+    line-height: 1.6 !important;
+    color: var(--c-text) !important;
+    font-variant-numeric: tabular-nums;   /* дати й номери не стрибають */
+}
+.message-content p { margin: 0 0 var(--s-2) !important }
+.message-content p:last-child { margin-bottom: 0 !important }
+.message-content ul, .message-content ol {
+    margin: var(--s-2) 0 !important;
+    padding-left: 20px !important;
+}
+.message-content li { margin: var(--s-1) 0 !important }
+.message-content li::marker { color: var(--c-muted) }
+.message-content strong { font-weight: 600 }
+.message-content em { color: var(--c-muted); font-style: normal; font-size: 13px }
+
+/* ── Блок джерела ───────────────────────────────────────────────────────── */
+
+details.src { margin-top: var(--s-3) !important }
+details.src summary {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    color: var(--c-muted);
+    list-style: none;
+    user-select: none;
+    padding: var(--s-1) 0;
+}
+details.src summary::-webkit-details-marker { display: none }
+details.src summary::before {
+    content: "";
+    width: 0; height: 0;
+    border-left: 4px solid currentColor;
+    border-top: 3px solid transparent;
+    border-bottom: 3px solid transparent;
+    transition: transform 0.18s ease;
+}
+details.src[open] summary::before { transform: rotate(90deg) }
+details.src summary:hover { color: var(--c-text) }
+details.src > *:not(summary) {
+    display: block;
+    margin-top: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    background: var(--c-surface);
+    border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--c-muted);
+    animation: reveal 0.18s ease;
+}
+@keyframes reveal {
+    from { opacity: 0; transform: translateY(-2px) }
+    to   { opacity: 1; transform: none }
+}
+
+/* ── Блоки-нотатки: попередження / інформація / помилка ─────────────────── */
+
+.note {
+    margin-top: var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    border-left: 3px solid var(--c-muted);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    font-size: 13px;
+    line-height: 1.55;
+}
+.note--warn  { border-color: var(--c-warn);    background: var(--c-warn-soft);    color: var(--c-text) }
+.note--info  { border-color: var(--c-accent);  background: var(--c-accent-soft);  color: var(--c-muted) }
+.note--error { border-color: var(--c-error);   background: var(--c-error-soft);   color: var(--c-text) }
+
+/* ── Кнопки дій під бульбашкою ──────────────────────────────────────────── */
+
+.icon-button-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    gap: var(--s-1) !important;
+}
+.message-row:hover .icon-button-wrapper,
+.icon-button-wrapper:focus-within { opacity: 1 }
+.message-row.bot-row .icon-button-wrapper { margin-left: 36px }
+.message-row.user-row .icon-button-wrapper { justify-content: flex-end }
+.icon-button-wrapper button.icon-button {
+    width: 28px !important;
+    height: 28px !important;
+    padding: 6px !important;
+    border-radius: var(--r-sm) !important;
+    color: var(--c-muted) !important;
+    background: transparent !important;
+    border: none !important;
+}
+.icon-button-wrapper button.icon-button:hover {
+    color: var(--c-text) !important;
+    background: var(--c-surface) !important;
+}
+
+/* ── Порожній екран ─────────────────────────────────────────────────────── */
+
+#hero {
+    max-width: var(--col);
+    margin: 0 auto !important;
+    padding: 12dvh var(--s-5) 0 !important;
+    gap: 0 !important;
+}
+#hero .hero-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--c-text);
+    text-align: center;
+    margin-bottom: var(--s-2);
+}
+#hero .hero-sub {
+    font-size: 14px;
+    color: var(--c-muted);
+    text-align: center;
+    margin-bottom: var(--s-6);
+    line-height: 1.6;
+}
+#hero-cards { gap: var(--s-2) !important }
+#hero-cards button {
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    justify-content: flex-start;
+    white-space: normal;
+    padding: var(--s-3);
+    box-shadow: none;
+    min-height: 0;
+    cursor: pointer;
+}
+#hero-cards button:hover {
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent-line);
+}
+
+/* ── Очікування відповіді: три крапки на місці відповіді ────────────────── */
+
+.typing { display: inline-flex; gap: 5px; padding: var(--s-1) 0 }
+.typing i {
+    width: 6px; height: 6px;
+    border-radius: var(--r-full);
+    background: var(--c-muted);
+    animation: pulse 1.2s infinite ease-in-out;
+}
+.typing i:nth-child(2) { animation-delay: 0.16s }
+.typing i:nth-child(3) { animation-delay: 0.32s }
+@keyframes pulse {
+    0%, 80%, 100% { opacity: 0.25; transform: translateY(0) }
+    40%           { opacity: 1;    transform: translateY(-2px) }
+}
+
+/* ── Поле вводу: краї збігаються з краями бульбашок ─────────────────────── */
+
+#composer {
+    position: relative;
+    max-width: var(--col) !important;
+    margin: 0 auto !important;
+    padding: var(--s-2) var(--s-5) var(--s-3) !important;
+    background: var(--c-bg);
+    gap: 0 !important;
+}
+#composer .block, #composer .form, #composer .input-container {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+#composer textarea {
+    border: 1px solid var(--c-border) !important;
+    border-radius: var(--r-md) !important;
+    background: var(--c-bg) !important;
+    color: var(--c-text) !important;
+    box-shadow: var(--shadow-sm) !important;
+    font-family: var(--font) !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    /* правий відступ звільняє місце під кнопку, яка стоїть усередині поля */
+    padding: 12px 60px 12px var(--s-4) !important;
+    resize: none !important;
+}
+#composer textarea:focus {
+    border-color: var(--c-accent) !important;
+    outline: none !important;
+}
+#composer textarea::placeholder { color: var(--c-muted) !important }
+
+#send-btn {
+    position: absolute !important;
+    right: calc(var(--s-5) + var(--s-2));
+    bottom: 22px;
+    z-index: 2;
+    flex: none !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    border-radius: var(--r-sm) !important;
+    background: var(--c-accent) !important;
+    color: var(--c-on-accent) !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    font-size: 15px !important;
+    cursor: pointer;
+}
+#send-btn:hover { filter: brightness(0.94) }
+
+#retry-btn {
+    background: transparent;
+    border: 1px solid var(--c-error);
+    border-radius: var(--r-md);
+    color: var(--c-error);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: var(--s-2) var(--s-3);
+    box-shadow: none;
+    cursor: pointer;
+}
+#retry-btn:hover { background: var(--c-error-soft) }
+
+#hint {
+    max-width: var(--col);
+    margin: 0 auto;
+    padding: 0 var(--s-5) var(--s-3);
+    font-size: 11px;
+    color: var(--c-muted);
+    text-align: center;
+}
