@@ -27,6 +27,7 @@ import os
 import sys
 import json
 import re
+import difflib
 import datetime
 import urllib.request
 import urllib.error
@@ -237,6 +238,24 @@ MONTHS = {"січ": 1, "лют": 2, "берез": 3, "квіт": 4, "трав": 
 RELATIVE_DAYS = {"позавчора": -2, "вчора": -1, "сьогодні": 0, "сьогоднi": 0,
                  "завтра": 1, "післязавтра": 2}
 
+# Повні форми -- для нечіткого збігу з одруківками. Стем-збіг вище ловить лише
+# помилки в ХВОСТІ слова («травнч»), бо там початок цілий. Помилка в самому
+# корені («тралня», «трвня») стем не проходить, а люди друкують саме так.
+# Доти одруківки виправляла модель -- але дату в неї забрали (вона підставляла
+# дати, яких у питанні не було), тож розпізнавати мусимо самі.
+MONTH_FORMS = {"січня": 1, "лютого": 2, "березня": 3, "квітня": 4,
+               "травня": 5, "червня": 6, "липня": 7, "серпня": 8,
+               "вересня": 9, "жовтня": 10, "листопада": 11, "грудня": 12}
+
+
+def _match_month(word):
+    """Номер місяця за словом: точний стем, інакше найближче за написанням."""
+    for stem, mon in MONTHS.items():
+        if word.startswith(stem):
+            return mon
+    near = difflib.get_close_matches(word, MONTH_FORMS, n=1, cutoff=0.7)
+    return MONTH_FORMS[near[0]] if near else None
+
 
 def extract_date(text):
     """ISO-форма -- як було. Плюс словесна («23 травня», «23-го травня»).
@@ -260,9 +279,9 @@ def extract_date(text):
             return str(datetime.date.today() + datetime.timedelta(days=shift))
     m = re.search(r"(\d{1,2})\s*(?:-?[а-яіїєґ]{1,3})?\s+([а-яіїєґ]+)", text.lower())
     if m and 1 <= int(m.group(1)) <= 31:
-        for stem, mon in MONTHS.items():
-            if m.group(2).startswith(stem):
-                return f"{STAND_YEAR}-{mon:02d}-{int(m.group(1)):02d}"
+        mon = _match_month(m.group(2))
+        if mon:
+            return f"{STAND_YEAR}-{mon:02d}-{int(m.group(1)):02d}"
     return None
 
 
