@@ -27,6 +27,7 @@ import os
 import sys
 import json
 import re
+import datetime
 import urllib.request
 import urllib.error
 
@@ -228,6 +229,14 @@ MONTHS = {"січ": 1, "лют": 2, "берез": 3, "квіт": 4, "трав": 
           "лип": 7, "серп": 8, "верес": 9, "жовт": 10, "листопад": 11,
           "груд": 12}
 
+# Відносні дати рахуються від СПРАВЖНЬОГО сьогодні, а не від травня 2026.
+# Стенд накриває травень, тож «сьогодні» майже напевно дасть порожньо -- і це
+# правильна відповідь: у підвалі видно зріз, людина одразу бачить, що на цю
+# дату документів немає. Раніше «сьогодні» не розпізнавалось узагалі, чат
+# питав «за яку дату рахувати?» і виглядало, ніби він не зрозумів слова.
+RELATIVE_DAYS = {"позавчора": -2, "вчора": -1, "сьогодні": 0, "сьогоднi": 0,
+                 "завтра": 1, "післязавтра": 2}
+
 
 def extract_date(text):
     """ISO-форма -- як було. Плюс словесна («23 травня», «23-го травня»).
@@ -242,6 +251,13 @@ def extract_date(text):
     m = re.search(r"\d{4}-\d{2}-\d{2}", text)
     if m:
         return m.group(0)
+    m = re.search(r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b", text)   # 15.05.2026
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    low = text.lower()
+    for word, shift in RELATIVE_DAYS.items():
+        if word in low:
+            return str(datetime.date.today() + datetime.timedelta(days=shift))
     m = re.search(r"(\d{1,2})\s*(?:-?[а-яіїєґ]{1,3})?\s+([а-яіїєґ]+)", text.lower())
     if m and 1 <= int(m.group(1)) <= 31:
         for stem, mon in MONTHS.items():
@@ -302,6 +318,11 @@ def rules_params(question):
     elif "хто" in low and re.search(r"відсутн|поза частин|відпуст|відрядж", low):
         # "відпуст" не "відпустк" -- місцевий відмінок «у відпустці» не містить
         # «к», інакше ця гілка мовчки не спрацьовує на відмінювані форми
+        params["intent"] = "хто_відсутній"
+    elif "скільки" in low and re.search(r"відпуст|відрядж|поза частин", low):
+        # «а скільки у відпустці?» -- питають кількість поза частиною.
+        # Стоїть ПІСЛЯ гілки зі «зведенням», щоб «скільки відсутніх по
+        # підрозділах» і далі йшло у зведення, а не сюди.
         params["intent"] = "хто_відсутній"
     elif "скільки" in low and "відсутн" in low:
         params["intent"] = "зведення_по_підрозділах"
@@ -763,15 +784,6 @@ def _read_state(history):
     return None
 
 
-def _drop_invented_date(params, question):
-    """Модель інколи повертає дату, якої в питанні немає -- бачили, як 4B
-    підставляла дату з прикладу в системному промпті. Дата без жодної цифри
-    в питанні -- вигадана; краще порожній слот (його добере перенесення),
-    ніж тихо неправильна відповідь."""
-    if params.get("date") and not any(c.isdigit() for c in question):
-        params = dict(params)
-        params["date"] = None
-    return params
 
 
 def _carry_over(params, prev):
@@ -785,6 +797,20 @@ def _carry_over(params, prev):
         if not out.get(slot):
             out[slot] = prev.get(slot)
     return out
+
+
+def _answers_clarification(question):
+    """Чи це справді ВІДПОВІДЬ на уточнення, а не нове питання.
+
+    Уточнення завжди просить конкретну сутність -- дату або людину. Тому
+    відповіддю вважаємо лише репліку, що цю сутність несе. Інакше людина,
+    яка після «За яку дату рахувати?» ставить наступне питання («а скільки
+    у відпустці?»), потрапляла в глухий кут: репліку зараховували як
+    відповідь, дати в ній не було, а повторно перепитувати вже не можна --
+    і замість відповіді йшла жорстка відмова.
+    """
+    return bool(extract_date(question) or extract_doc_number(question)
+                or extract_name(question))
 
 
 def _merge_clarification(question, history):
@@ -811,7 +837,9 @@ def _merge_clarification(question, history):
         content = _history_text(m.get("content")) if isinstance(m, dict) else ""
         if role in ("user", "assistant") and content:
             msgs.append((role, content))
-    if msgs and msgs[-1][0] == "assistant" and msgs[-1][1].startswith(CLARIFY_MARK):
+    if (msgs and msgs[-1][0] == "assistant"
+            and msgs[-1][1].startswith(CLARIFY_MARK)
+            and _answers_clarification(question)):
         prev_user = next((c for r, c in reversed(msgs[:-1]) if r == "user"), "")
         return f"{prev_user}\n{question}", True
     return question, False
@@ -871,9 +899,14 @@ def answer(question, history=None):
     if route == "підрахунок" and params is not None:
         # дата з правил надійніша за модельну: правила читають саме текст
         # питання, модель може підставити дату з прикладу в промпті
-        if not params.get("date"):
-            params = dict(params, date=extract_date(merged))
-        params = _drop_invented_date(params, merged)
+        # Дата -- ЛИШЕ з правил і лише з поточного питання. Модель тут не
+        # авторитет: вона підставляла то дату зі стенду (на «скільки сьогодні
+        # повертаються?» відповідала за 2026-05-24), то дату з прикладу у
+        # власному промпті. Правила читають буквальний текст питання й
+        # покривають ISO, «23 травня», «15.05.2026» і «сьогодні/вчора/завтра»;
+        # чого вони не впізнали -- того в питанні й немає, слот лишається
+        # порожнім і його добере перенесення з попереднього ходу.
+        params = dict(params, date=extract_date(question))
         params = _carry_over(params, _read_state(history))
         # Запобіжник проти зайвого успадкування: якщо ПОТОЧНЕ питання само
         # однозначно називає намір (№документа, ПІБ, «хто повертається»...),
@@ -886,7 +919,14 @@ def answer(question, history=None):
         if own["intent"] and own["intent"] != params.get("intent"):
             params = dict(params, intent=own["intent"])
             for slot in ("date", "subdivision", "name", "doc_number"):
-                params[slot] = own[slot] if slot in INTENT_SLOTS[own["intent"]] else None
+                if slot not in INTENT_SLOTS[own["intent"]]:
+                    params[slot] = None          # чужий наміру -- геть
+                elif own[slot]:
+                    params[slot] = own[slot]     # своє з питання -- головніше
+                # інакше лишаємо успадковане: «а скільки у відпустці?» змінює
+                # НАМІР, але дату бере з попереднього ходу. Раніше цей цикл
+                # затирав її на None, і чат просив уточнити дату, яку щойно
+                # сам же й назвав у попередній відповіді.
 
     if route == "підрахунок":
         result = dispatch_count(params, clarified, clarify_hint, merged)
