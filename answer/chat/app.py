@@ -168,6 +168,12 @@ PARAMS_SYSTEM = """Витягни параметри запиту до бази 
 - документи_людини: документи конкретної людини (є ПІБ або UNIT-XXXX)
 - документ_за_номером: питання про документ №NNN (квиток, наказ)
 - зведення_по_підрозділах: скільки відсутніх по кожному підрозділу
+ФОРМАТ ВХОДУ. Тобі можуть дати два рядки — «Попереднє:» і «Поточне:». Тоді:
+- дату, підрозділ, ПІБ, номер документа бери ТІЛЬКИ з рядка «Поточне:»;
+- намір бери з «Поточне:», якщо він там названий; якщо ні («а 23 травня?», \
+«а по 2 роті?») — з рядка «Попереднє:»;
+- рядок «Попереднє:» потрібен ЛИШЕ для наміру, жодних інших значень звідти \
+не бери.
 date — у форматі YYYY-MM-DD або null. Дані стенду охоплюють ТРАВЕНЬ 2026 РОКУ: \
 якщо в питанні названо день і місяць без року («24 травня», «15-го»), рік — \
 2026, склади дату сам, не став null і не проси уточнення лише через \
@@ -214,9 +220,34 @@ def normalize_subdivision(text):
     return None
 
 
+# Стенд накриває травень 2026 -- рік у словесній даті («23 травня») людина
+# не називає майже ніколи, тож підставляємо його самі. Місяці -- стемами, бо
+# форма відмінюється («травня», «травні», «травень»).
+STAND_YEAR = 2026
+MONTHS = {"січ": 1, "лют": 2, "берез": 3, "квіт": 4, "трав": 5, "черв": 6,
+          "лип": 7, "серп": 8, "верес": 9, "жовт": 10, "листопад": 11,
+          "груд": 12}
+
+
 def extract_date(text):
-    m = re.search(r"\d{4}-\d{2}-\d{2}", text or "")
-    return m.group(0) if m else None
+    """ISO-форма -- як було. Плюс словесна («23 травня», «23-го травня»).
+
+    Без словесної форми найприродніше уточнення («а 23 травня?») лишало слот
+    date порожнім, і дату доводилось сподіватись отримати від моделі -- а та
+    в непевних випадках підставляла дату з ПРИКЛАДУ в системному промпті.
+    «2-га механізована рота» сюди не потрапляє: «механізована» не починається
+    з жодного стема місяця.
+    """
+    text = text or ""
+    m = re.search(r"\d{4}-\d{2}-\d{2}", text)
+    if m:
+        return m.group(0)
+    m = re.search(r"(\d{1,2})\s*(?:-?[а-яіїєґ]{1,3})?\s+([а-яіїєґ]+)", text.lower())
+    if m and 1 <= int(m.group(1)) <= 31:
+        for stem, mon in MONTHS.items():
+            if m.group(2).startswith(stem):
+                return f"{STAND_YEAR}-{mon:02d}-{int(m.group(1)):02d}"
+    return None
 
 
 def extract_doc_number(text):
@@ -636,6 +667,99 @@ def _is_followup(question):
                 or extract_doc_number(question))
 
 
+# ── Перенесення слотів між ходами ───────────────────────────────────────────
+#
+# Замість склеювати попереднє питання з поточним в один рядок і сподіватись,
+# що модель візьме потрібну половину (саме там 4B стабільно брала дату з
+# ПЕРШОГО рядка), модель бачить РІВНО ОДНЕ питання, а порожні слоти
+# добираються кодом з попереднього ходу. Детерміновано й без здогадок про
+# те, «схоже це на уточнення чи ні».
+
+# Які слоти взагалі має сенс тягнути для кожного наміру. Завдяки цьому
+# «Хто у відпустці за квитком №301?» після питання з датою НЕ успадкує ту
+# дату: для документ_за_номером date не в списку.
+INTENT_SLOTS = {
+    "хто_відсутній": ("date", "subdivision"),
+    "хто_повертається": ("date", "subdivision"),
+    "зведення_по_підрозділах": ("date",),
+    "документи_людини": ("name",),
+    "документ_за_номером": ("doc_number",),
+}
+SLOT_KEYS = ("intent", "date", "subdivision", "name", "doc_number")
+STATE_RE = re.compile(r"<!--slots:(.*?)-->", re.S)
+
+
+def _state_marker(params):
+    """Розпізнані слоти -- у саме повідомлення бота, прихованим HTML-коментарем.
+    Так зберігається принцип «стану не тримаємо, все читається з history»:
+    окремий gr.State не потрібен, а користувач цього не бачить."""
+    keep = {k: params.get(k) for k in SLOT_KEYS}
+    return f"\n<!--slots:{json.dumps(keep, ensure_ascii=False)}-->"
+
+
+def _last_user_question(history):
+    """Попереднє питання користувача -- як позначений контекст для наміру."""
+    for m in reversed(history or []):
+        if isinstance(m, dict) and m.get("role") == "user":
+            text = _history_text(m.get("content")).strip()
+            if text:
+                return text
+    return None
+
+
+def _params_input(question, history):
+    """Вхід для витягу параметрів: два ПОЗНАЧЕНІ рядки, а не склеєний текст.
+
+    Саме позначення вирішило обидві поломки склейки на 4B: модель перестала
+    брати дату з першого рядка (тепер сутності явно з «Поточне:») і почала
+    успадковувати намір там, де в питанні його немає (з «Попереднє:»).
+    Перевірено: з prev=«хто повертається» намір хто_повертається, з
+    prev=«хто відсутній» -- хто_відсутній, дата в обох з поточного рядка.
+    """
+    prev = _last_user_question(history)
+    if not prev:
+        return question
+    return f"Попереднє: {prev}\nПоточне: {question}"
+
+
+def _read_state(history):
+    """Слоти з останньої відповіді бота, де вони були."""
+    for m in reversed(history or []):
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        found = STATE_RE.search(_history_text(m.get("content")))
+        if found:
+            try:
+                return json.loads(found.group(1))
+            except ValueError:
+                return None
+    return None
+
+
+def _drop_invented_date(params, question):
+    """Модель інколи повертає дату, якої в питанні немає -- бачили, як 4B
+    підставляла дату з прикладу в системному промпті. Дата без жодної цифри
+    в питанні -- вигадана; краще порожній слот (його добере перенесення),
+    ніж тихо неправильна відповідь."""
+    if params.get("date") and not any(c.isdigit() for c in question):
+        params = dict(params)
+        params["date"] = None
+    return params
+
+
+def _carry_over(params, prev):
+    """Порожні слоти -- з попереднього ходу, але лише ті, що доречні наміру."""
+    if not prev:
+        return params
+    out = dict(params)
+    if not out.get("intent"):
+        out["intent"] = prev.get("intent")
+    for slot in INTENT_SLOTS.get(out.get("intent"), ()):
+        if not out.get(slot):
+            out[slot] = prev.get(slot)
+    return out
+
+
 def _merge_clarification(question, history):
     """Попередня відповідь бота — уточнення? Склеїти з питанням до нього.
     Стану не тримаємо: все читається з history. Друге уточнення заборонене.
@@ -647,15 +771,13 @@ def _merge_clarification(question, history):
     травня?» і підставляють дефолтний намір замість того, що мав на увазі
     користувач.
 
-    ВАЖЛИВО (задокументовано в docs/known-issues/... -- дивись файл, перш ніж
-    міняти цю функцію): пробував прибрати цей regex-гейт і завжди давати
-    моделі контекст (і повну історію, і лише останній рядок) -- емпірично
-    ГІРШЕ: 4B-модель на 2+ рядках зливаного тексту ненадійно бере не ту
-    дату/номер (з першого рядка чи з прикладу в системному промпті, а не з
-    останнього рядка), незалежно від формулювання інструкції. Тобто ця
-    regex-псевдокласифікація, при всій крихкості на сленг і відмінки, зараз
-    надійніша за повне довірення моделі -- це empірично виміряний компроміс,
-    не лінь дописати промпт."""
+    Склейка лишилась ТІЛЬКИ для випадку «бот спитав -- людина відповіла»:
+    там відповідь справді не має сенсу окремо від питання бота. Колишню
+    другу гілку (склейка коротких уточнень через regex-гейт _is_followup)
+    прибрано -- її замінило перенесення слотів (_carry_over вище). Гейт
+    пропускав лише ISO-дати й номери, тож найприродніші форми («а 23
+    травня?», «а по 2 роті?») повз нього не проходили, а те, що проходило,
+    4B все одно псувала, беручи дату з першого рядка склеєного тексту."""
     msgs = []
     for m in history or []:
         role = m.get("role") if isinstance(m, dict) else None
@@ -665,10 +787,6 @@ def _merge_clarification(question, history):
     if msgs and msgs[-1][0] == "assistant" and msgs[-1][1].startswith(CLARIFY_MARK):
         prev_user = next((c for r, c in reversed(msgs[:-1]) if r == "user"), "")
         return f"{prev_user}\n{question}", True
-    if rules_params(question)["intent"] is None and _is_followup(question):
-        for role, content in reversed(msgs):
-            if role == "user" and rules_params(content)["intent"] is not None:
-                return f"{content}\n{question}", False
     return question, False
 
 
@@ -699,8 +817,14 @@ def answer(question, history=None):
             route = r.get("route") if r.get("route") in ROUTES else None
             clarify_hint = r.get("clarify_question") or None
             if route == "підрахунок":
-                p = mamaylm_json(PARAMS_SYSTEM, merged, PARAMS_SCHEMA, "params")
-                if p.get("intent") in INTENTS:
+                # НЕ merged: параметри витягуються з позначеного
+                # «Попереднє:/Поточне:», щоб сутності бралися з поточного
+                # питання, а намір міг успадкуватись
+                p = mamaylm_json(PARAMS_SYSTEM, _params_input(question, history),
+                                 PARAMS_SCHEMA, "params")
+                # None теж приймаємо: це «наміру в питанні немає», його
+                # добере _carry_over. Відкидаємо лише сміття поза enum.
+                if p.get("intent") in INTENTS or p.get("intent") is None:
                     params = p
         except Exception:
             route = None
@@ -714,6 +838,28 @@ def answer(question, history=None):
         route = "підрахунок"
     if route == "підрахунок" and params is None:
         params = rules_params(merged)
+
+    # Слоти, яких у питанні не було, добираємо з попереднього ходу. Робиться
+    # ПІСЛЯ моделі й правил: спершу чесно дивимось, що є в самому питанні.
+    if route == "підрахунок" and params is not None:
+        # дата з правил надійніша за модельну: правила читають саме текст
+        # питання, модель може підставити дату з прикладу в промпті
+        if not params.get("date"):
+            params = dict(params, date=extract_date(merged))
+        params = _drop_invented_date(params, merged)
+        params = _carry_over(params, _read_state(history))
+        # Запобіжник проти зайвого успадкування: якщо ПОТОЧНЕ питання само
+        # однозначно називає намір (№документа, ПІБ, «хто повертається»...),
+        # він головніший за успадкований. Без цього «Хто у відпустці за
+        # квитком №301?» після питання з датою відповідало старим наміром і
+        # старою датою -- розмітка «Попереднє:» робить модель надто охочою
+        # тягнути контекст. Правила тут працюють лише НА ПІДТВЕРДЖЕННЯ:
+        # не знайшли наміру -- нічого не блокуємо, лишається успадкований.
+        own = rules_params(question)
+        if own["intent"] and own["intent"] != params.get("intent"):
+            params = dict(params, intent=own["intent"])
+            for slot in ("date", "subdivision", "name", "doc_number"):
+                params[slot] = own[slot] if slot in INTENT_SLOTS[own["intent"]] else None
 
     if route == "підрахунок":
         result = dispatch_count(params, clarified, clarify_hint, merged)
@@ -741,6 +887,9 @@ def answer(question, history=None):
             out = CLARIFY_MARK + "\n" + WARN_FALLBACK + out[len(CLARIFY_MARK):]
         else:
             out = WARN_FALLBACK + "\n\n" + out
+    if route == "підрахунок" and params is not None:
+        # у кінці, щоб не зачіпати startswith-перевірки вище
+        out += _state_marker(params)
     return out
 
 
@@ -930,7 +1079,10 @@ def main():
         for btn, q in zip(side_btns + hero_col_a + hero_col_b, EXAMPLES * 3):
             btn.click(respond, [gr.State(q), chat], outs)
 
-    demo.launch(server_name="127.0.0.1", server_port=7861, share=False,
+    # порт з env -- щоб прототип піднімався поруч із основним стендом
+    demo.launch(server_name="127.0.0.1",
+                server_port=int(os.environ.get("CHAT_PORT", "7861")),
+                share=False,
                 inbrowser=False, theme=theme, head=css_head,
                 allowed_paths=[ASSETS])
 
