@@ -419,6 +419,33 @@ def describe_doc(r):
 # ── Дорога «підрахунок»: диспетчер intent → функція db.py ────────────────────
 
 
+def people_count(rows):
+    """Скільки РІЗНИХ людей у вибірці.
+
+    Рядок -- це документ, а не людина: на одну дату в людини може бути два
+    чинні документи одночасно (у стенді Бабко Павло Ярославович на
+    2026-05-15 -- відрядження №201 і відпустка №501, overlap_001.pdf), і
+    тоді len(rows) завищує кількість людей. Без цього поруч у чаті стояли
+    «16 осіб поза частиною на 2026-05-15» і «14 з 300 відсутні» на ту саму
+    дату -- обидва числа правильні, але назване однаково, і виглядало як
+    помилка в даних.
+
+    Записи без service_id не склеюємо: вони не підтверджені реєстром, і чи
+    це та сама людина -- невідомо. Тому кожен рахується окремо.
+    """
+    known = {r["service_id"] for r in rows if r["service_id"]}
+    return len(known) + sum(1 for r in rows if not r["service_id"])
+
+
+def count_head(rows):
+    """«15 осіб (16 документів)» -- друге число лише коли воно інше."""
+    n = people_count(rows)
+    head = f"**{plural_people(n)}**"
+    if len(rows) != n:
+        head += f" ({len(rows)} документів)"
+    return head
+
+
 def plural_people(n):
     """«3 особи» / «5 осіб» — цифра має читатись як фраза, не як «3 людина»."""
     if n % 10 == 1 and n % 100 != 11:
@@ -436,7 +463,7 @@ def answer_absent(date, subdivision, not_returned=False):
     if not rows:
         body = f"0 — на {date}{where} чинних документів про відсутність немає."
     else:
-        body = (f"**{plural_people(len(rows))}** поза частиною на {date}{where}.\n"
+        body = (f"{count_head(rows)} поза частиною на {date}{where}.\n"
                 + "\n".join(items))
     if not_returned:
         # питання №3 замовника: відмітки про фактичне повернення в даних немає
@@ -454,7 +481,7 @@ def answer_returning(date, subdivision):
     else:
         items = [f"- {person_label(r)} — {r['doc_type']} {r['doc_number']}"
                  for r in rows]
-        body = (f"**{plural_people(len(rows))}** повертаються {date}{where}.\n"
+        body = (f"{count_head(rows)} повертаються {date}{where}.\n"
                 + "\n".join(items)
                 + "\n\nЦе дата завершення за документом; фактичне повернення "
                   "в даних не фіксується.")
