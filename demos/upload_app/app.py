@@ -1,0 +1,344 @@
+"""Демо-апка «завантажив фото → воно в базі» (запит команди БД,
+docs/contracts/2026-08-14_upload-app-task-for-pipeline-team.md).
+
+Головне правило: апка НЕ дублює мапінг. Два виклики:
+  1) пайплайн -- subprocess `python run_pipeline.py --config ... --input <файл>`;
+  2) запис у БД -- імпортом `ai_secretary_loader.load(md_path, original_path)`
+     (той самий модуль, що в CLI-обгортки db/scripts/load_ai_secretary_output.py).
+
+YAML-шапку вихідного .md апка читає РІВНО ЯК ПРИЛАД -- показати людині, що
+витягнулось, ДО запису в базу (правило продукту: чернетка ≠ факт, кнопка
+запису окрема від завантаження). Жодного власного SQL і жодного «яке поле в
+яку таблицю» тут немає.
+
+Запуск (з кореня репозиторію):
+    python -m uvicorn demos.upload_app.app:app --host 127.0.0.1 --port 8000
+"""
+import datetime
+import json
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import uuid
+
+import yaml
+from fastapi import FastAPI, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(APP_DIR))
+CONFIG_PATH = os.path.join(APP_DIR, "config-app.yaml")
+
+# Тимчасові завантаження -- у гітігнорений шлях (data/inbox/* у .gitignore
+# цілком). Підпапка, а не сам inbox: пакетний прогін `python run_pipeline.py`
+# сканує inbox не рекурсивно, тож наші копії йому не заважають.
+UPLOADS_DIR = os.path.join(PROJECT_ROOT, "data", "inbox", "upload_app")
+
+OUTPUT_ROOT = os.path.join(PROJECT_ROOT, "data", "output")
+INDEX_PATH = os.path.join(OUTPUT_ROOT, "index", "processed.jsonl")
+
+# Лоадер команди БД -- імпортом, як його ж CLI-обгортка. Шлях, не копія коду:
+# мапінг «поле -> таблиця» лишається в одному місці (їхня зона).
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "airflow", "plugins"))
+
+ALLOWED_EXTS = {".docx", ".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
+
+# OCR-прогони по одному (вимога перевірки ТЗ; два паралельні llama-server
+# на CPU і не помістяться в пам'ять). Один лок на всі прогони пайплайна.
+PIPELINE_LOCK = threading.Lock()
+
+# Пайплайн на фото: старт Surya ~1-2 хв + OCR 1.5-3 хв/фото + LLM-виклики
+# десятки секунд кожен. 30 хв -- стеля, після якої це вже збій.
+PIPELINE_TIMEOUT_S = 30 * 60
+
+JOBS = {}
+JOBS_LOCK = threading.Lock()
+
+app = FastAPI(title="ai-secretary upload demo")
+
+
+def _now():
+    return time.perf_counter()
+
+
+def _file_sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _read_index():
+    """{file_hash: storage_key} з індексу пайплайна. Читаємо як дані (це
+    його власний публічний слід дедуплікації), нічого не пишемо."""
+    index = {}
+    if not os.path.exists(INDEX_PATH):
+        return index
+    with open(INDEX_PATH, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("file_hash"):
+                index[row["file_hash"]] = row.get("key")
+    return index
+
+
+def _read_frontmatter(md_path):
+    """YAML-шапка вихідного .md -- ЛИШЕ для показу людині (не мапінг)."""
+    with open(md_path, encoding="utf-8") as f:
+        content = f.read()
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        raise ValueError(f"у {md_path} немає YAML-шапки")
+    return yaml.safe_load(parts[1])
+
+
+def _fact_labels():
+    """Людські назви типів фактів -- з довідника КОМАНДИ БД (той самий
+    FACT_TYPE_LABELS, що керує dimensions.name), а не власна копія: підпис у
+    UI і назва виміру в базі мають збігатися. Лише для показу, не мапінг."""
+    try:
+        import ai_secretary_loader
+        labels = dict(ai_secretary_loader.FACT_TYPE_LABELS)
+    except Exception:
+        labels = {}
+    labels.setdefault("rank", "Звання")
+    labels.setdefault("position", "Посада")
+    return labels
+
+
+def _preview_from_meta(meta):
+    """Рівно те, що треба показати ДО запису в базу. Прогалини -- видимі
+    прогалини, не порожні клітинки."""
+    provenance = meta.get("field_provenance") or {}
+    return {
+        "fact_labels": _fact_labels(),
+        "status": meta.get("status"),
+        "template": meta.get("template"),
+        "domain": meta.get("domain"),
+        "source_kind": meta.get("source_kind"),
+        "reason": meta.get("reason"),
+        "review_reason": meta.get("review_reason"),
+        "review_queue": meta.get("review_queue"),
+        "subject": meta.get("subject") or {},
+        "facts": meta.get("facts") or [],
+        "field_provenance": provenance,
+        "unknown_fields": meta.get("unknown_fields") or [],
+        "unknown_critical_fields": meta.get("unknown_critical_fields") or [],
+        "confirmed_empty_fields": meta.get("confirmed_empty_fields") or [],
+        "warnings": meta.get("warnings") or [],
+        "ocr_blocks": meta.get("ocr_blocks"),
+        "ocr_chars": meta.get("ocr_chars"),
+        "date_range_error": meta.get("date_range_error"),
+        "consistency_problems": meta.get("consistency_problems") or {},
+    }
+
+
+def _set_step(job, name, state, seconds=None, detail=None):
+    # started_at -- щоб секундомір у UI рахувався від старту кроку НА СЕРВЕРІ:
+    # сторінку можна перезавантажити посеред довгого OCR, і таймер не має
+    # починатися з нуля.
+    for step in job["steps"]:
+        if step["name"] == name:
+            step["state"] = state
+            if state == "running" and not step.get("started_at"):
+                step["started_at"] = time.time()
+            if seconds is not None:
+                step["seconds"] = round(seconds, 1)
+            if detail is not None:
+                step["detail"] = detail
+            return
+    job["steps"].append({"name": name, "state": state,
+                         "started_at": time.time() if state == "running" else None,
+                         "seconds": round(seconds, 1) if seconds is not None else None,
+                         "detail": detail})
+
+
+def _run_pipeline_job(job_id):
+    with JOBS_LOCK:
+        job = JOBS[job_id]
+    original_path = job["original_path"]
+
+    file_hash = _file_sha256(original_path)
+    job["file_hash"] = file_hash
+    was_known = file_hash in _read_index()
+
+    # Короткі підказки про тривалість показує фронтенд за job["is_image"] --
+    # бекенд не диктує тексти UI.
+    _set_step(job, "pipeline", "running")
+    job["state"] = "pipeline_running"
+    started = _now()
+
+    with PIPELINE_LOCK:  # OCR-прогони строго по одному
+        try:
+            proc = subprocess.run(
+                [sys.executable, "run_pipeline.py",
+                 "--config", CONFIG_PATH, "--input", original_path],
+                cwd=PROJECT_ROOT, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=PIPELINE_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            _set_step(job, "pipeline", "failed", _now() - started,
+                      f"пайплайн не завершився за {PIPELINE_TIMEOUT_S // 60} хв -- перервано")
+            job["state"] = "pipeline_failed"
+            job["error"] = "таймаут пайплайна"
+            return
+        except OSError as exc:
+            _set_step(job, "pipeline", "failed", _now() - started, str(exc))
+            job["state"] = "pipeline_failed"
+            job["error"] = f"не вдалося запустити пайплайн: {exc}"
+            return
+
+    elapsed = _now() - started
+    job["pipeline_stdout"] = proc.stdout[-4000:]
+    job["pipeline_stderr"] = proc.stderr[-4000:]
+
+    if proc.returncode != 0:
+        _set_step(job, "pipeline", "failed", elapsed,
+                  f"код виходу {proc.returncode}")
+        job["state"] = "pipeline_failed"
+        job["error"] = (proc.stderr or proc.stdout or "").strip()[-1500:] \
+            or f"пайплайн упав з кодом {proc.returncode}"
+        return
+
+    # Результат шукаємо за хешем в індексі пайплайна -- так само його шукає
+    # і сам пайплайн (дедуплікація). Для дубліката індекс уже містив хеш,
+    # і ключ вказує на ІСНУЮЧИЙ запис -- саме його й показуємо.
+    key = _read_index().get(file_hash)
+    if not key:
+        _set_step(job, "pipeline", "failed", elapsed, "вихідний .md не знайдено в індексі")
+        job["state"] = "pipeline_failed"
+        job["error"] = ("пайплайн завершився, але запису з таким хешем немає в "
+                        "data/output/index/processed.jsonl -- див. лог пайплайна нижче")
+        return
+
+    md_path = os.path.join(OUTPUT_ROOT, key.replace("/", os.sep))
+    try:
+        meta = _read_frontmatter(md_path)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        _set_step(job, "pipeline", "failed", elapsed, str(exc))
+        job["state"] = "pipeline_failed"
+        job["error"] = f"не вдалося прочитати вихідний .md: {exc}"
+        return
+
+    _set_step(job, "pipeline", "done", elapsed)
+    job["md_path"] = md_path
+    job["storage_key"] = key
+    job["duplicate_upload"] = was_known
+    job["preview"] = _preview_from_meta(meta)
+    job["state"] = "ready_for_review"
+
+
+def _commit_job(job_id):
+    with JOBS_LOCK:
+        job = JOBS[job_id]
+    _set_step(job, "db", "running")
+    job["state"] = "committing"
+    started = _now()
+    try:
+        import ai_secretary_loader
+        result = ai_secretary_loader.load(job["md_path"], job["original_path"])
+    except KeyError as exc:
+        _set_step(job, "db", "failed", _now() - started)
+        job["state"] = "commit_failed"
+        job["error"] = (f"БД недоступна: немає змінної середовища {exc} -- "
+                        "перевірте .env у корені репозиторію (потрібен рядок "
+                        "DATABASE_URL=..., див. README апки)")
+        return
+    except Exception as exc:
+        _set_step(job, "db", "failed", _now() - started)
+        job["state"] = "commit_failed"
+        job["error"] = f"БД недоступна: {type(exc).__name__}: {exc}"
+        return
+    _set_step(job, "db", "done", _now() - started)
+    job["db_result"] = {
+        "document_id": result.get("document_id"),
+        "doc_state": result.get("doc_state"),
+        "facts_inserted": [list(pair) for pair in result.get("facts_inserted") or []],
+    }
+    job["state"] = "committed"
+
+
+@app.get("/")
+def index():
+    return FileResponse(os.path.join(APP_DIR, "static", "index.html"))
+
+
+@app.post("/api/upload")
+async def upload(file: UploadFile):
+    name = os.path.basename(file.filename or "")
+    ext = os.path.splitext(name)[1].lower()
+    if not name or ext not in ALLOWED_EXTS:
+        return JSONResponse(status_code=400, content={
+            "error": f"непідтримуваний тип файлу '{ext or name}'. "
+                     f"Приймаються: {', '.join(sorted(ALLOWED_EXTS))}"})
+
+    job_id = str(uuid.uuid4())
+    job_dir = os.path.join(UPLOADS_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    dest = os.path.join(job_dir, name)
+
+    started = _now()
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+    upload_seconds = _now() - started
+
+    job = {
+        "id": job_id,
+        "filename": name,
+        "original_path": dest,
+        "is_image": ext not in (".docx", ".pdf"),
+        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "state": "queued",
+        "steps": [{"name": "upload", "state": "done",
+                   "seconds": round(upload_seconds, 1), "detail": None}],
+        "error": None,
+        "preview": None,
+        "db_result": None,
+    }
+    with JOBS_LOCK:
+        JOBS[job_id] = job
+
+    threading.Thread(target=_run_pipeline_job, args=(job_id,), daemon=True).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "немає такої задачі"})
+    payload = {k: v for k, v in job.items() if k not in ("original_path", "md_path")}
+    # Для кроку, що триває, віддаємо поточний лічильник із сервера --
+    # секундомір у UI переживає перезавантаження сторінки.
+    payload["steps"] = [
+        dict(step, seconds=(round(time.time() - step["started_at"], 1)
+                            if step["state"] == "running" and step.get("started_at")
+                            else step["seconds"]))
+        for step in payload["steps"]
+    ]
+    return payload
+
+
+@app.post("/api/jobs/{job_id}/commit")
+def commit(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "немає такої задачі"})
+    if job["state"] not in ("ready_for_review", "commit_failed"):
+        return JSONResponse(status_code=409, content={
+            "error": f"запис у базу можливий лише після перегляду (стан: {job['state']})"})
+    threading.Thread(target=_commit_job, args=(job_id,), daemon=True).start()
+    return {"ok": True}

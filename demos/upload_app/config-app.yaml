@@ -1,0 +1,42 @@
+# Конфіг пайплайна ДЛЯ ДЕМО-АПКИ (demos/upload_app). Копія кореневого
+# config.yaml цієї машини + увімкнений OCR (surya). Кореневий config.yaml
+# свідомо не чіпаємо (там ocr.engine: none) -- апка передає цей файл через
+# `python run_pipeline.py --config demos/upload_app/config-app.yaml`.
+# Шляхи -- відносні до КОРЕНЯ репозиторію (так їх розгортає pipeline/config.py).
+
+paths:
+  input_dir: data/inbox
+  output_dir: data/output
+
+intake:
+  archive: true
+  processed_dir: data/processed
+  failed_dir: data/failed
+
+llm:
+  enabled: true
+  # Ваги MamayLM 12B (~6.8 ГБ), лежать поза репо. Див. README апки, крок
+  # "Важке встановлення".
+  model_path: ../project_other/models/MamayLM-Gemma-3-12B-IT-v2.0-Q4_K_M.gguf
+  n_gpu_layers: 0              # CPU; LLM-виклик -- десятки секунд
+  batch_size: 4
+  self_consistency_n: 1
+  max_context_chars: 6000
+
+ocr:
+  engine: surya
+  # Windows: готовий бінарник llama-server (winget install ggml.llamacpp),
+  # Surya запускає його всередині; сервер слухає лише 127.0.0.1.
+  llama_server_path: C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\llama-server.exe
+  inference_parallel: 2
+  # 0 = чистий CPU. НЕ null: дефолт surya (99 шарів на GPU) на цій машині
+  # означає Vulkan на вбудованій графіці, де внутрішній сервер розпізнавання
+  # вмирає з vk::ErrorDeviceLost
+  # (docs/research/2026-08-14_ocr-ngl0-control-run.md).
+  n_gpu_layers: 0
+
+storage:
+  local_root: data/output
+
+review:
+  sample_rate: 20

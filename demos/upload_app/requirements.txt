@@ -1,0 +1,5 @@
+# Залежності ЛИШЕ демо-апки (demos/upload_app). Кореневий requirements.txt
+# не чіпаємо. Пайплайн і лоадер мають власні залежності -- див. README апки.
+fastapi
+uvicorn
+python-multipart
