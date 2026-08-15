@@ -362,4 +362,8 @@ def commit(job_id: str):
 # API-маршрути апки вище лишаються як були.
 import gradio as gr  # noqa: E402
 
-app = gr.mount_gradio_app(app, chat_app.build_blocks(), path="/chat")
+# theme/head у Gradio 6 передаються сюди, не в Blocks (у Blocks вони мовчки
+# губляться в kwargs -- перевірено: сторінка приїжджала без theme.css)
+app = gr.mount_gradio_app(app, chat_app.build_blocks(), path="/chat",
+                          theme=chat_app.make_theme(),
+                          head=chat_app.make_head_css())

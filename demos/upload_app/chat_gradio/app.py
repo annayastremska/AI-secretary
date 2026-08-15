@@ -1104,18 +1104,31 @@ def render_reply(text):
     return out
 
 
-def build_blocks():
+def make_theme():
+    """Google Fonts вирізано свідомо: gr.themes.GoogleFont тягне css/шрифти з
+    fonts.googleapis.com -- зовнішній запит, порушення «все локально».
+    Системні шрифти, жодного звернення назовні. У Gradio 6 theme/head
+    передаються в mount_gradio_app / launch, не в Blocks -- тому окремі
+    функції, які кличе і апка, і standalone-запуск."""
     import gradio as gr
-
-    # Google Fonts вирізано свідомо: gr.themes.GoogleFont тягне css/шрифти з
-    # fonts.googleapis.com -- зовнішній запит, порушення «все локально».
-    # Системні шрифти, жодного звернення назовні.
-    theme = gr.themes.Base(
+    return gr.themes.Base(
         font=["system-ui", "-apple-system", "Segoe UI", "sans-serif"],
         font_mono=["ui-monospace", "Consolas", "monospace"],
         radius_size=gr.themes.sizes.radius_sm,
         spacing_size=gr.themes.sizes.spacing_md,
     )
+
+
+def make_head_css():
+    # Gradio 6 скоупить усе, що прийшло через css/css_paths (`:root`
+    # переписується і не збігається ні з чим) -- той самий файл через head
+    # працює без скоупінгу (рішення з оригіналу, лишено).
+    with open(THEME_CSS, encoding="utf-8") as fh:
+        return f"<style>{fh.read()}</style>"
+
+
+def build_blocks():
+    import gradio as gr
 
     # приклади -- під нашу реальну базу (3 демо-документи, травень 2026)
     EXAMPLES = [
@@ -1175,17 +1188,13 @@ def build_blocks():
     # в `.gradio-container… .contain :root` і не збігається ні з чим, тому токени
     # теми (і весь блок prefers-color-scheme) мовчки не застосовуються.
     # Той самий один файл підключаємо через head — там скоупінгу немає.
-    with open(THEME_CSS, encoding="utf-8") as fh:
-        css_head = f"<style>{fh.read()}</style>"
-
     # знак системи -- інлайном: шлях /gradio_api/file=... під монтуванням у
     # FastAPI (root_path=/chat) не резолвиться, а інлайн-SVG не залежить від
     # того, де живе апка
     with open(MARK, encoding="utf-8") as fh:
         mark_svg = fh.read()
 
-    with gr.Blocks(title="AI-секретар", theme=theme, head=css_head,
-                   fill_height=True) as demo:
+    with gr.Blocks(title="AI-секретар", fill_height=True) as demo:
         last_q = gr.State("")
 
         with gr.Row(equal_height=False):
@@ -1268,7 +1277,8 @@ def main():
     warm_up_async()
     demo.launch(server_name="127.0.0.1",
                 server_port=int(os.environ.get("CHAT_PORT", "7861")),
-                share=False, inbrowser=False)
+                share=False, inbrowser=False,
+                theme=make_theme(), head=make_head_css())
 
 
 if __name__ == "__main__":
