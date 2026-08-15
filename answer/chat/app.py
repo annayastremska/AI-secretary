@@ -212,9 +212,16 @@ def normalize_subdivision(text):
     for s in SUBDIVISIONS:
         if low == s.lower():
             return s
-    m = re.search(r"([123])\s*-?\s*[а-яіїєґ]*\s*механізован", low)
+    # «механізован» не вимагаємо: люди пишуть просто «по 2 роті». Рот у
+    # частині лише три, тож саме слово «рота» вже однозначне. Без цього
+    # уточнення «а по 2 роті?» мовчки давало зведення по всій частині --
+    # підрозділ із питання просто зникав.
+    m = re.search(r"([123])\s*-?\s*[а-яіїєґ]*\s*(?:механізован|рот)", low)
     if m:
         return SUBDIVISIONS[int(m.group(1)) - 1]
+    m = re.search(r"(перш|друг|трет)[а-яіїєґ]*\s*(?:механізован|рот)", low)
+    if m:
+        return SUBDIVISIONS[{"перш": 1, "друг": 2, "трет": 3}[m.group(1)] - 1]
     if "забезпеченн" in low:
         return "Взвод забезпечення"
     if "управлінн" in low:
@@ -764,14 +771,52 @@ def _state_marker(params):
     return f"\n<!--slots:{json.dumps(keep, ensure_ascii=False)}-->"
 
 
+# Питання складається практично лише з числа: «а 22?», «22», «а 15-го?»,
+# «а 22 числа?». Саме така вимога і рятує від хибних спрацювань: у «а по 2
+# роті?» після числа стоїть іменник, тож воно сюди не підходить і 2-м числом
+# не стане.
+BARE_DAY_RE = re.compile(
+    r"^\W*(?:а|і|й|та|ну)?\s*(\d{1,2})\s*(?:-?[гґ]о|-?[ає]|числа)?\s*[?!.]*$")
+
+
+def _refine_day(question, prev_date):
+    """«а 22?» після відповіді за 23 травня -> 2026-05-22.
+
+    День без місяця extract_date розпізнати не може, тому доти дата
+    успадковувалась цілком: на «а 22?» чат відповідав за попереднє число і
+    навіть не показував, що не зрозумів. Місяць і рік беремо з попередньої
+    дати -- людина уточнює день у межах уже названого місяця.
+    """
+    if not prev_date:
+        return None
+    m = BARE_DAY_RE.match((question or "").strip().lower())
+    if not m:
+        return None
+    try:
+        base = datetime.date.fromisoformat(prev_date)
+        return str(base.replace(day=int(m.group(1))))
+    except ValueError:
+        return None          # 31 квітня і подібне -- не вигадуємо
+
+
 def _last_user_question(history):
-    """Попереднє питання користувача -- як позначений контекст для наміру."""
-    for m in reversed(history or []):
-        if isinstance(m, dict) and m.get("role") == "user":
-            text = _history_text(m.get("content")).strip()
-            if text:
-                return text
-    return None
+    """Попереднє питання -- як позначений контекст для наміру.
+
+    Береться останнє питання, у якому намір ВЗАГАЛІ Є: ланцюжок уточнень
+    («а 23 травня?» -> «а 22?») інакше давав моделі для контексту такий самий
+    безнамірний рядок, і успадковувати їй було нізвідки -- на «а 22?» намір
+    злітав на дефолтний. Якщо з наміром не знайшлось, беремо просто останнє.
+    """
+    questions = [
+        _history_text(m.get("content")).strip()
+        for m in (history or [])
+        if isinstance(m, dict) and m.get("role") == "user"
+        and _history_text(m.get("content")).strip()
+    ]
+    for text in reversed(questions):
+        if rules_params(text)["intent"]:
+            return text
+    return questions[-1] if questions else None
 
 
 def _params_input(question, history):
@@ -926,7 +971,10 @@ def answer(question, history=None):
         # чого вони не впізнали -- того в питанні й немає, слот лишається
         # порожнім і його добере перенесення з попереднього ходу.
         params = dict(params, date=extract_date(question))
-        params = _carry_over(params, _read_state(history))
+        prev_state = _read_state(history)
+        if not params["date"]:
+            params["date"] = _refine_day(question, (prev_state or {}).get("date"))
+        params = _carry_over(params, prev_state)
         # Запобіжник проти зайвого успадкування: якщо ПОТОЧНЕ питання само
         # однозначно називає намір (№документа, ПІБ, «хто повертається»...),
         # він головніший за успадкований. Без цього «Хто у відпустці за
@@ -935,7 +983,14 @@ def answer(question, history=None):
         # тягнути контекст. Правила тут працюють лише НА ПІДТВЕРДЖЕННЯ:
         # не знайшли наміру -- нічого не блокуємо, лишається успадкований.
         own = rules_params(question)
-        if own["intent"] and own["intent"] != params.get("intent"):
+        if not own["intent"] and (prev_state or {}).get("intent"):
+            # Питання власного наміру не називає («а 22?») -- тримаємо
+            # попередній, а не те, що вгадала модель. Вона мусить обрати
+            # щось із enum навіть коли обирати нема з чого, і на коротких
+            # уточненнях це «щось» стрибало: на «а 22?» -- «поза частиною»
+            # після двох питань про повернення.
+            params = dict(params, intent=prev_state["intent"])
+        elif own["intent"] and own["intent"] != params.get("intent"):
             params = dict(params, intent=own["intent"])
             for slot in ("date", "subdivision", "name", "doc_number"):
                 if slot not in INTENT_SLOTS[own["intent"]]:
