@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Тести на ДОВЕДЕНО ПОРОЖНІЙ СЛОТ (R2-П5-А,
+"""Тести на ДОВЕДЕНО ПОРОЖНІЙ СЛОТ (R2-П5-А і П5-Б,
 docs/improvement-2026-08-15/r2-llm.md розд. 5.5).
 
 Правка не покращує якість -- вона забирає МАРНУ роботу: поле, чий слот на
@@ -17,7 +17,10 @@ LEAVE-011 віддавала null у 8 з 8 таких полів, витрач�
   2. порожнє КРИТИЧНЕ поле лишає документ needs_review -- «слот порожній» це
      висновок різака, підтвердити його має людина (чернетка != факт);
   3. скіпнуте поле НІКОЛИ не несе значення -- скіп означає «не питали», а не
-     «вирішили».
+     «вирішили»;
+  4. (П5-Б) знання про форму живе в СХЕМІ: без оголошеного `empty_pattern:`
+     код сам порожній слот дати не скіпає, а оголошений, але недіючий патерн
+     мусить бути ПОМИЛКОЮ валідатора, не тихо проігнорованим ключем.
 
 Запуск (без LLM, без OCR):
     python -m pytest eval/tests/test_confirmed_empty_slot.py -q
@@ -31,12 +34,16 @@ _PROJECT_ROOT = os.path.dirname(
 sys.path.insert(0, _PROJECT_ROOT)
 
 from pipeline.build_record import build_record, field_criticality
+from pipeline.extraction.blank_form import blank_template_text
 from pipeline.extraction.extract import (
     CONFIRMED_EMPTY_SLOT_METHOD,
+    EMPTY_PATTERN_KEY,
     PROVEN_EMPTY_REASONS,
     extract_document,
+    slot_is_provably_empty,
 )
-from pipeline.identification import load_schemas, schema_title_phrases
+from pipeline.identification import (
+    load_schemas, schema_title_phrases, validate_schema)
 from pipeline.ingestion.ingest import extract_docx_blocks
 from pipeline.run import load_dictionaries
 
@@ -111,14 +118,71 @@ def test_empty_person_group_is_not_sent_to_the_model():
         assert results[name][1] == f"{CONFIRMED_EMPTY_SLOT_METHOD}:printed_hint"
 
 
-def test_unlocalized_gap_still_goes_to_the_model():
-    """Друга група LEAVE-011 (дні + дати) -- причина no_value: regex-скелет у
-    документі є, значення немає, але жоден сигнал цього НЕ доводить. Така
-    група мусить і далі йти в модель: саме так на LEAVE-007.png LLM
-    відновлювала пропис днів, який regex не зматчив."""
-    _results, calls = _run(EMPTY)
-    assert calls, "усі виклики зникли -- скіп з'їв і недоведені прогалини"
+def test_code_alone_does_not_skip_an_undeclared_empty_slot():
+    """Межа між П5-А і П5-Б: група «дні + дати» LEAVE-011 сигналами П5-А НЕ
+    ловиться (порожній слот дати -- не placeholder і не літеральний друкований
+    рядок), тому без оголошеного в СХЕМІ `empty_pattern` вона мусить іти в
+    модель. Саме так на LEAVE-007.png LLM відновлює пропис днів, який regex не
+    зматчив -- знання про форму живе в YAML, не в .py."""
+    bare = dict(_leave, fields=[{k: v for k, v in f.items()
+                                 if k != EMPTY_PATTERN_KEY}
+                                for f in _leave["fields"]])
+    results, calls = _run(EMPTY, schema=bare)
+    assert calls, "усі виклики зникли без жодного оголошеного empty_pattern"
     assert {"duration_days", "leave_start_date"} <= _asked(calls)
+    assert results["duration_days"][1] == "no_value"
+
+
+def test_declared_empty_pattern_closes_the_last_group():
+    """П5-Б: з оголошеними скелетами порожнечі LEAVE-011 не викликає модель
+    ЖОДНОГО разу -- єдине джерело LLM-викликів на синтетичному корпусі
+    зникає, і в пакеті без інших прогалин 12B узагалі не вантажиться."""
+    results, calls = _run(EMPTY)
+    assert calls == [], f"лишились виклики: {calls}"
+    for name in ("duration_days", "leave_start_date", "leave_end_date_planned",
+                 "actual_return_date"):
+        assert results[name] == (
+            None, f"{CONFIRMED_EMPTY_SLOT_METHOD}:empty_pattern"), (
+            f"{name}: {results[name]}")
+
+
+def test_empty_pattern_matches_the_declared_blank_and_no_filled_document():
+    """Патерн порожнечі мусить збігатися з ПОРОЖНІМ бланком (інакше він
+    написаний під щось інше й не спрацює ніколи -- це ловить валідатор) і НЕ
+    збігатися з жодним заповненим документом (інакше він забирав би дані)."""
+    blank = blank_template_text(_leave)
+    assert blank, "бланк не читається -- тест нічого не міряє"
+    declared = [f for f in _leave["fields"] if f.get(EMPTY_PATTERN_KEY)]
+    assert declared, "жодного оголошеного empty_pattern -- тест нічого не міряє"
+    for field in declared:
+        assert slot_is_provably_empty(field, blank), (
+            f"{field['name']}: скелет порожнечі не знайдено в порожньому бланку")
+    for path in sorted(glob.glob(os.path.join(LEAVE_DOCX, "*.docx"))):
+        if os.path.basename(path) == "LEAVE-011.docx":
+            continue          # навмисно порожній -- єдиний, де збіг очікується
+        text, _blocks = extract_docx_blocks(path)
+        for field in declared:
+            assert not slot_is_provably_empty(field, text), (
+                f"{os.path.basename(path)}/{field['name']}: скелет порожнечі "
+                "збігся в ЗАПОВНЕНОМУ документі")
+
+
+def test_found_value_beats_the_emptiness_proof():
+    """Значення важливіше за доказ порожнечі: якщо детермінований шлях щось
+    знайшов, скіп не має права стерти результат. Інакше двосторінковий бланк
+    (друга, незаповнена копія тих самих полів) забирав би знайдені дати."""
+    text, blocks = extract_docx_blocks(FULL)
+    # Той самий текст, до якого ДОПИСАНО порожній скелет: значення в документі
+    # є, доказ порожнечі теж збігається.
+    tail = "\nз “____” ________________ 20___ р.  по “____” ________________ 20___ р.\n"
+    results = extract_document(_leave, text + tail, blocks, _dicts,
+                               llm_extract_batch=lambda *a, **k: {},
+                               title_phrases=schema_title_phrases(_leave),
+                               batch_size=4)
+    for name in ("leave_start_date", "leave_end_date_planned"):
+        assert results[name][0] is not None, (
+            f"{name}: знайдене значення стерто доказом порожнечі")
+        assert results[name][1] == "matched"
 
 
 def test_foreign_edition_loses_nothing_to_the_cutter():
@@ -166,7 +230,8 @@ def test_reviewer_sees_the_signal_not_silence():
     results, _calls = _run(EMPTY)
     for name in _skipped(results):
         signal = results[name][1].split(":", 1)[1]
-        assert signal in set(PROVEN_EMPTY_REASONS) | {"printed_hint"}, signal
+        assert signal in set(PROVEN_EMPTY_REASONS) | {"printed_hint",
+                                                       "empty_pattern"}, signal
 
 
 # --- 3. Межа: скіп це «не питали», а не «вирішили» -------------------------
@@ -190,6 +255,55 @@ def test_skipped_field_never_carries_a_value_on_any_corpus():
                     f"{os.path.basename(path)}/{name}: слот оголошено порожнім, "
                     f"але поле несе значення {results[name][0]!r}")
     assert checked, "жодного скіпу на корпусі -- тест нічого не перевірив"
+
+
+# --- 4. Валідатор схем: недіючий патерн мусить бути ПОМИЛКОЮ --------------
+
+def test_validator_rejects_pattern_that_the_blank_does_not_contain():
+    """Скелет порожнечі існує в порожньому бланку за визначенням. Патерн, який
+    у ньому не збігається, написаний під щось інше й не спрацює НІКОЛИ -- поле
+    й далі витрачало б виклик моделі на відомо порожній слот, і ніде не було б
+    жодного сигналу про це."""
+    broken = dict(_leave, fields=[
+        dict(f, **{EMPTY_PATTERN_KEY: "цього рядка в бланку немає"})
+        if f["name"] == "leave_start_date" else f
+        for f in _leave["fields"]])
+    problems = validate_schema(broken)
+    assert any(sev == "error" and EMPTY_PATTERN_KEY in msg
+               and "blank_template" in msg for sev, msg in problems), problems
+
+
+def test_validator_rejects_pattern_on_a_field_that_never_calls_the_model():
+    """`empty_pattern` на derived_from-полі не діє ніколи: таке поле в LLM не
+    їде взагалі. Мовчки проігнороване налаштування -- рівно те, від чого
+    захищає валідатор схем."""
+    derived = next(f for f in _leave["fields"]
+                   if f.get("extraction") == "derived_from")
+    broken = dict(_leave, fields=[
+        dict(f, **{EMPTY_PATTERN_KEY: "терміном"}) if f is derived else f
+        for f in _leave["fields"]])
+    problems = validate_schema(broken)
+    assert any(sev == "error" and EMPTY_PATTERN_KEY in msg
+               for sev, msg in problems), problems
+
+
+def test_validator_rejects_invalid_regex():
+    broken = dict(_leave, fields=[
+        dict(f, **{EMPTY_PATTERN_KEY: "(незакрита дужка"})
+        if f["name"] == "leave_start_date" else f
+        for f in _leave["fields"]])
+    problems = validate_schema(broken)
+    assert any(sev == "error" and "невалідний" in msg for sev, msg in problems)
+
+
+def test_real_schemas_have_no_empty_pattern_complaints():
+    """Обидві робочі схеми проходять валідатор без НОВИХ помилок -- інакше
+    build_resources виключив би схему з набору, і всі документи шаблону пішли
+    б в unresolved."""
+    for schema in _schemas:
+        errors = [msg for sev, msg in validate_schema(schema)
+                  if sev == "error"]
+        assert not errors, errors
 
 
 if __name__ == "__main__":

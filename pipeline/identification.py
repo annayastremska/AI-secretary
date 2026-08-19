@@ -23,9 +23,11 @@ from pipeline.extraction.blank_form import (
     BLANK_TEMPLATE_KEY,
     blank_line_coverage,
     blank_template_path,
+    blank_template_text,
     printed_cutters,
 )
 from pipeline.extraction.extract import (
+    EMPTY_PATTERN_KEY,
     EXTRACTION_LIMITS_KEY,
     KNOWN_EXTRACTION_LIMITS,
     NAME_PART_ROLES,
@@ -439,6 +441,48 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
             err(f"поле '{name}': type: category без ключа category")
 
         mode = field.get("extraction")
+
+        # `empty_pattern:` -- схемний доказ ПОРОЖНЬОГО слота (R2-П5-Б).
+        # Перевіряється ДО `continue` за deferred/None нижче навмисно: ключ,
+        # оголошений на полі, яке в LLM не їде взагалі, не дасть жодного
+        # ефекту -- а мовчки недіюче налаштування це рівно те, від чого
+        # захищає весь цей валідатор.
+        declared_empty = field.get(EMPTY_PATTERN_KEY)
+        if declared_empty is not None:
+            patterns = ([declared_empty] if isinstance(declared_empty, str)
+                        else declared_empty)
+            if (not isinstance(patterns, list)
+                    or not patterns
+                    or not all(isinstance(p, str) and p.strip() for p in patterns)):
+                err(f"поле '{name}': {EMPTY_PATTERN_KEY} мусить бути непорожнім "
+                    "рядком або списком непорожніх рядків")
+                patterns = []
+            if mode is None or mode == "derived_from" or \
+                    field.get("priority") == "deferred":
+                err(f"поле '{name}': {EMPTY_PATTERN_KEY} на полі з режимом "
+                    f"'{mode}' (або deferred) не діє -- таке поле в LLM не "
+                    "їде, тобто скіпати нема чого")
+            elif field.get("llm_fallback") is False:
+                warn(f"поле '{name}': {EMPTY_PATTERN_KEY} разом із "
+                     "llm_fallback: false -- фолбеку й так немає, ключ лише "
+                     "додає провенанс confirmed_empty_slot")
+            blank_text = blank_template_text(schema)
+            for pattern in patterns:
+                try:
+                    compiled = re.compile(pattern)
+                except re.error as exc:
+                    err(f"поле '{name}': невалідний {EMPTY_PATTERN_KEY} ({exc})")
+                    continue
+                # Скелет порожнечі ІСНУЄ в порожньому бланку за визначенням.
+                # Якщо він там не збігається -- патерн написаний під щось інше
+                # й не спрацює НІКОЛИ, а поле й далі витрачатиме виклик моделі
+                # на відомо порожній слот (заміряно: 89-198 с на групу).
+                if blank_text and not compiled.search(blank_text):
+                    err(f"поле '{name}': {EMPTY_PATTERN_KEY} не збігається з "
+                        f"оголошеним blank_template -- скелет порожнього слота "
+                        "мусить бути в порожньому бланку, інакше патерн мовчки "
+                        "не діяв би ніколи")
+
         if field.get("priority") == "deferred" or mode is None:
             continue
         if mode not in EXTRACTION_REQUIRED_KEYS:

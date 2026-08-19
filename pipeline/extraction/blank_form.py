@@ -102,6 +102,29 @@ def printed_lines(schema: dict) -> frozenset:
     return result
 
 
+_text_cache = {}
+
+
+def blank_template_text(schema: dict) -> str:
+    """Суцільний текст порожнього бланка (рядки через `\\n`), або "" якщо
+    схема шаблону не оголосила.
+
+    Потрібен валідатору схем: `empty_pattern:` -- це друкований СКЕЛЕТ
+    порожнього слота, тобто він за визначенням існує в порожньому бланку.
+    Патерн, який у ньому не збігається, написаний неправильно й мовчки не
+    діяв би ніколи (та сама логіка, що для перевірки blank_template вище).
+    Читається тим самим `_read_lines`, що й решта модуля -- інакше валідатор
+    перевіряв би текст, якого рушій не бачить."""
+    path = blank_template_path(schema)
+    if not path:
+        return ""
+    cached = _text_cache.get(path)
+    if cached is None:
+        cached = "\n".join(_read_lines(path))
+        _text_cache[path] = cached
+    return cached
+
+
 _order_cache = {}
 
 
