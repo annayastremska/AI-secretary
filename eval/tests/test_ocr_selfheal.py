@@ -146,7 +146,7 @@ class _FakeManager:
 
 
 @contextlib.contextmanager
-def _fake_surya(attempts, healthy):
+def _fake_surya(attempts, healthy, reader_kwargs=None):
     """attempts -- список результатів послідовних спроб розпізнавання, кожен
     список рядків. healthy -- що віддасть `/health`: True/False, або None щоб
     зробити перевірку неможливою (probe_health кине виняток).
@@ -181,6 +181,15 @@ def _fake_surya(attempts, healthy):
     backends = types.ModuleType("surya.inference.backends")
     spawn = types.ModuleType("surya.inference.backends.spawn")
     spawn.probe_health = _probe_health
+    # Бекенд llamacpp -- у ньому make_surya_reader обмежує max_retries
+    # (партіал поверх імені модуля, бо env-ручки в surya немає). Стаб мусить
+    # його мати, інакше тест перевіряв би реader без цієї гілки.
+    llamacpp = types.ModuleType("surya.inference.backends.llamacpp")
+
+    def _fake_chat_completions_batch(batch, max_retries=3, **kwargs):
+        return []
+
+    llamacpp.chat_completions_batch = _fake_chat_completions_batch
     recognition = types.ModuleType("surya.recognition")
     recognition.RecognitionPredictor = lambda mgr: _predictor
 
@@ -190,13 +199,14 @@ def _fake_surya(attempts, healthy):
         "surya.inference": inference,
         "surya.inference.backends": backends,
         "surya.inference.backends.spawn": spawn,
+        "surya.inference.backends.llamacpp": llamacpp,
         "surya.recognition": recognition,
     }
     saved = {name: sys.modules.get(name) for name in fakes}
     saved_env = os.environ.get("SURYA_INFERENCE_PARALLEL")
     sys.modules.update(fakes)
     try:
-        yield make_surya_reader(), manager
+        yield make_surya_reader(**(reader_kwargs or {})), manager
     finally:
         for name, module in saved.items():
             if module is None:
@@ -318,6 +328,35 @@ def test_grammar_400_document_is_honestly_empty_not_silently_lost():
 
 
 # --- Частина 4: сама перевірка здоров'я ------------------------------------
+
+def test_recognition_max_retries_is_capped_via_backend_patch():
+    """R1-№4: env-ручки для max_retries у surya немає (літерал 3 у сигнатурі
+    chat_completions_batch), тому ЯВНО заданий конфігом ліміт
+    make_surya_reader застосовує партіалом поверх імені в модулі бекенда.
+    Без цієї перевірки перейменування в surya тихо повернуло б дефолтні
+    3 повтори по ~хвилинах на патологічному кадрі."""
+    import functools
+    with _fake_surya(attempts=[["текст"]], healthy=True,
+                     reader_kwargs={"recognition_max_retries": 1}):
+        backend = sys.modules["surya.inference.backends.llamacpp"]
+        patched = backend.chat_completions_batch
+        assert isinstance(patched, functools.partial)
+        assert patched.keywords.get("max_retries") == 1
+        # Оригінал збережено -- повторний make_surya_reader у тому самому
+        # процесі не завертає partial у partial.
+        assert not isinstance(backend._unpatched_chat_completions_batch,
+                              functools.partial)
+
+
+def test_recognition_max_retries_untouched_by_default():
+    """Дефолт -- НЕ чіпати surya: стеля/ліміт повторів відкочені за
+    результатом заміру якості (p2-execution.md розд. 2). Без явного конфігу
+    chat_completions_batch лишається оригіналом."""
+    import functools
+    with _fake_surya(attempts=[["текст"]], healthy=True):
+        backend = sys.modules["surya.inference.backends.llamacpp"]
+        assert not isinstance(backend.chat_completions_batch, functools.partial)
+
 
 def test_health_of_returns_none_when_there_is_nothing_to_ask():
     """Немає backend/handle/base_url -> None («не змогли перевірити»), і НЕ

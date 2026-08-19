@@ -30,6 +30,23 @@ DEFAULT_INFERENCE_PARALLEL = "2"
 # (ggml-org/llama.cpp#22629): для OCR-навантаження кеш марний за побудовою.
 DEFAULT_CACHE_RAM_MB = "0"
 
+# Guided decoding (JSON-схема) для layout-проходу (env SURYA_GUIDED_LAYOUT;
+# дефолт surya true). На бекенді llama.cpp зламаний ЗАВЖДИ: `\d` у схемі не
+# парситься в GBNF (400 failed to parse grammar), тому поблоковий запасний
+# шлях -- єдиний вихід для кадру, чий повносторінковий прохід не вдався, --
+# без цього не працює взагалі (давав «unresolved, 2 поля» замість тексту).
+DEFAULT_GUIDED_LAYOUT = "0"
+
+# СВІДОМО БЕЗ дефолтів пайплайна (None = не чіпати surya: стеля 12288,
+# 3 повтори): стеля `SURYA_MAX_TOKENS_FULL_PAGE=3072` + `max_retries=1`
+# давали 2.4-4.7× на патологічному кадрі (LEAVE-011: 1814 с -> 749 с), але
+# ЗАМІРЯНЕ просідання якості: примусовий поблоковий шлях віддає інший
+# порядок блоків, і детермінований витяг на ньому взяв ПІБ командира за
+# суб'єкта документа з довірою 0.9 (leave/png 154/154 -> 150/154,
+# p2-execution.md розд. 2). Тиха чужа ідентичність дорожча за 18 хвилин.
+# Ручки лишаються в конфізі для експериментів -- вмикати лише з передзаміром
+# якості на повному корпусі.
+
 # Змінна середовища surya, якою МОЖНА відправити зображення документів на чужу
 # машину: якщо вона виставлена, surya не піднімає локальний сервер, а
 # під'єднується до вказаного URL
@@ -136,7 +153,8 @@ def _health_of(manager):
 
 def make_surya_reader(llama_server_path=None, inference_parallel=None,
                       n_gpu_layers=None, hub_offline=False,
-                      cache_ram_mb=None):
+                      cache_ram_mb=None, max_tokens_full_page=None,
+                      guided_layout=None, recognition_max_retries=None):
     """Повертає callable(image_path) -> list[{"text","bbox"}].
 
     Модель вантажиться один раз на процес (замикання), не на кожен файл --
@@ -184,6 +202,16 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None,
     if cache_ram_mb is None:
         cache_ram_mb = DEFAULT_CACHE_RAM_MB
     os.environ["LLAMA_ARG_CACHE_RAM"] = str(cache_ram_mb)
+    # Стеля токенів повносторінкового проходу: лише ЯКЩО задана конфігом --
+    # дефолт surya не чіпаємо (чому: коментар «СВІДОМО БЕЗ дефолтів» вище).
+    if max_tokens_full_page is not None:
+        os.environ["SURYA_MAX_TOKENS_FULL_PAGE"] = str(max_tokens_full_page)
+    if guided_layout is None:
+        guided_layout = DEFAULT_GUIDED_LAYOUT
+    # bool з YAML -> "0"/"1", бо pydantic-settings surya парсить рядок.
+    if isinstance(guided_layout, bool):
+        guided_layout = int(guided_layout)
+    os.environ["SURYA_GUIDED_LAYOUT"] = str(guided_layout)
     if llama_server_path:
         os.environ["LLAMA_CPP_BINARY"] = llama_server_path
     # `is not None`, а не `if n_gpu_layers`: 0 -- це осмислене значення
@@ -195,6 +223,34 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None,
     from PIL import Image, ImageOps
     from surya.inference import SuryaInferenceManager
     from surya.recognition import RecognitionPredictor
+
+    # Ліміт повторів розпізнавання: env-ручки в surya НЕМАЄ (літерал 3 у
+    # сигнатурі chat_completions_batch), тому partial поверх імені в модулі
+    # бекенда -- llamacpp.py викликає функцію через ВЛАСНИЙ неймспейс
+    # (`from ... import chat_completions_batch` на рівні модуля), тож заміна
+    # атрибута модуля діє на всі виклики. Оригінал зберігається окремим
+    # атрибутом, щоб повторний make_surya_reader у тому самому процесі не
+    # завертав partial у partial.
+    _llamacpp_backend = None
+    if recognition_max_retries is not None:
+        # Ліміт застосовується лише ЯКЩО заданий конфігом (дефолт -- не
+        # чіпати surya): чому -- коментар «СВІДОМО БЕЗ дефолтів» вище.
+        try:
+            import surya.inference.backends.llamacpp as _llamacpp_backend
+        except ImportError:
+            # Інша структура surya (оновлення, підставна surya в тестах) --
+            # ліміт не застосовується, але НЕ мовчки.
+            print("[OCR] surya.inference.backends.llamacpp не імпортується -- "
+                  "ліміт повторів розпізнавання НЕ застосовано (дефолт surya: 3)",
+                  file=sys.stderr)
+    if _llamacpp_backend is not None:
+        import functools
+        _orig_batch = getattr(_llamacpp_backend,
+                              "_unpatched_chat_completions_batch",
+                              None) or _llamacpp_backend.chat_completions_batch
+        _llamacpp_backend._unpatched_chat_completions_batch = _orig_batch
+        _llamacpp_backend.chat_completions_batch = functools.partial(
+            _orig_batch, max_retries=int(recognition_max_retries))
 
     manager = SuryaInferenceManager()
     predictor = RecognitionPredictor(manager)

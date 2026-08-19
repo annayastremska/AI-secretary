@@ -82,6 +82,19 @@ DEFAULTS = {
         # (docs/improvement-2026-08-15/r1-ocr.md, №3). null тут означає «наш
         # дефолт 0» (surya_reader.DEFAULT_CACHE_RAM_MB), не «дефолт сервера».
         "cache_ram_mb": None,
+        # Guided decoding для layout-проходу surya. null = дефолт пайплайна
+        # ВИМКНЕНО (surya_reader.DEFAULT_GUIDED_LAYOUT): на llama.cpp
+        # guided-схема layout зламана завжди (`\d` у GBNF не парситься) і
+        # блокує запасний поблоковий шлях розпізнавання.
+        "guided_layout": None,
+        # Експериментальні ручки патологічного кадру (цикл повторів,
+        # weak-spots 2.19). null = НЕ чіпати дефолти surya (стеля 12288,
+        # 3 повтори). Стеля 3072 + 1 повтор давали 2.4× на кадрі LEAVE-011,
+        # але з заміряним просіданням якості (154/154 -> 150/154: примусовий
+        # поблоковий шлях -> чужий ПІБ з довірою 0.9) -- вмикати лише з
+        # передзаміром якості (p2-execution.md розд. 2).
+        "max_tokens_full_page": None,
+        "recognition_max_retries": None,
         # HF_HUB_OFFLINE=1 для surya: заборонити їй звертатись до HuggingFace
         # за власними файлами моделі. Документів у тих запитах немає, але
         # мережевий виклик є. false за замовчуванням -- на машині без

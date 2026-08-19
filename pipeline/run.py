@@ -185,7 +185,10 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
                                            cfg["ocr"].get("inference_parallel"),
                                            n_gpu_layers=cfg["ocr"].get("n_gpu_layers"),
                                            hub_offline=cfg["ocr"].get("hub_offline", False),
-                                           cache_ram_mb=cfg["ocr"].get("cache_ram_mb"))
+                                           cache_ram_mb=cfg["ocr"].get("cache_ram_mb"),
+                                           max_tokens_full_page=cfg["ocr"].get("max_tokens_full_page"),
+                                           guided_layout=cfg["ocr"].get("guided_layout"),
+                                           recognition_max_retries=cfg["ocr"].get("recognition_max_retries"))
         except Exception as exc:
             res["warnings"].append(f"OCR недоступний ({type(exc).__name__}: {exc}) -- зображення не обробляться")
 
