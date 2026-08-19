@@ -184,7 +184,8 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
             res["ocr"] = make_surya_reader(cfg["ocr"].get("llama_server_path"),
                                            cfg["ocr"].get("inference_parallel"),
                                            n_gpu_layers=cfg["ocr"].get("n_gpu_layers"),
-                                           hub_offline=cfg["ocr"].get("hub_offline", False))
+                                           hub_offline=cfg["ocr"].get("hub_offline", False),
+                                           cache_ram_mb=cfg["ocr"].get("cache_ram_mb"))
         except Exception as exc:
             res["warnings"].append(f"OCR недоступний ({type(exc).__name__}: {exc}) -- зображення не обробляться")
 

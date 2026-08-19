@@ -75,6 +75,13 @@ DEFAULTS = {
         # усіх. Заміри обох режимів --
         # docs/research/2026-08-14_ocr-ngl0-control-run.md.
         "n_gpu_layers": None,
+        # Host prompt cache внутрішнього llama-server Surya, МіБ
+        # (env LLAMA_ARG_CACHE_RAM; дефолт самого сервера 8192). 0 = вимкнено:
+        # в OCR кожен промпт містить унікальне зображення, кеш не має влучень
+        # і монотонно ріс +170…195 МБ/фото, впираючи пакет у стіну RAM
+        # (docs/improvement-2026-08-15/r1-ocr.md, №3). null тут означає «наш
+        # дефолт 0» (surya_reader.DEFAULT_CACHE_RAM_MB), не «дефолт сервера».
+        "cache_ram_mb": None,
         # HF_HUB_OFFLINE=1 для surya: заборонити їй звертатись до HuggingFace
         # за власними файлами моделі. Документів у тих запитах немає, але
         # мережевий виклик є. false за замовчуванням -- на машині без

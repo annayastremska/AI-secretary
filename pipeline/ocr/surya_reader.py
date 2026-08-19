@@ -20,6 +20,16 @@ _BR_RE = re.compile(r"<br\s*/?>")
 
 DEFAULT_INFERENCE_PARALLEL = "2"
 
+# Host prompt cache внутрішнього llama-server (МіБ, env LLAMA_ARG_CACHE_RAM;
+# дефолт самого сервера -- 8192, PR ggml-org/llama.cpp#16391). 0 = вимкнено,
+# і це НАШ дефолт: сервер серіалізує KV-стан кожного унікального промпту, а в
+# OCR кожен промпт містить УНІКАЛЬНЕ зображення, тож кеш не має жодного
+# влучення й монотонно росте -- заміряно +170…195 МБ/фото (виглядало як витік,
+# docs/improvement-2026-08-15/r1-ocr.md, №3), з вимкненим кешем -- +0.3 МБ/фото
+# без зміни часу і якості. Апстрім закрив це як «not planned»
+# (ggml-org/llama.cpp#22629): для OCR-навантаження кеш марний за побудовою.
+DEFAULT_CACHE_RAM_MB = "0"
+
 # Змінна середовища surya, якою МОЖНА відправити зображення документів на чужу
 # машину: якщо вона виставлена, surya не піднімає локальний сервер, а
 # під'єднується до вказаного URL
@@ -125,7 +135,8 @@ def _health_of(manager):
 
 
 def make_surya_reader(llama_server_path=None, inference_parallel=None,
-                      n_gpu_layers=None, hub_offline=False):
+                      n_gpu_layers=None, hub_offline=False,
+                      cache_ram_mb=None):
     """Повертає callable(image_path) -> list[{"text","bbox"}].
 
     Модель вантажиться один раз на процес (замикання), не на кожен файл --
@@ -143,6 +154,10 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None,
     має `ggml-vulkan.dll`, тому 99 означає інференс на вбудованій графіці, а в
     логах смерті сервера стоїть `vk::ErrorDeviceLost`. `0` дає чистий CPU.
     Див. docs/research/2026-08-14_ocr-ngl0-control-run.md.
+
+    cache_ram_mb: ліміт host prompt cache внутрішнього сервера в МіБ
+    (`LLAMA_ARG_CACHE_RAM`). `None` -> наш дефолт 0 (вимкнено) -- див.
+    DEFAULT_CACHE_RAM_MB: для OCR кеш не дає влучень і лише з'їдає RAM.
 
     hub_offline: виставити `HF_HUB_OFFLINE=1`, тобто заборонити surya звертатись
     до HuggingFace за власними файлами моделі («You are sending unauthenticated
@@ -162,6 +177,13 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None,
     if inference_parallel is None:
         inference_parallel = DEFAULT_INFERENCE_PARALLEL
     os.environ["SURYA_INFERENCE_PARALLEL"] = str(inference_parallel)
+    # Той самий патерн, що для SURYA_INFERENCE_PARALLEL: явне присвоєння
+    # (конфіг мусить описувати те, що реально працює), `is None` -- щоб явно
+    # заданий 0 не плутався з «не задано». Чому дефолт 0 -- коментар до
+    # DEFAULT_CACHE_RAM_MB.
+    if cache_ram_mb is None:
+        cache_ram_mb = DEFAULT_CACHE_RAM_MB
+    os.environ["LLAMA_ARG_CACHE_RAM"] = str(cache_ram_mb)
     if llama_server_path:
         os.environ["LLAMA_CPP_BINARY"] = llama_server_path
     # `is not None`, а не `if n_gpu_layers`: 0 -- це осмислене значення
