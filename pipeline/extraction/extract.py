@@ -1470,6 +1470,40 @@ UNANCHORED_MODES = ("regex", "rank_and_name_tokenized")
 #: `matched`.
 UNVERIFIED_METHOD = "unverified_foreign_edition"
 
+#: Провенанс поля, чий слот на бланку ДОВЕДЕНО порожній детермінованим
+#: сигналом (R2-П5-А, docs/improvement-2026-08-15/r2-llm.md розд. 5.5).
+#: Після двокрапки -- сам сигнал: blank_value (у слоті placeholder),
+#: printed_form_text (кандидат цілком з друкованих рядків бланка),
+#: printed_hint (підказка локалізованої прогалини -- друкований рядок
+#: бланка, вписаного значення немає), empty_pattern (схемний доказ, П5-Б).
+#:
+#: Таке поле НЕ йде в LLM-фолбек, і це не економія навмання: модель бачить
+#: ТОЙ САМИЙ OCR-текст, у якому значення немає, а заземлення відкидає все,
+#: чого в тексті немає, -- тобто єдина «легальна» відповідь моделі тут null
+#: (заміряно: 12B віддала null у 8/8 полів LEAVE-011, її єдина вигадка
+#: відкинута заземленням). Скіп ще й БЛОКУЄ клас помилки: категоріальні
+#: поля заземленню не підлягають за побудовою (GROUNDED_TYPES без category),
+#: і вигадане звання в порожній ПІБ-групі пройшло б у результат.
+#:
+#: Поле при цьому ЛИШАЄТЬСЯ невирішеним (unknown_fields /
+#: unknown_critical_fields у build_record -- як і коли LLM чесно віддавала
+#: null): порожнє КРИТИЧНЕ поле так само лишає документ needs_review, бо
+#: «слот порожній» -- висновок різака, а підтвердити порожнечу має людина
+#: (чернетка ≠ факт). Міняється лише маршрутизація (без виклику моделі) і
+#: видимість причини для рев'юера.
+#:
+#: Межа чесності: сигнали вимагають ЛОКАЛІЗОВАНОГО слота. «Слот не знайдено»
+#: (no_label / no_value / чужа редакція бланка) лишається в LLM за побудовою
+#: -- на реальному фото слот може бути не знайдений, а не порожній
+#: (перевірено на штучній чужій редакції: жоден сигнал не вистрілює).
+CONFIRMED_EMPTY_SLOT_METHOD = "confirmed_empty_slot"
+
+#: Причини validate_*_value, які ДОВОДЯТЬ порожнечу локалізованого слота
+#: (а не лише підозру): обидві означають «місце поля знайдено, у ньому --
+#: сам бланк». Підозрілі причини (oversized_block_suspect, type_mismatch,
+#: printed_label_in_value) навмисно НЕ тут: там кандидат є, і фолбек законний.
+PROVEN_EMPTY_REASONS = ("blank_value", "printed_form_text")
+
 #: Провенанс ПІБ, у якому після по батькові лишилися неспожиті токени
 #: (R-B1-02: «ЛЕМЕШКО Соломія Мустафа кизи» -- 4-й токен частина імені, не
 #: сміття). Позиційний розріз after[0]/after[1] тут ненадійний за побудовою,
@@ -1576,6 +1610,14 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 results[name] = (None, f"rank_not_in_dictionary:{leftover}")
                 hints[name] = rank_raw_line or ""
                 localized_gaps.append(name)
+            elif rank_raw_line and is_printed_form_text(rank_raw_line, printed):
+                # Локалізована прогалина, чия підказка -- ДРУКОВАНИЙ рядок
+                # бланка: лейбл знайдено, «значенням» перед ним стоїть сам
+                # бланк, тобто вписаного значення немає (заміряний випадок --
+                # порожня ПІБ-група LEAVE-011: підказкою був рядок «Відмітка
+                # про постановку на облік...», і 12B чесно віддавала null за
+                # 98-372 с). Третій сигнал П5-А: модель не питаємо.
+                results[name] = (None, f"{CONFIRMED_EMPTY_SLOT_METHOD}:printed_hint")
             else:
                 results[name] = (None, rank_label_reason if rank_label_reason != "matched" else "no_value")
                 # рядок знайдено, не вдався лише розбір -> локалізована прогалина
@@ -1617,14 +1659,27 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 # кандидат -- це якраз НЕПРАВИЛЬНИЙ текст).
                 value, value_reason = validate_block_value(
                     field, raw, label_heads, printed)
-                results[name] = (value, value_reason)
-                if value is None:
-                    global_gaps.append(name)
+                if value is None and value_reason in PROVEN_EMPTY_REASONS:
+                    # Слот знайдено, у ньому -- сам бланк: відповідь відома
+                    # детерміновано, модель не питаємо (див.
+                    # CONFIRMED_EMPTY_SLOT_METHOD).
+                    results[name] = (None,
+                                     f"{CONFIRMED_EMPTY_SLOT_METHOD}:{value_reason}")
+                else:
+                    results[name] = (value, value_reason)
+                    if value is None:
+                        global_gaps.append(name)
 
         elif mode == "regex":
             value, reason = extract_field_regex(field, ocr_text)
             if value is not None:
                 value, reason = validate_regex_value(field, value, printed)
+            if value is None and reason in PROVEN_EMPTY_REASONS:
+                # Патерн зматчив сам порожній слот / друкований рядок форми --
+                # доведено-порожньо, фолбек не потрібен (те саме правило, що
+                # для block_before_label вище).
+                results[name] = (None, f"{CONFIRMED_EMPTY_SLOT_METHOD}:{reason}")
+                continue
             results[name] = (value, reason)
             if value is None and field.get("llm_fallback") is not False:
                 # Regex -- найкрихкіший режим (паттерн пишеться під конкретну
