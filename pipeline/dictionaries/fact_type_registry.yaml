@@ -99,3 +99,12 @@ fact_types:
   - code: travel_document
     label: Військові перевізні документи
     validity_model: permanent_event
+
+  # Схемо-вільний витяг для невідомої форми (docs/open-questions.md, п.1):
+  # жоден бланк не впізнано, LLM дістала що бачила за загальною схемою
+  # (pipeline/run.py, FREEFORM_SCHEMA). permanent_event -- не про стан
+  # особи, тому ranged/current_state тут не мають сенсу; facts.confirmed
+  # завжди false, доки людина не підтвердить.
+  - code: unrecognized
+    label: Нерозпізнаний запис (потребує підтвердження людини)
+    validity_model: permanent_event

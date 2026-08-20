@@ -50,6 +50,99 @@ from pipeline.subject_kind import (
 
 SUPPORTED_EXTS = DOCX_EXTS + PDF_EXTS + IMAGE_EXTS
 
+# Причини identify_template, за яких документ дійсно СХОЖИЙ на факт-документ
+# без відомої схеми (а не на щось, для чого схема принципово не потрібна чи
+# небезпечна). "procedural_document" -- нормативний текст, суб'єкта немає за
+# визначенням; "multiple_templates_matched" -- джерело з кількома додатками,
+# не сам бланк; "ambiguous" -- ДВА відомих бланки набрали однаковий бал, тут
+# питання "який із двох", а не "що це взагалі". Жодному з трьох вільний
+# витяг не допоможе -- лише "no_template_match"/"below_llm_floor" означають
+# "жодного відомого бланка, і ЖОДНОГО сигналу чому" (docs/open-questions.md,
+# ідея "схемо-вільний витяг для невідомої форми", п.1).
+FREEFORM_ELIGIBLE_REASONS = {"no_template_match", "below_llm_floor"}
+
+# Схема НЕ лежить у pipeline/schemas/*.yaml навмисно: тоді вона потрапила б у
+# load_schemas() і бала б проти анкорів у identify_template (score_schema) --
+# 0 анкорів означає 0 балів, тобто вона ніколи не переміг би, але вона й не
+# мусить туди потрапляти взагалі: це не бланк, який пайплайн впізнає, а
+# аварійний вихід ПІСЛЯ того, як жоден бланк не впізнано.
+#
+# Кожне поле -- extraction: llm без label_before/regex: детермінований прохід
+# для них не спрацює за визначенням (ми не знаємо верстки), тож усі йдуть
+# одним-двома LLM-групами (build_json_schema_for_fields), а `note` -- єдина
+# підказка моделі, що взагалі означає це поле (llm/client.py:171).
+#
+# criticality: "optional" на КОЖНОМУ полі свідомо: цей запис ЗАВЖДИ
+# needs_review (нижче, безумовно), тож "критичне поле відсутнє" нічого не
+# додає рев'юеру понад сам факт "форма невідома" -- лише роздуло б
+# unknown_critical_fields шумом на записі, де відсутність будь-якого поля --
+# норма, не сигнал.
+FREEFORM_SCHEMA = {
+    "template": "unrecognized",
+    "fact_type": "unrecognized",
+    # СПРОБУВАНО й ВІДКОЧЕНО (20.08.2026): виокремлення дат в окремий батч
+    # (FREEFORM_BATCH_SIZE=2, дати першими) мало на меті вирішити систематичну
+    # пропажу date_start/date_end (заміряно на всіх 3 holdout-документах зі
+    # звичайним порядком). Дати не виправились -- лишились no_value і в
+    # новому групуванні, тож гіпотеза "змішаний батч розсіює увагу" не
+    # підтвердилась (чи, принаймні, не нею проблема вирішується). А зміна
+    # складу груп ЗЛАМАЛА поле, що раніше працювало: ПІБ у давальному
+    # відмінку (holdout-02) під новим групуванням почав відхилятись
+    # заземленням (ungrounded_llm_value) замість нормалізації. Той самий
+    # клас побічного ефекту, що і з рядковим детектором Surya -- одну
+    # прогалину закрили, дві нові відкрили, тому лишено як БУЛО.
+    # Пропажа дат лишається відкритою, задокументованою прогалиною --
+    # запис і так завжди needs_review, людина побачить дати в сирому тексті.
+    "fields": [
+        {"name": "person_rank", "type": "text", "extraction": "llm",
+         "db_target": "person", "part": "rank", "criticality": "optional",
+         "note": "Військове звання особи, про яку йдеться в документі, якщо є"},
+        {"name": "person_surname", "type": "text", "extraction": "llm",
+         "db_target": "person", "part": "surname", "criticality": "optional",
+         "note": "Прізвище особи, про яку йдеться в документі, якщо є"},
+        {"name": "person_given_name", "type": "text", "extraction": "llm",
+         "db_target": "person", "part": "given_name", "criticality": "optional",
+         "note": "Ім'я особи, про яку йдеться в документі, якщо є"},
+        {"name": "person_patronymic", "type": "text", "extraction": "llm",
+         "db_target": "person", "part": "patronymic", "criticality": "optional",
+         "note": "По батькові особи, якщо вказано"},
+        {"name": "date_start", "type": "date", "extraction": "llm",
+         "db_target": "fact_date_start", "criticality": "optional",
+         "note": "Дата початку періоду або дата самої події, якщо є"},
+        {"name": "date_end", "type": "date", "extraction": "llm",
+         "db_target": "fact_date_end", "criticality": "optional",
+         "note": "Дата завершення періоду, якщо є (інакше немає)"},
+        # Було "своїми словами, без дат і чисел" -- і це суперечило заземленню
+        # (extract.ground_llm_value): парафраз за визначенням не збігається
+        # буквально з текстом, тож ЗАВЖДИ відхилявся як "ungrounded_llm_value"
+        # (заміряно на holdout-01). Назва/заголовок документа -- майже завжди
+        # написана буквально В САМОМУ документі (як і "звільнена"/лейбли на
+        # наших звичайних бланках), тож проходить заземлення чесно, а не через
+        # послаблення самої перевірки.
+        {"name": "document_title", "type": "text", "extraction": "llm",
+         "db_target": "fact_value", "criticality": "optional",
+         "note": "Точна назва або заголовок документа, ЯК НАПИСАНО в тексті -- "
+                 "процитувати буквально, не переказувати своїми словами"},
+        {"name": "key_number", "type": "number", "extraction": "llm",
+         "db_target": "additional_info", "criticality": "optional",
+         "note": "Головне число з документа (тривалість, кількість тощо), якщо є"},
+        {"name": "place_or_unit", "type": "text", "extraction": "llm",
+         "db_target": "additional_info", "criticality": "optional",
+         "note": "Місце або назва підрозділу/установи, з яким пов'язаний документ"},
+        {"name": "document_number", "type": "text", "extraction": "llm",
+         "db_target": "additional_info", "criticality": "optional",
+         "note": "Номер самого документа, якщо вказаний"},
+        {"name": "issued_by", "type": "text", "extraction": "llm",
+         "db_target": "additional_info", "criticality": "optional",
+         "note": "Хто підписав або видав документ (посада, звання, ім'я)"},
+        {"name": "raw_notes", "type": "text", "extraction": "llm",
+         "db_target": "additional_info", "criticality": "optional",
+         "note": "Інші важливі деталі, не охоплені іншими полями (напр. діагноз, "
+                 "причина, підстава)"},
+    ],
+}
+
+
 
 def load_dictionaries(dictionaries_dir: str) -> dict:
     """Довідники визначаються за ВМІСТОМ (category + values), не за назвою
@@ -361,6 +454,84 @@ def _to_markdown(document_meta: dict, text: str) -> str:
     )
 
 
+def _build_freeform_record(text: str, blocks: list, ident: dict, base_meta: dict,
+                           source_kind, ingest_warnings: list, res: dict, cfg: dict) -> dict:
+    """Гілка "схемо-вільний витяг" (docs/open-questions.md, п.1): жоден бланк
+    не впізнано, і жодного сигналу чому -- LLM дістає що бачить за фіксованою
+    ЗАГАЛЬНОЮ схемою (FREEFORM_SCHEMA), запис ЗАВЖДИ needs_review.
+
+    Свідомо НЕ через звичайну гілку `ident["schema"] is not None` нижче: там
+    забагато гейтів, написаних під документ із ВІДОМИМ бланком
+    (template_by_llm, чужа редакція, form_recognized) -- жоден з них тут не
+    застосовний, і повторне використання тієї гілки означало б або
+    вимкнути їх усі окремо, або ризикнути, що один спрацює на випадок, на
+    який не розрахований. Тут повний вирок -- одне явне правило нижче.
+
+    Вид суб'єкта -- ЗАВЖДИ "unknown", і ЯВНО, а не через resolve_subject_kind:
+    навіть якщо грубий домен (ident["domain"]) випадково збігся зі знаним і
+    мав би мапінг на "person", це була б довіра до вгадки поверх вгадки.
+    Тут ми буквально нічого не знаємо про сам бланк -- об'єкт у реєстрі БД
+    не створюється, доки людина не підтвердить (create_subject_object: false)."""
+    llm = res["llm"]
+    llm_cfg = cfg["llm"]
+    raw_extraction = extract_document(
+        FREEFORM_SCHEMA, text, blocks, res["dictionaries"],
+        llm_extract_batch=llm.extract_batch, title_phrases=[],
+        batch_size=llm_cfg.get("batch_size", 4),
+        self_consistency_n=llm_cfg.get("self_consistency_n", 1),
+        form_recognized=True,
+    )
+    record = build_record(FREEFORM_SCHEMA, raw_extraction, res["dictionaries"])
+    for fact in record["facts"]:
+        fact["source_document_id"] = base_meta["id"]
+        # Безумовно, а не "якщо build_record не підтвердив": build_record сам
+        # рахує confirmed за критичними полями, а тут КОЖНЕ поле -- optional
+        # (коментар до FREEFORM_SCHEMA), тобто його власний вердикт завжди
+        # True. Правило продукту "форма невідома -> завжди чернетка" не може
+        # залежати від того, скільки саме полів LLM вдалося вгадати.
+        fact["confirmed"] = False
+
+    subject = _person_identity(record["subject"])
+    if not subject.get("person_complete"):
+        ingest_warnings = ingest_warnings + [
+            "неповний ПІБ (немає прізвища або імені) -- вставка в people у "
+            "БД-споживача не пройде, якщо людина підтвердить цей запис"]
+
+    return dict(
+        base_meta,
+        status="needs_review",
+        source_kind=source_kind,
+        domain=ident.get("domain"),
+        template=FREEFORM_SCHEMA["template"],
+        identification={"source": "llm_freeform", "score": ident.get("score"),
+                        "runner_up": ident.get("runner_up"),
+                        "scores": ident.get("scores"),
+                        "domain_scores": ident.get("domain_scores"),
+                        "blank_edition": None},
+        review_reason="freeform_unknown_form",
+        review_queue="unknown_type",
+        subject=subject,
+        subject_kind=UNKNOWN_SUBJECT,
+        subject_kind_source=None,
+        subject_kind_reason="freeform_extraction",
+        create_subject_object=False,
+        facts=record["facts"],
+        field_provenance=record["field_provenance"],
+        unknown_fields=record["unknown_fields"],
+        unknown_critical_fields=record["unknown_critical_fields"],
+        confirmed_empty_fields=record["confirmed_empty_fields"],
+        not_implemented_fields=record["not_implemented_fields"],
+        date_range_error=record["date_range_error"],
+        consistency_problems=record["consistency_problems"],
+        document_links=record["document_links"],
+        unresolved_values=record["unresolved_values"],
+        warnings=list(ingest_warnings) + [
+            "форма не впізнана жодною схемою -- запис зібрано вільним "
+            f"витягом LLM (reason: {ident.get('reason')}) і НЕ підтверджено; "
+            "тип факту 'unrecognized' до підтвердження людиною"],
+    )
+
+
 def process_file(path: str, res: dict, cfg: dict, force_template=None,
                  reprocess=False) -> dict:
     """Повертає document_meta. Ніколи не кидає виняток через вміст документа
@@ -453,6 +624,18 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
                  "blank_edition": blank_edition_verdict(text, forced)}
 
     if ident["schema"] is None:
+        # Схемо-вільний витяг (docs/open-questions.md, п.1) -- ЛИШЕ коли
+        # reason каже "жодного відомого бланка, і жодного сигналу чому"
+        # (FREEFORM_ELIGIBLE_REASONS вище). Нормативний текст, джерело з
+        # кількома додатками й нічия між двома ВІДОМИМИ бланками -- три різні
+        # причини, і вільний витяг жодній з них не відповідає (докстрінг
+        # _build_freeform_record).
+        if res.get("llm") is not None and ident.get("reason") in FREEFORM_ELIGIBLE_REASONS:
+            meta = _build_freeform_record(text, blocks, ident, base_meta, source_kind,
+                                          ingest_warnings, res, cfg)
+            _persist(meta, text, res)
+            return meta
+
         # Схеми немає -> рівні 2 і 3: мапінг «домен -> вид», далі (якщо ввімкнено
         # окремим прапорцем) модель. Саме тут значення `none` окупається:
         # нормативна інструкція отримує домен `normative`, вид `none` і
