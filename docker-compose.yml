@@ -37,47 +37,11 @@ services:
       - "-c"
       - "max_connections=200"
 
-  minio:
-    image: minio/minio:latest
-    container_name: milidoc-minio
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    ports:
-      - "${MINIO_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
-    volumes:
-      - ./data/minio:/data
-    command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  minio-init:
-    image: minio/mc:latest
-    container_name: milidoc-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
-      mc mb --ignore-existing local/templates &&
-      mc mb --ignore-existing local/raw-photos &&
-      mc mb --ignore-existing local/synthetic-text &&
-      mc mb --ignore-existing local/ground-truth &&
-      mc mb --ignore-existing local/ocr-output &&
-      mc mb --ignore-existing local/manual-review-cache &&
-      mc mb --ignore-existing local/exports &&
-      mc ilm rule add local/raw-photos --expire-days 30 &&
-      echo 'buckets ready'
-      "
+  # MinIO прибрано (20.08.2026). Від сховища оригіналів потрібно лише покласти
+  # файл і видалити через 30 днів -- для цього достатньо теки data/originals,
+  # а адмініструвати S3-сумісний сервіс у підрозділі нікому. 30-денне
+  # видалення тепер робить db/scripts/purge_expired_originals.py за
+  # documents.expires_at (раніше -- ILM-правило бакета).
 
   airflow-init:
     image: apache/airflow:2.10.4
@@ -95,21 +59,23 @@ services:
       # Доступ до нашої (не airflow-service) БД -- для DAG-ів, що вантажать
       # факти/документи, напр. load_ai_secretary_output.
       APP_DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ORIGINALS_DIR: /opt/airflow/originals
       # dev-зручність: doставляє пакети airflow/plugins/ai_secretary_loader.py
-      # потребує (psycopg, pyyaml, minio) без окремого custom-образу. Для
+      # потребує (psycopg, pyyaml) без окремого custom-образу. Для
       # продакшн варто перенести у власний Dockerfile.
-      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg[binary] pyyaml minio"
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg[binary] pyyaml"
     user: "${AIRFLOW_UID}:0"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      # Оригінали документів. Той самий шлях, що бачить CLI на хості, тільки
+      # змонтований -- тож raw_uri з контейнера і з хосту вказує на той самий
+      # файл. Не read-only: сюди пишемо.
+      - ./data/originals:/opt/airflow/originals
       # ТИМЧАСОВО (демо): прямий read-only доступ до виходу пайплайна Ані на
-      # цій машині. У реальному розгортанні -- MinIO чи спільний inbox, не
-      # абсолютний шлях конкретного клону.
+      # цій машині. У реальному розгортанні -- спільний inbox, не абсолютний
+      # шлях конкретного клону.
       - D:/AI-secretary-anya/data/output/documents:/opt/airflow/ai_secretary_output:ro
     entrypoint: /bin/bash
     command:
@@ -135,9 +101,13 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      # Оригінали документів. Той самий шлях, що бачить CLI на хості, тільки
+      # змонтований -- тож raw_uri з контейнера і з хосту вказує на той самий
+      # файл. Не read-only: сюди пишемо.
+      - ./data/originals:/opt/airflow/originals
       # ТИМЧАСОВО (демо): прямий read-only доступ до виходу пайплайна Ані на
-      # цій машині. У реальному розгортанні -- MinIO чи спільний inbox, не
-      # абсолютний шлях конкретного клону.
+      # цій машині. У реальному розгортанні -- спільний inbox, не абсолютний
+      # шлях конкретного клону.
       - D:/AI-secretary-anya/data/output/documents:/opt/airflow/ai_secretary_output:ro
     ports:
       - "${AIRFLOW_WEBSERVER_PORT}:8080"
@@ -161,8 +131,12 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
+      # Оригінали документів. Той самий шлях, що бачить CLI на хості, тільки
+      # змонтований -- тож raw_uri з контейнера і з хосту вказує на той самий
+      # файл. Не read-only: сюди пишемо.
+      - ./data/originals:/opt/airflow/originals
       # ТИМЧАСОВО (демо): прямий read-only доступ до виходу пайплайна Ані на
-      # цій машині. У реальному розгортанні -- MinIO чи спільний inbox, не
-      # абсолютний шлях конкретного клону.
+      # цій машині. У реальному розгортанні -- спільний inbox, не абсолютний
+      # шлях конкретного клону.
       - D:/AI-secretary-anya/data/output/documents:/opt/airflow/ai_secretary_output:ro
     command: scheduler

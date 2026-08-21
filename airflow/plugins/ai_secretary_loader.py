@@ -11,9 +11,15 @@ schemas/*.yaml).
 Підключення до БД: якщо задано env APP_DATABASE_URL (так налаштовано в
 docker-compose для контейнерів Airflow) -- береться воно; інакше читається
 .env у корені проєкту (для запуску з хосту через CLI-скрипт). Те саме для
-MinIO (MINIO_ENDPOINT у контейнері, інакше localhost:${MINIO_PORT}).
+теки оригіналів (ORIGINALS_DIR, інакше data/originals у корені).
+
+Оригінали лежать у звичайній теці, не в об'єктному сховищі. MinIO прибрано
+свідомо: від сховища потрібно лише покласти файл і видалити його через 30
+днів, а адмініструвати S3-сумісний сервіс у підрозділі нікому. Видалення
+тепер робить db/scripts/purge_expired_originals.py за documents.expires_at.
 """
 import os
+import shutil
 
 import psycopg
 import yaml
@@ -21,12 +27,6 @@ from dotenv import load_dotenv
 from psycopg.types.json import Jsonb
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Єдиний bucket з уже налаштованим 30-денним ILM-правилом (docker-compose,
-# minio-init) -- сюди йдуть усі оригінали документів, що підлягають
-# видаленню за ТЗ (project-expectations.md, "Зберігання оригіналів
-# документів"), не лише фото/скани попри назву bucket-а.
-RAW_ORIGINALS_BUCKET = "raw-photos"
 
 # template (AI-secretary) -> document_types.code (milidoc). Розширювати тут
 # при появі нових шаблонів у schemas/.
@@ -100,31 +100,39 @@ def get_dsn() -> str:
     return url.replace("postgresql+psycopg://", "postgresql://")
 
 
-def get_minio_client():
-    from minio import Minio
-
-    endpoint = os.environ.get("MINIO_ENDPOINT")
-    if not endpoint:
+def originals_dir() -> str:
+    """Тека, де лежать оригінали. ORIGINALS_DIR -- щоб контейнер і хост
+    вказували на той самий змонтований шлях."""
+    path = os.environ.get("ORIGINALS_DIR")
+    if not path:
         load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-        endpoint = f"localhost:{os.environ.get('MINIO_PORT', '9000')}"
-    return Minio(
-        endpoint,
-        access_key=os.environ["MINIO_ROOT_USER"],
-        secret_key=os.environ["MINIO_ROOT_PASSWORD"],
-        secure=False,
-    )
+        path = os.environ.get("ORIGINALS_DIR") or os.path.join(PROJECT_ROOT, "data", "originals")
+    return path
 
 
-def upload_original(local_path: str, file_hash: str) -> str:
-    """Кладе оригінал у MinIO (RAW_ORIGINALS_BUCKET, 30-денний ILM уже
-    налаштований у docker-compose). Ключ -- за хешем вмісту, тож повторне
-    завантаження того самого файлу перезаписує той самий об'єкт
-    (ідемпотентно, не плодить дублікатів у сховищі). Повертає raw_uri у
-    форматі s3://<bucket>/<key>."""
-    client = get_minio_client()
-    key = f"{file_hash}{os.path.splitext(local_path)[1]}"
-    client.fput_object(RAW_ORIGINALS_BUCKET, key, local_path)
-    return f"s3://{RAW_ORIGINALS_BUCKET}/{key}"
+def store_original(local_path: str, file_hash: str) -> str:
+    """Копіює оригінал у нашу теку і повертає raw_uri (file://...).
+
+    Раніше тут був MinIO. Прибрали свідомо: єдине, що від сховища потрібно --
+    покласти файл і видалити через 30 днів. S3-сумісний сервіс для цього не
+    потрібен, а в підрозділі його нікому адмініструвати. Разом із MinIO
+    зникає і рут-акаунт, яким ми до нього ходили.
+
+    Ім'я -- за хешем вмісту, тож повторне завантаження того самого файлу
+    перезаписує той самий шлях і не плодить дублікатів. Підтека з двох
+    перших символів хеша -- щоб не тримати десятки тисяч файлів в одній
+    теці (частина ФС на цьому деградує).
+
+    ВАЖЛИВО: 30-денне видалення більше НЕ виконується сховищем саме.
+    Раніше це робило ILM-правило MinIO, тепер -- db/scripts/purge_expired_originals.py
+    за documents.expires_at. Політика стала видимою в базі, але й вимагає,
+    щоб прибирання справді запускалось за розкладом.
+    """
+    target_dir = os.path.join(originals_dir(), file_hash[:2])
+    os.makedirs(target_dir, exist_ok=True)
+    target = os.path.join(target_dir, f"{file_hash}{os.path.splitext(local_path)[1]}")
+    shutil.copy2(local_path, target)
+    return f"file:///{os.path.abspath(target).replace(os.sep, '/')}"
 
 
 def parse_frontmatter(md_path: str) -> dict:
@@ -337,14 +345,16 @@ def get_or_create_document(cur, meta: dict, md_path: str, original_file_hint: st
     raw_uri = None
     if original_file_hint and os.path.exists(original_file_hint):
         try:
-            raw_uri = upload_original(original_file_hint, meta["file_hash"])
-        except Exception as exc:
-            # MinIO недоступний чи інша тимчасова проблема -- не валимо весь
-            # запис через це, лише деградуємо до посилання на локальний файл.
-            print(f"MinIO upload не вдався ({type(exc).__name__}: {exc}) -- fallback на file:///")
+            raw_uri = store_original(original_file_hint, meta["file_hash"])
+        except OSError as exc:
+            # Немає місця, немає прав, шлях не змонтований -- не валимо весь
+            # запис через це. Але й НЕ підставляємо шлях, звідки файл прийшов:
+            # пайплайн Ані свій вхід архівує або видаляє, тож таке посилання
+            # за кілька днів вказує в нікуди. Краще чесно без raw_uri.
+            print(f"Копіювання оригіналу не вдалось ({type(exc).__name__}: {exc}) -- "
+                  f"документ пишемо без raw_uri")
     if raw_uri is None:
-        raw_uri = f"file:///{os.path.abspath(original_file_hint)}" if original_file_hint \
-            else f"ai-secretary-output:{_safe_relpath(md_path, PROJECT_ROOT)}"
+        raw_uri = f"ai-secretary-output:{_safe_relpath(md_path, PROJECT_ROOT)}"
 
     # pipeline_meta -- усе, що AI-secretary вже рахує по документу, але що не
     # заслуговує на окрему типізовану колонку (аналіз Ані, розділ "Довіра до
