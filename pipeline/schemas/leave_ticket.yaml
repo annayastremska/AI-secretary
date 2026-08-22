@@ -59,13 +59,20 @@ fields:
     db_target: person
 
   - name: surname
+    # `normalization:` тут БУЛО й ПРИБРАНО 22.08.2026 (рев'ю, A-04):
+    # `nominative_case` на цьому полі не читався жодним рядком коду --
+    # `extraction: rank_and_name_tokenized` іде власною гілкою build_record,
+    # де морфологію вибирає `part:`. Заміряно: видалення ключа й підміна його
+    # іншим значенням давали ПОБАЙТОВО той самий вихід. Мертвий ключ тут
+    # небезпечніший за звичайне сміття, бо читається як гарантія: наступний
+    # автор схеми вважав би, що знявши його, вимкне морфологію.
+    # Тепер оголошення -- error валідатора.
     # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
     # поля, керує морфологією й ключем у subject -- тому схема може
     # називати поля як завгодно (applicant_surname, prizvyshche).
     part: surname
     type: text
     extraction: rank_and_name_tokenized   # той самий виклик, інша частина результату
-    normalization: nominative_case
     db_target: person
 
   - name: given_name
@@ -75,7 +82,6 @@ fields:
     part: given_name
     type: text
     extraction: rank_and_name_tokenized
-    normalization: nominative_case
     db_target: person
 
   - name: patronymic
@@ -85,7 +91,6 @@ fields:
     part: patronymic
     type: text
     extraction: rank_and_name_tokenized
-    normalization: nominative_case
     db_target: person
 
   # ВИПРАВЛЕНО (звірено з data/eval/samples/leave/відпускний_шаблон.docx): "вид
@@ -100,6 +105,13 @@ fields:
   # автоматично (значення вільнотекстове, комбіноване).
   - name: leave_type_and_destination
     type: text
+    # value_free_text: значення основного факту тут ВІЛЬНОТЕКСТОВЕ, і це
+    # оголошення, а не замовчування (рев'ю 22.08.2026, A-11). Причина -- на
+    # бланку вид відпустки й населений пункт стоять одним значенням під одним
+    # лейблом, тож контрольованого коду з dictionaries/leave_type.yaml тут
+    # бути не може. Ціна відома: підрахунок «скільком людям сімейна відпустка»
+    # на боці БД -- порівняння рядків, не GROUP BY по коду.
+    value_free_text: true
     extraction: block_before_label
     label_before: "вид відпустки та найменування населеного пункту"
     strip_prefix: "звільнений"

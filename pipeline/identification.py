@@ -175,6 +175,18 @@ KNOWN_NORMALIZATIONS = {"nominative_case", "null_if_not_issued"}
 # ключ на такому полі мертвий за побудовою (саме так 8 рядків
 # `normalization: iso_date` прожили в схемах, не читаючись жодним рядком коду).
 TYPE_DISPATCHED_BEFORE_NORMALIZATION = {"category", "number", "date"}
+# Режими екстракції, які в build_record ідуть ВЛАСНОЮ гілкою й до
+# `normalize_field` не доходять узагалі -- отже `normalization:` на такому полі
+# теж мертвий ключ (рев'ю 22.08.2026, A-04). Заміряно: видалення
+# `normalization: nominative_case` з полів ПІБ і підміна його на інше значення
+# дають ПОБАЙТОВО той самий вихід, а валідатор не казав нічого. Небезпека не в
+# самому мертвому ключі, а в тому, що він ЧИТАЄТЬСЯ як гарантія: наступний
+# автор схеми, побачивши `nominative_case` на прізвищі, вважатиме, що зняття
+# ключа вимкне морфологію -- а вона керується `part:` і не вимикається взагалі.
+# `rank_and_name_tokenized` -- морфологія ПІБ за `part:` (build_record.py:324);
+# `derived_from` -- значення обчислює DERIVE_FUNCS.
+EXTRACTION_DISPATCHED_BEFORE_NORMALIZATION = {"rank_and_name_tokenized",
+                                              "derived_from"}
 # Ключі, які схема може оголосити, але код їх НЕ читає. Тримаємо перелік явно,
 # щоб автор нової схеми дізнався про це з попередження, а не з тихо
 # незаповненого поля через тиждень. `note` тут свідомо НЕМА: він і не має
@@ -291,6 +303,16 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
             err(f"blank_template '{schema[BLANK_TEMPLATE_KEY]}' не існує -- "
                 "резегментація фото, перевірка друкованого тексту бланка й "
                 "вердикт редакції мовчки вимкнулись би")
+        elif not blank_path.lower().endswith(".docx"):
+            # ОКРЕМИМ повідомленням, а не разом із «не дає рядків»: раніше
+            # не-docx шлях узагалі не доходив до перевірки -- `_read_lines`
+            # кидав PackageNotFoundError назовні й валив увесь батч (A-14).
+            # Тепер причина названа словами: читач бланка один і той самий, що
+            # для документів-docx, і pdf/фото він не читає за побудовою.
+            err(f"blank_template '{schema[BLANK_TEMPLATE_KEY]}' не .docx -- "
+                "порожній бланк читається тим самим docx-інжестом, що й "
+                "документи, тому pdf/зображення тут не працюють; захисти за "
+                "бланком мовчки вимкнулись би")
         elif not printed_cutters(schema):
             err(f"blank_template '{schema[BLANK_TEMPLATE_KEY]}' не дає жодного "
                 "друкованого рядка (порожній або нечитабельний файл) -- "
@@ -334,6 +356,22 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
                 f"мовчки пішло б у additional_info, який БД не читає")
         if target in SINGLE_VALUE_DB_TARGETS:
             single_value_targets_seen.setdefault(target, []).append(name)
+        if (target == "fact_value" and field.get("type") != "category"
+                and not field.get("category") and not field.get("value_free_text")):
+            # ЗНАЧЕННЯ ОСНОВНОГО ФАКТУ вільним текстом (рев'ю 22.08.2026,
+            # A-11). Обидва наявні шаблони саме такі: `facts.value_code`
+            # отримує рядок із паперу («щорічна основна відпустка за 2026
+            # рік»), а не код довідника, тому питання «скільком людям
+            # СІМЕЙНА відпустка» на боці БД -- порівняння рядків, не GROUP BY
+            # по коду. Це може бути свідомим рішенням (на бланку вид відпустки
+            # злитий із населеним пунктом в одне значення), і тоді схема каже
+            # це вголос: `value_free_text: true`. Попередження, не помилка --
+            # рішення тут за автором схеми, але воно мусить бути ОГОЛОШЕНИМ, а
+            # не таким, що вгадується з відсутності `category:`.
+            warn(f"поле '{name}': db_target fact_value без `category:` -- "
+                 "значення основного факту піде в БД вільним текстом, "
+                 "підрахунок за видом стане порівнянням рядків; якщо це "
+                 "свідомо, оголоси `value_free_text: true`")
 
         dimension = field.get("dimension")
         # `is not None` -- та сама причина, що й для fact_type вище.
@@ -383,6 +421,12 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
                 err(f"поле '{name}': normalization '{normalization}' не "
                     f"читається для type '{field_type}' -- normalize_field "
                     "диспетчеризує за типом раніше, ключ мертвий")
+            elif field.get("extraction") in EXTRACTION_DISPATCHED_BEFORE_NORMALIZATION:
+                err(f"поле '{name}': normalization '{normalization}' не "
+                    f"читається для extraction '{field.get('extraction')}' -- "
+                    "build_record обробляє цей режим власною гілкою й до "
+                    "normalize_field не доходить (морфологією ПІБ керує "
+                    "part:, а не цей ключ); ключ мертвий")
             if normalization == "null_if_not_issued" and not field.get("not_issued_sentinel"):
                 err(f"поле '{name}': null_if_not_issued без not_issued_sentinel "
                     "-- порівнювати нема з чим, нормалізація інертна")
@@ -422,6 +466,24 @@ def validate_schema(schema: dict, known_fact_types=None) -> list:
                     elif target not in {f.get("name") for f in schema.get("fields") or []}:
                         err(f"поле '{name}': consistency.{ref} посилається на "
                             f"поле '{target}', якого в схемі немає")
+        elif (field_type == "number" and field.get("llm_fallback") is not False
+                and field.get("extraction") != "derived_from"):
+            # ЧИСЛОВЕ поле, яке може прийти від моделі, БЕЗ перевірки
+            # узгодженості (рев'ю 22.08.2026, C-07). Заземлення для number
+            # питає лише «чи є це число в документі» -- заміряно на
+            # «Відпускний квиток № 4180/26 від 31.07.2026»: 12 (правильне), 26
+            # (хвіст номера), 31 (день) і 7 (місяць) проходять ОДНАКОВО, а
+            # відсіюється тільки те, що не влазить у межі поля. Тобто другий
+            # шар (`consistency`) -- єдине, що відрізняє прочитане число від
+            # правдоподібно вигаданого, і досі він був ЗБІГОМ КОНФІГУРАЦІЇ:
+            # обидва наявні number-поля його оголосили, а валідатор не вимагав.
+            # Вибір автора схеми лишається реальний: або правило узгодженості,
+            # або `llm_fallback: false` (краще відмова, ніж вигадка) --
+            # derived_from сюди не входить, бо там значення обчислює код.
+            err(f"поле '{name}': type number без consistency -- заземлення "
+                "числа перевіряє лише наявність числа В ДОКУМЕНТІ, тому день, "
+                "місяць чи хвіст номера пройдуть як значення. Оголоси "
+                "consistency (правило узгодженості) або llm_fallback: false")
 
         link_type = field.get("link_type")
         if link_type is not None and link_type not in KNOWN_LINK_TYPES:
@@ -834,3 +896,20 @@ def missing_dictionaries(schema: dict, dictionaries: dict) -> set:
     required = {f["category"] for f in schema["fields"]
                 if f.get("type") == "category" and f.get("category")}
     return required - set(dictionaries)
+
+
+def unused_dictionaries(schemas: list, dictionaries: dict) -> set:
+    """Довідники, на які НЕ посилається жодне поле жодної схеми.
+
+    Дзеркало `missing_dictionaries`, і потрібне з тієї самої причини:
+    завантажений довідник виглядає як робоча частина пайплайна (прогін друкує
+    «Довідники: ['leave_type', 'military_rank']»), хоч `leave_type` не читає
+    жодне `category:` -- вид відпустки на реальному бланку злитий із населеним
+    пунктом в одне вільнотекстове поле (рев'ю 22.08.2026, A-16). Файл
+    лишається свідомо (коди знадобляться, якщо вид відпустки виділять в окреме
+    категоріальне поле), але «лишається на майбутнє» і «працює зараз» мусять
+    виглядати по-різному.
+    """
+    used = {f["category"] for schema in schemas for f in schema.get("fields") or []
+            if f.get("type") == "category" and f.get("category")}
+    return set(dictionaries) - used

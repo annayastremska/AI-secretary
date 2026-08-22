@@ -209,7 +209,20 @@ def _read_lines(path: str) -> list:
         return []
     from pipeline.ingestion.ingest import extract_docx_blocks
     # Порядок значень саме такий: (суцільний текст, список блоків).
-    _text, blocks = extract_docx_blocks(path)
+    try:
+        _text, blocks = extract_docx_blocks(path)
+    except Exception:
+        # НЕ-DOCX (або побитий) шлях у `blank_template:` -- це помилка СХЕМИ, і
+        # сказати про неї має валідатор, а не необроблений PackageNotFoundError
+        # посеред батчу (рев'ю 22.08.2026, A-14). Раніше виняток проходив
+        # `validate_schema` і `build_resources` наскрізь до `run_pipeline`:
+        # одна одруківка в шляху -> НУЛЬ оброблених документів і traceback без
+        # причини, тобто ламався сам інваріант «невалідна схема виключається,
+        # решта обробляється» (run.py:211-218).
+        # Порожній список тут означає для решти модуля рівно те саме, що
+        # відсутній файл, -- «друкованих рядків немає», а валідатор із цього
+        # робить error і виключає схему.
+        return []
     out = []
     for block in blocks:
         text = block if isinstance(block, str) else (block or {}).get("text", "")

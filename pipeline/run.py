@@ -29,6 +29,7 @@ from pipeline.identification import (
     load_schemas,
     missing_dictionaries,
     schema_title_phrases,
+    unused_dictionaries,
     validate_schema,
     validate_schema_set,
 )
@@ -177,6 +178,36 @@ def load_fact_types(dictionaries_dir: str) -> dict:
             if isinstance(entry, dict) and entry.get("code")}
 
 
+def annotate_validity_model(facts: list, fact_types: dict) -> list:
+    """Дописує кожному факту `validity_model` з нашого реєстру. Повертає
+    перелік кодів, яких у реєстрі немає.
+
+    НАВІЩО (рев'ю 22.08.2026, A-07). `validity_model` у пайплайні досі
+    згадувався лише в докстрінгу `load_fact_types` -- у facts і meta він не
+    потрапляв, тому завантажувач БД тримає ВЛАСНУ копію таблиці
+    (`ai_secretary_loader.FACT_TYPE_VALIDITY`), а копія вже розійшлась:
+    `travel_document` у нашому реєстрі `permanent_event`, у копії його немає
+    взагалі, тобто лоадер поставить `ranged` за замовчуванням -- і разовий
+    реквізит стане діапазонним фактом, який «спливає». Дві копії однієї
+    таблиці без жодного зв'язку -- це не помилка Андрія й не наша: це
+    відсутність передачі значення. Тепер значення їде РАЗОМ ІЗ ФАКТОМ, тобто
+    копію можна замінити читанням поля (передача Андрію --
+    docs/review-2026-08-22/fixes-pipeline.md).
+
+    Код, якого в реєстрі немає, отримує `None`, а не «ranged за
+    замовчуванням»: замовчування -- це і є та тиха неправда, від якої ми
+    відходимо. Відсутність повертається викликачу попередженням.
+    """
+    unknown = []
+    for fact in facts:
+        code = fact.get("fact_type")
+        entry = fact_types.get(code) or {}
+        fact["validity_model"] = entry.get("validity_model")
+        if code and not entry:
+            unknown.append(code)
+    return unknown
+
+
 def build_resources(cfg: dict, force_no_llm=False) -> dict:
     """Важкі об'єкти (схеми, довідники, модель, OCR) створюються ОДИН раз на
     процес, а не на кожен файл -- інакше пакетна обробка папки перечитувала б
@@ -216,6 +247,19 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
         res["warnings"].append(
             f"схеми виключені через помилки: {sorted(invalid)} -- документи цих "
             "типів підуть у unresolved, доки YAML не виправлено")
+
+    # Довідник, на який не посилається жодне `category:`, завантажений і
+    # НЕ ПРАЦЮЄ -- а прогін друкує його поруч із робочим ("Довідники:
+    # ['leave_type', 'military_rank']"), тобто мертвий довідник виглядає як
+    # живий (рев'ю 22.08.2026, A-16). Попередження, не виключення з набору:
+    # файл лишається свідомо (коди знадобляться, якщо вид відпустки виділять в
+    # окреме категоріальне поле), а видимою мусить бути саме різниця між
+    # «лишається на майбутнє» і «працює зараз».
+    for category in sorted(unused_dictionaries(res["schemas"], res["dictionaries"])):
+        res["warnings"].append(
+            f"довідник '{category}' завантажено, але на нього не посилається "
+            "жодне поле жодної схеми (`category:`) -- зіставлення з ним не "
+            "виконується")
 
     keyphrases_path = os.path.join(paths["dictionaries_dir"], "domain_keyphrases.yaml")
     if os.path.exists(keyphrases_path):
@@ -720,6 +764,14 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         record = build_record(schema, raw_extraction, res["dictionaries"])
         for fact in record["facts"]:
             fact["source_document_id"] = document_id
+        # Модель чинності їде РАЗОМ із фактом (A-07): інакше її доводиться
+        # тримати другою копією на боці завантажувача, а копія вже розійшлась.
+        for code in annotate_validity_model(record["facts"], res["fact_types"]):
+            warnings.append(
+                f"тип факту '{code}' відсутній у dictionaries/"
+                "fact_type_registry.yaml -- модель чинності факту невідома "
+                "(validity_model: null), споживач не має підстав вважати його "
+                "ні діапазонним, ні разовим")
 
         # ОСНОВНИЙ факт визначає статус документа. Похідні факти (поля з
         # `dimension:`) додаються найкраще-як-вийде: відсутня посада не має

@@ -51,6 +51,14 @@ fields:
     db_target: person
 
   - name: surname
+    # `normalization:` тут БУЛО й ПРИБРАНО 22.08.2026 (рев'ю, A-04):
+    # `nominative_case` на цьому полі не читався жодним рядком коду --
+    # `extraction: rank_and_name_tokenized` іде власною гілкою build_record,
+    # де морфологію вибирає `part:`. Заміряно: видалення ключа й підміна його
+    # іншим значенням давали ПОБАЙТОВО той самий вихід. Мертвий ключ тут
+    # небезпечніший за звичайне сміття, бо читається як гарантія: наступний
+    # автор схеми вважав би, що знявши його, вимкне морфологію.
+    # Тепер оголошення -- error валідатора.
     # part: РОЛЬ поля в розборі рядка "звання ПІБ". Саме вона, а не ім'я
     # поля, керує морфологією й ключем у subject -- тому схема може
     # називати поля як завгодно (applicant_surname, prizvyshche).
@@ -58,7 +66,6 @@ fields:
     type: text
     extraction: rank_and_name_tokenized
     strip_prefix: "Видано"
-    normalization: nominative_case
     db_target: person
 
   - name: given_name
@@ -69,7 +76,6 @@ fields:
     type: text
     extraction: rank_and_name_tokenized
     strip_prefix: "Видано"
-    normalization: nominative_case
     db_target: person
 
   - name: patronymic
@@ -80,7 +86,6 @@ fields:
     type: text
     extraction: rank_and_name_tokenized
     strip_prefix: "Видано"
-    normalization: nominative_case
     db_target: person
 
   - name: position_and_workplace
@@ -118,6 +123,11 @@ fields:
   # leave_ticket.
   - name: destination_points
     type: text
+    # value_free_text: пункти призначень -- вільний текст за побудовою (може
+    # бути кілька пунктів в одному рядку), контрольованого довідника
+    # населених пунктів у нас немає. Оголошено явно за тією самою логікою, що
+    # в leave_ticket (рев'ю 22.08.2026, A-11).
+    value_free_text: true
     extraction: block_before_label
     label_before: "пункти призначень"
     strip_prefix: "відрядженому до"
