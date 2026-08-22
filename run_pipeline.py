@@ -71,7 +71,11 @@ def main(argv=None):
 
     res = build_resources(cfg, force_no_llm=args.no_llm)
     if args.dry_run:
-        res["store"] = None
+        # Не `res["store"] = None`: сховище потрібне для ЧИТАННЯ (дедуплікація
+        # за хешем), і без нього сухий прогін мовчки поводився як
+        # `--reprocess` (C-09). Запис вимикає окремий прапорець, який читає
+        # `_persist`.
+        res["read_only"] = True
     for warning in res["warnings"]:
         print(f"[увага] {warning}", file=sys.stderr)
 

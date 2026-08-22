@@ -90,9 +90,18 @@ fields:
 
   - name: position_and_workplace
     type: text
-    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
-    # воно лишається лише в additional_info, який завантажувач не читає,
-    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача -- тобто
+    # значенням, за яким можна ЗАПИТАТИ (GROUP BY, WHERE), а не лише
+    # прочитати очима.
+    # ВИПРАВЛЕНО 22.08.2026 (рев'ю, A-03): тут стояло «additional_info
+    # завантажувач не читає, до бази не доходить узагалі (у facts немає
+    # JSON-колонки)» -- це СТАЛЕ вже щонайменше з міграції
+    # 8a667569ba4d_facts_additional_info_jsonb: колонка `facts.additional_info
+    # JSONB` існує, і завантажувач її пише (ai_secretary_loader.py:497 ->
+    # Jsonb(additional_info)). Тобто вибір між `dimension:` і
+    # `additional_info` -- це вибір «окремий рядок, за яким можна запитати»
+    # проти «поле в JSON, яке видно, але за яким не запитаєш», а не
+    # «доходить» проти «не доходить».
     dimension: position
     # ВИПРАВЛЕНО 13.08.2026. Тут стояв `extraction: llm` з коментарем "без
     # лейбл-якоря" -- це було неправильно: на бланку значення стоїть блоком
@@ -136,9 +145,18 @@ fields:
 
   - name: destination_org
     type: object_ref
-    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
-    # воно лишається лише в additional_info, який завантажувач не читає,
-    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача -- тобто
+    # значенням, за яким можна ЗАПИТАТИ (GROUP BY, WHERE), а не лише
+    # прочитати очима.
+    # ВИПРАВЛЕНО 22.08.2026 (рев'ю, A-03): тут стояло «additional_info
+    # завантажувач не читає, до бази не доходить узагалі (у facts немає
+    # JSON-колонки)» -- це СТАЛЕ вже щонайменше з міграції
+    # 8a667569ba4d_facts_additional_info_jsonb: колонка `facts.additional_info
+    # JSONB` існує, і завантажувач її пише (ai_secretary_loader.py:497 ->
+    # Jsonb(additional_info)). Тобто вибір між `dimension:` і
+    # `additional_info` -- це вибір «окремий рядок, за яким можна запитати»
+    # проти «поле в JSON, яке видно, але за яким не запитаєш», а не
+    # «доходить» проти «не доходить».
     dimension: deployment_org
     registry: military_unit
     extraction: block_before_label
@@ -152,9 +170,18 @@ fields:
     # константою коду в генеричному типі number (R-A1-03).
     min_value: 1
     max_value: 366
-    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
-    # воно лишається лише в additional_info, який завантажувач не читає,
-    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача -- тобто
+    # значенням, за яким можна ЗАПИТАТИ (GROUP BY, WHERE), а не лише
+    # прочитати очима.
+    # ВИПРАВЛЕНО 22.08.2026 (рев'ю, A-03): тут стояло «additional_info
+    # завантажувач не читає, до бази не доходить узагалі (у facts немає
+    # JSON-колонки)» -- це СТАЛЕ вже щонайменше з міграції
+    # 8a667569ba4d_facts_additional_info_jsonb: колонка `facts.additional_info
+    # JSONB` існує, і завантажувач її пише (ai_secretary_loader.py:497 ->
+    # Jsonb(additional_info)). Тобто вибір між `dimension:` і
+    # `additional_info` -- це вибір «окремий рядок, за яким можна запитати»
+    # проти «поле в JSON, яке видно, але за яким не запитаєш», а не
+    # «доходить» проти «не доходить».
     dimension: deployment_days
     extraction: regex
     regex_variants:
@@ -195,9 +222,18 @@ fields:
   # extract.compile_value_boundaries).
   - name: purpose
     type: text
-    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
-    # воно лишається лише в additional_info, який завантажувач не читає,
-    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача -- тобто
+    # значенням, за яким можна ЗАПИТАТИ (GROUP BY, WHERE), а не лише
+    # прочитати очима.
+    # ВИПРАВЛЕНО 22.08.2026 (рев'ю, A-03): тут стояло «additional_info
+    # завантажувач не читає, до бази не доходить узагалі (у facts немає
+    # JSON-колонки)» -- це СТАЛЕ вже щонайменше з міграції
+    # 8a667569ba4d_facts_additional_info_jsonb: колонка `facts.additional_info
+    # JSONB` існує, і завантажувач її пише (ai_secretary_loader.py:497 ->
+    # Jsonb(additional_info)). Тобто вибір між `dimension:` і
+    # `additional_info` -- це вибір «окремий рядок, за яким можна запитати»
+    # проти «поле в JSON, яке видно, але за яким не запитаєш», а не
+    # «доходить» проти «не доходить».
     dimension: deployment_purpose
     extraction: block_before_label
     label_before: "мета відрядження"
@@ -207,9 +243,18 @@ fields:
 
   - name: basis_order_date
     type: date
-    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
-    # воно лишається лише в additional_info, який завантажувач не читає,
-    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача -- тобто
+    # значенням, за яким можна ЗАПИТАТИ (GROUP BY, WHERE), а не лише
+    # прочитати очима.
+    # ВИПРАВЛЕНО 22.08.2026 (рев'ю, A-03): тут стояло «additional_info
+    # завантажувач не читає, до бази не доходить узагалі (у facts немає
+    # JSON-колонки)» -- це СТАЛЕ вже щонайменше з міграції
+    # 8a667569ba4d_facts_additional_info_jsonb: колонка `facts.additional_info
+    # JSONB` існує, і завантажувач її пише (ai_secretary_loader.py:497 ->
+    # Jsonb(additional_info)). Тобто вибір між `dimension:` і
+    # `additional_info` -- це вибір «окремий рядок, за яким можна запитати»
+    # проти «поле в JSON, яке видно, але за яким не запитаєш», а не
+    # «доходить» проти «не доходить».
     dimension: order_date
     extraction: regex
     note: >
@@ -230,9 +275,18 @@ fields:
 
   - name: basis_order_number
     type: text
-    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача. Без цього
-    # воно лишається лише в additional_info, який завантажувач не читає,
-    # тобто до бази не доходить узагалі (у facts немає JSON-колонки).
+    # dimension: поле стає ОКРЕМИМ рядком у facts БД-споживача -- тобто
+    # значенням, за яким можна ЗАПИТАТИ (GROUP BY, WHERE), а не лише
+    # прочитати очима.
+    # ВИПРАВЛЕНО 22.08.2026 (рев'ю, A-03): тут стояло «additional_info
+    # завантажувач не читає, до бази не доходить узагалі (у facts немає
+    # JSON-колонки)» -- це СТАЛЕ вже щонайменше з міграції
+    # 8a667569ba4d_facts_additional_info_jsonb: колонка `facts.additional_info
+    # JSONB` існує, і завантажувач її пише (ai_secretary_loader.py:497 ->
+    # Jsonb(additional_info)). Тобто вибір між `dimension:` і
+    # `additional_info` -- це вибір «окремий рядок, за яким можна запитати»
+    # проти «поле в JSON, яке видно, але за яким не запитаєш», а не
+    # «доходить» проти «не доходить».
     dimension: order_number
     extraction: regex
     # ВИПРАВЛЕНО 13.08.2026 разом із basis_order_date: та сама вимога

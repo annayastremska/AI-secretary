@@ -1189,6 +1189,14 @@ def parse_rank_and_name(raw_line, rank_alias_lookup):
     surname_index = next((k for k, t in enumerate(name_tokens)
                           if t.isupper() and len(t) > 1), None)
     if surname_index is None:
+        # ПОЗИЦІЙНИЙ ФОЛБЕК, позначений ненадійним (A-05, див.
+        # POSITIONAL_NAME_METHOD). Без нього ПІБ, надрукований з малої
+        # («молодший сержант Гайдученко Остап Миронович» -- саме так у
+        # holdout-формі), не читався ВЗАГАЛІ: три None і жодного сліду того,
+        # що в документі стоїть.
+        positional = positional_name_parts(name_tokens)
+        if positional:
+            return rank_result, dict(positional, _positional=True)
         return rank_result, {"surname": None, "given_name": None, "patronymic": None}
 
     # Ім'я та по батькові беруться ЛИШЕ з токенів ПІСЛЯ прізвища. Раніше
@@ -1610,6 +1618,45 @@ def slot_is_provably_empty(field_def, text: str) -> bool:
 #: рев'юера), і перейменування не сміє тихо розірвати зв'язок.
 NAME_TAIL_METHOD = "name_tail_unparsed"
 
+#: Провенанс ПІБ, розібраного ПОЗИЦІЙНО -- без опори на ВЕЛИКИЙ регістр
+#: прізвища (рев'ю 22.08.2026, A-05). Константа, як NAME_TAIL_METHOD:
+#: build_record тримає її в UNRELIABLE_METHODS, тому таке значення НЕ дає
+#: `confirmed` і поле лишається невирішеним.
+#:
+#: Навіщо взагалі. `parse_rank_and_name` вимагає, щоб прізвище було
+#: надруковане ВЕЛИКИМИ літерами, інакше віддає всі три частини як None --
+#: заміряно: `parse_rank_and_name('молодший сержант Гайдученко Остап
+#: Миронович')` дає звання й ТРИ None, і саме так ПІБ надрукований у
+#: holdout-формі (довідка_лікування_01). Вимога регістру не помилка (без неї
+#: позиційний розбір давав ТИХО ЗСУНУТІ given_name/patronymic з провенансом
+#: `matched`), але «нічого не прочитано» -- теж не відповідь: значення в
+#: документі Є, і людина його бачить.
+#:
+#: Різниця з попередньою поведінкою рівно одна: значення тепер ВИДНО, і воно
+#: назване ненадійним. Тихо неправильного `matched` тут з'явитись не може за
+#: побудовою -- провенанс у UNRELIABLE_METHODS означає resolved: false,
+#: прогалину для LLM і жодного внеску в підрахунки без людини.
+POSITIONAL_NAME_METHOD = "positional_name_no_uppercase"
+
+#: Токен, який МОЖЕ бути частиною ПІБ при позиційному розборі: суто літерний,
+#: з великої, довший за одну літеру. Це не «розпізнавання імені», а фільтр
+#: проти того, на чому позиційний розбір колись і зламався -- дат, номерів і
+#: гомогліфів ('25О', 'О7.О5.2О2б', 'від').
+_NAME_WORD_RE = re.compile(r"^[^\W\d_][^\W\d_]+$", re.UNICODE)
+
+
+def positional_name_parts(name_tokens: list) -> dict:
+    """ПІБ за позицією (прізвище, ім'я, по батькові) або None, якщо токени на
+    ПІБ не схожі. Викликається ЛИШЕ коли жоден токен не у ВЕЛИКОМУ регістрі."""
+    words = [t for t in name_tokens if _NAME_WORD_RE.match(t) and t[:1].isupper()]
+    if len(words) < 2 or len(words) != len(name_tokens):
+        # Менше двох слів -- не ПІБ; зайві токени (дати, номери, залишок
+        # префікса) означають, що ми не знаємо, де починається прізвище.
+        return None
+    return {"surname": words[0],
+            "given_name": words[1],
+            "patronymic": words[2] if len(words) > 2 else None}
+
 
 def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries: dict,
                       llm_extract_batch=None, title_phrases=None,
@@ -1717,7 +1764,16 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 hints[name] = rank_raw_line or ""
                 localized_gaps.append(name)
             elif value:
-                results[name] = (value, "matched")
+                # Позиційний розбір -- значення видно, але надійним воно не є
+                # (A-05): провенанс у UNRELIABLE_METHODS, тобто resolved:
+                # false, прогалина для LLM і жодного внеску в підрахунки без
+                # людини.
+                if name_parts.get("_positional") and part != "rank":
+                    results[name] = (value, POSITIONAL_NAME_METHOD)
+                    hints[name] = rank_raw_line or ""
+                    localized_gaps.append(name)
+                else:
+                    results[name] = (value, "matched")
             elif part == "rank" and name_parts.get("_leftover_before_surname"):
                 # Прізвище знайдене, але ліворуч від нього лишились неспожиті
                 # токени -- значить там звання, якого немає в довіднику

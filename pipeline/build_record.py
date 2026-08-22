@@ -18,6 +18,7 @@ import re
 from pipeline.extraction.extract import (
     AMBIGUOUS_MATCH_METHOD,
     NAME_PART_ROLES,
+    POSITIONAL_NAME_METHOD,
     NAME_TAIL_METHOD,
     UNVERIFIED_METHOD,
     field_part,
@@ -40,7 +41,10 @@ from pipeline.normalization.normalize import (
 # критичне поле з таким провенансом не дає документу статус confirmed.
 # Без цього LLM могла віддати "рядовий" у поле given_name, морфологія
 # відповідала not_a_name, значення лишалось -- і документ виходив confirmed.
-UNRELIABLE_METHODS = ("llm_split_vote", UNVERIFIED_METHOD)
+# POSITIONAL_NAME_METHOD -- імпортом, не літералом, з тієї самої причини, що
+# UNVERIFIED_METHOD: рядок провенансу мусить мати одне джерело, інакше
+# перейменування тихо вимкнуло б блокер (A-05).
+UNRELIABLE_METHODS = ("llm_split_vote", UNVERIFIED_METHOD, POSITIONAL_NAME_METHOD)
 # UNVERIFIED_METHOD ("unverified_foreign_edition") доданий 14.08.2026,
 # known-weak-spots.md розд. 8.6. Він означає рівно те, чого цей перелік і
 # стосується: детермінований шлях значення знайшов, але бланк не впізнаний,
@@ -428,13 +432,20 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
         if confidence is not None:
             field_provenance[name]["confidence"] = confidence
 
-        # Поле, що оголосило `dimension:`, стає ОКРЕМИМ фактом. Без цього все
-        # з db_target: additional_info не доходить до БД узагалі: у таблиці
-        # facts немає JSON-колонки, а завантажувач споживача вставляє лише
-        # fact.value_code -- тобто посада, мета, номер наказу мовчки губились.
+        # Поле, що оголосило `dimension:`, стає ОКРЕМИМ фактом -- значенням,
+        # за яким можна ЗАПИТАТИ, а не лише прочитати.
+        # ВИПРАВЛЕНО 22.08.2026 (A-03): тут стояло «у таблиці facts немає
+        # JSON-колонки», що вже неправда (`facts.additional_info JSONB`,
+        # міграція 8a667569ba4d, і завантажувач її пише). Наслідок сталого
+        # обґрунтування -- ДУБЛЮВАННЯ: реквізити документа їдуть і в
+        # additional_info основного факту, і окремими рядками facts. Чи
+        # прибирати `dimension:` з реквізитів -- питання до контракту з
+        # командою БД (docs/review-2026-08-22/fixes-pipeline.md, «потребує
+        # рішення»), а не тиха правка.
         if field.get("dimension") and normalized is not None and not unresolved:
             extra_facts.append({
                 "fact_type": field["dimension"],
+                "is_primary": False,
                 "value_code": (normalized.get("code") if isinstance(normalized, dict)
                                else str(normalized)),
                 "date_start": None,
@@ -504,11 +515,15 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
             resolved_values[name] = normalized
 
         # Зв'язок документ -> документ. Збирається окремим ключем, а не
-        # ховається в additional_info: завантажувач споживача additional_info
-        # не читає взагалі (у facts немає JSON-колонки), а таблиці зв'язків, до
-        # якої це належить, у їхній схемі ще немає. Тому значення мусить бути
-        # на видноті -- інакше погоджене рішення (architecture-proposal.md,
-        # розд. 2 п.4) втратиться другий раз.
+        # ховається в additional_info: таблиці зв'язків, до якої це належить,
+        # у схемі споживача ще немає, тож значення мусить бути на видноті --
+        # інакше погоджене рішення (architecture-proposal.md, розд. 2 п.4)
+        # втратиться другий раз.
+        # ВИПРАВЛЕНО 22.08.2026 (A-03): тут ще стояло «завантажувач
+        # additional_info не читає взагалі (у facts немає JSON-колонки)» --
+        # стале: колонка є (міграція 8a667569ba4d) і завантажувач її пише.
+        # Аргумент за окремий ключ від цього не слабший: JSON-поле факту --
+        # не місце для вказівки закрити ІНШИЙ документ.
         if field.get("link_type") and normalized is not None:
             document_links.append({
                 "link_type": field["link_type"],
@@ -586,6 +601,15 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
 
     fact = {
         "fact_type": schema.get("fact_type"),
+        # ОСНОВНИЙ факт документа -- позначкою, а не позицією в списку
+        # (рев'ю 22.08.2026, C-08). Доти статус документа рахувався як
+        # `record["facts"][0].get("confirmed")` у run.py, а завантажувач
+        # споживача бере `facts[0]` як джерело дати для факту звання -- тобто
+        # три модулі були зв'язані мовчазною угодою про ІНДЕКС, якої не
+        # перевіряв ніхто (валідатор порядку полів не бачить). Порядок
+        # лишається тим самим (основний першим), але тепер він не єдиний
+        # носій цього знання.
+        "is_primary": True,
         "value_code": fact_value_code,
         "date_start": fact_date_start,
         "date_end": fact_date_end,

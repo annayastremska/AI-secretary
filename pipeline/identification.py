@@ -808,7 +808,11 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
             return {
                 "schema": schema, "template": best_template, "domain": schema.get("domain"),
                 "source": "anchors", "score": best_score, "runner_up": runner_up_score,
-                "scores": scores, "reason": None,
+                # `domain_scores` і в УСПІШНОМУ поверненні (рев'ю 22.08.2026,
+                # A-17): два інші return-и його мають, а цей -- ні, тому в
+                # збереженому meta впізнаного документа вироку про домен не
+                # було видно взагалі (R-B1-01 вимагав саме перевірності).
+                "scores": scores, "domain_scores": domain_scores, "reason": None,
                 "blank_edition": blank_edition_verdict(text, schema),
             }
 
