@@ -651,6 +651,10 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
     #   інші статуси        -> ЖОДЕН факт не сміє мати confirmed=true, бо
     #                          споживач фільтрує за facts.confirmed і взяв би
     #                          непідтверджений запис у підрахунок.
+    # Скільки ПОЛЬОВИХ перевірок цього запису провалилось -- рахується ДО
+    # інваріантів, бо інваріант «відмова обґрунтована» на це спирається.
+    field_checks_failed = [c["key"] for c in checks if not c["ok"]]
+
     fact_flags = [bool(f.get("confirmed")) for f in facts]
     if meta.get("status") == "confirmed":
         consistent = (bool(fact_flags) and all(fact_flags)
@@ -664,6 +668,62 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         "surplus": False, "expected_blank": False, "from_printed": False,
         "ours": f"status={meta.get('status')}, facts.confirmed={fact_flags}",
         "expected": "status=confirmed <=> усі facts.confirmed=true",
+    })
+
+    # ЗВОРОТНИЙ БІК ТОГО САМОГО ІНВАРІАНТА (A-01, рев'ю 22.08.2026).
+    #
+    # `чернетка_не_факт` карає брехню лише В БІК ДОВІРИ (сказав «факт», а факт
+    # непевний). Протилежного боку прилад не міряв ЗОВСІМ, і це заміряно:
+    # пайплайн, у якого КОЖЕН запис переведено в needs_review з
+    # facts[*].confirmed=False -- тобто який перестав підтверджувати будь-що --
+    # отримував ті самі 224/224 = 100.0%, бо гілка «не confirmed» вимагає лише
+    # `not any(fact_flags)`, а масова відмова її проходить. Тобто головна цифра
+    # приладу не падала від того, що система стала беззастережно непридатною.
+    #
+    # Інваріант: ЗАПИС МУСИТЬ САМ ПОЯСНЮВАТИ СВІЙ СТАТУС. Відмова (будь-який
+    # статус, крім confirmed) дозволена лише тоді, коли в самому записі є
+    # об'єктивна підстава для сумніву. Ніякого знання сценарію еталона тут
+    # немає -- усі підстави читаються з виходу пайплайна, крім однієї
+    # (провалена польова перевірка), яка читається з ВЖЕ виміряних полів і
+    # стоїть тут, щоб не карати двічі за одне зіпсоване значення.
+    #
+    # Чому це чесно, а не підгонка: пайплайн, який на документі витягнув усе
+    # правильно, не побачив жодної прогалини, не видав попередження -- і все
+    # одно відмовився, -- не «обережний», а невживний: людина мусить
+    # передивитись документ, у якому нічого не зламано. Ціна відмови не нульова,
+    # і цифра приладу мусить це показувати.
+    refusal_grounds = []
+    if meta.get("unknown_critical_fields"):
+        refusal_grounds.append("unknown_critical_fields")
+    if meta.get("unresolved_values"):
+        refusal_grounds.append("unresolved_values")
+    if meta.get("consistency_problems"):
+        refusal_grounds.append("consistency_problems")
+    if meta.get("date_range_error"):
+        refusal_grounds.append("date_range_error")
+    if meta.get("warnings"):
+        refusal_grounds.append("warnings")
+    if not meta.get("template"):
+        # Шаблон не визначено -- нема чого підтверджувати; відмова тут і є
+        # правильною поведінкою (це стан, з якого запис іде людині).
+        refusal_grounds.append("template=None")
+    if not facts:
+        refusal_grounds.append("facts=[]")
+    if field_checks_failed:
+        refusal_grounds.append(f"провалені поля: {','.join(field_checks_failed[:3])}")
+    refused = meta.get("status") != "confirmed"
+    checks.append({
+        "key": "відмова_обґрунтована",
+        "field": "status+підстави сумніву",
+        "compare": "flag",
+        "ok": (not refused) or bool(refusal_grounds),
+        "surplus": False, "expected_blank": False, "from_printed": False,
+        # Тривіальна тоді, коли запису й не було в чому відмовляти.
+        "trivial": not refused,
+        "ours": f"status={meta.get('status')}, підстави={refusal_grounds}",
+        "expected": ("статус, відмінний від confirmed, мусить мати хоч одну "
+                     "об'єктивну підставу в самому записі"),
+        "refusal_grounds": refusal_grounds,
     })
 
     # ЗВ'ЯЗОК ДОКУМЕНТ -> ДОКУМЕНТ (R-A2-04). Пайплайн ВИТЯГУЄ ознаку
@@ -685,6 +745,13 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         "expected": ("є supersedes-зв'язок" if expects_link
                      else "зв'язків немає"),
         "links": supersedes_links,
+        # ТРИВІАЛЬНА ПЕРЕВІРКА (A-09): на документі без пари в еталоні
+        # правильна відповідь -- «зв'язків немає», і пайплайн, який зв'язків не
+        # витягує ВЗАГАЛІ, проходить її задарма. Заміряно 22.08.2026: таких
+        # 14 із 16, тобто змістовних лише 2. Перевірку не прибираємо (вигаданий
+        # зв'язок мусить лишатися помилкою), але в знаменнику вона тепер
+        # рахується окремо.
+        "trivial": not expects_link and not supersedes_links,
     })
 
     conflict = printed_range_conflict(
@@ -702,6 +769,24 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
             "expected": "date_range_error=True, confirmed=False",
             "range_conflict": dict(conflict, flagged=flagged, confirmed=counted),
         })
+
+    # ТРИ ЦИФРИ ОКРЕМО, а не одна (A-09, рев'ю 22.08.2026). Заміряно: у «224»
+    # входило 178 польових перевірок, 32 інваріанти й 14 «очікується null», і
+    # єдина надрукована цифра давала зрозуміти, що це все -- витягнуті поля.
+    # Знаменник від цього не змінюється (жодна перевірка не прибирається), але
+    # склад його тепер видно і в звіті, і в JSON.
+    for c in checks:
+        if c.get("expected_blank"):
+            c["group"] = "blank"
+        elif c.get("compare") == "flag":
+            c["group"] = "invariant"
+        else:
+            c["group"] = "field"
+
+    def group_count(group):
+        rows = [c for c in checks if c["group"] == group]
+        return {"ok": sum(1 for c in rows if c["ok"]), "total": len(rows),
+                "trivial": sum(1 for c in rows if c.get("trivial"))}
 
     return {
         "id": truth["id"],
@@ -726,6 +811,7 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         "checks": checks,
         "fields_ok": sum(1 for c in checks if c["ok"]),
         "fields_total": len(checks),
+        "by_group": {g: group_count(g) for g in ("field", "invariant", "blank")},
     }
 
 
@@ -754,6 +840,9 @@ def main(argv=None):
                         help="лише ці ID через кому (LEAVE-011,TRIP-012,...) -- "
                              "щоб дорогий прогін (OCR/LLM) брав документи, "
                              "обрані за змістом, а не перші за алфавітом")
+    parser.add_argument("--fail-under", type=float, default=None,
+                        help="код виходу 1, якщо загальна частка правильних "
+                             "перевірок нижча за цей відсоток (для CI)")
     parser.add_argument("--ocr", default=None, choices=["none", "surya"],
                         help="перевизначити ocr.engine, не правлячи config.yaml")
     args = parser.parse_args(argv)
@@ -912,8 +1001,32 @@ def main(argv=None):
 
     ok_fields = sum(r["fields_ok"] for r in results)
     all_fields = sum(r["fields_total"] for r in results)
-    print(f"\nусього полів правильно: {ok_fields}/{all_fields} "
+    print(f"\nусього перевірок правильно: {ok_fields}/{all_fields} "
           f"({100 * ok_fields / max(1, all_fields):.1f}%)")
+
+    # СКЛАД ЗНАМЕННИКА (A-09). Одна цифра «224/224» читається як «224 поля», а
+    # це неправда: п'ята частина -- інваріанти й порожні поля.
+    groups = {}
+    for g in ("field", "invariant", "blank"):
+        groups[g] = {
+            "ok": sum(r["by_group"][g]["ok"] for r in results),
+            "total": sum(r["by_group"][g]["total"] for r in results),
+            "trivial": sum(r["by_group"][g]["trivial"] for r in results),
+        }
+    labels = {"field": "польових (витягнуте значення)",
+              "invariant": "інваріантів (статус, зв'язок, суперечність)",
+              "blank": "порожніх на бланку (очікується null)"}
+    print("  склад знаменника:")
+    for g in ("field", "invariant", "blank"):
+        d = groups[g]
+        if not d["total"]:
+            continue
+        pct = 100 * d["ok"] / max(1, d["total"])
+        tail = (f"   з них тривіальних: {d['trivial']}" if d["trivial"] else "")
+        print(f"    {labels[g]:44} {d['ok']:>3}/{d['total']:<3} {pct:5.1f}%{tail}")
+    print("    ^ «тривіальна» = проходить і на пайплайні, який цього не вміє "
+          "взагалі\n      (документ без пари -> «зв'язків немає»; "
+          "confirmed -> нема в чому відмовляти).")
     if blanks:
         pen_ok = ok_fields - sum(1 for _, c in blanks if c["ok"])
         pen_all = all_fields - len(blanks)
@@ -924,8 +1037,23 @@ def main(argv=None):
     print("шаблон визначено правильно: "
           f"{sum(1 for r in results if r['template_ok'])}/{len(results)}")
     print("статуси:", dict(collections.Counter(r["status"] for r in results)))
-    print("підтверджено (основний факт):",
-          sum(1 for r in results if r["confirmed"]), f"з {len(results)}")
+    # ЧАСТКА ПІДТВЕРДЖЕНИХ (A-01). Це не перевірка й у знаменник не входить --
+    # «правильної» частки не існує: на корпусі з дефектами частина документів
+    # МУСИТЬ іти людині. Цифра стоїть тут, щоб падіння підтверджень було видно
+    # в тому самому виводі, де стоїть головна цифра; карає за необґрунтовану
+    # відмову перевірка `відмова_обґрунтована`.
+    n_confirmed = sum(1 for r in results if r["confirmed"])
+    print(f"підтверджено (основний факт): {n_confirmed} з {len(results)} "
+          f"({100 * n_confirmed / max(1, len(results)):.1f}%)")
+    ungrounded = [r["id"] for r in results
+                  for c in r["checks"]
+                  if c["key"] == "відмова_обґрунтована" and not c["ok"]]
+    if ungrounded:
+        print(f"  !! НЕОБҐРУНТОВАНА ВІДМОВА на {len(ungrounded)} документах: "
+              f"{', '.join(ungrounded)}")
+        print("     ^ запис не підтверджено, але в ньому немає ЖОДНОЇ підстави "
+              "для сумніву:\n       ні прогалини, ні попередження, ні "
+              "розходження з еталоном. Відмова теж має ціну.")
 
     print("\n=== навмисні дефекти набору ===")
     for row in results:
@@ -955,6 +1083,14 @@ def main(argv=None):
         with io.open(args.report, "w", encoding="utf-8") as f:
             json.dump({"input": args.input, "llm": bool(res["llm"]),
                        "mapping_problems": map_problems,
+                       # Склад знаменника й частка підтверджених -- у звіті, а
+                       # не лише на екрані: діф двох звітів мусить показувати,
+                       # ЧИМ саме змінилась головна цифра (A-01, A-09).
+                       "totals": {"ok": ok_fields, "total": all_fields,
+                                  "by_group": groups},
+                       "confirmed_rate": {"confirmed": n_confirmed,
+                                          "documents": len(results),
+                                          "ungrounded_refusals": ungrounded},
                        "per_key": {k: v for k, v in sorted(per_key.items())},
                        "blank_expected": [
                            {"id": i, "key": c["key"], "ok": c["ok"],
@@ -963,6 +1099,35 @@ def main(argv=None):
                        "surplus": dict(surplus),
                        "results": results}, f, ensure_ascii=False, indent=1, default=str)
         print(f"\nзвіт: {args.report}")
+
+    # КОД ВИХОДУ (A-15 + C-11). Доти `main` беззастережно повертав 0, тобто
+    # прилад казав «успіх» і на прогоні, де половина полів на нулі, і на
+    # прогоні з поламаним мапінгом: єдиний ненульовий вихід був «немає файлів».
+    # Через це прилад не можна було поставити в CI -- провал вимірювання не
+    # відрізнявся від успіху.
+    #
+    # Що НЕ робимо: не оголошуємо провалом «менше 100%». Поріг ставить
+    # викликач (`--fail-under`), бо на різних корпусах він різний; без прапорця
+    # провалом лишається тільки те, що є провалом ЗАВЖДИ.
+    reasons = []
+    if map_problems:
+        reasons.append(f"мапінг: {len(map_problems)} проблем "
+                       f"(поле, яке не міряється, дає тихий 0%)")
+    if dead:
+        reasons.append("поля на нулі: " + ", ".join(k for k, _ in dead))
+    inv = groups["invariant"]
+    if inv["ok"] < inv["total"]:
+        reasons.append(f"інваріанти: {inv['total'] - inv['ok']} провалених "
+                       f"(чернетка≠факт / відмова / зв'язок / діапазон)")
+    score = 100.0 * ok_fields / max(1, all_fields)
+    if args.fail_under is not None and score < args.fail_under:
+        reasons.append(f"{score:.1f}% нижче порога --fail-under "
+                       f"{args.fail_under:.1f}%")
+    if reasons:
+        print("\n=== ПРОВАЛ ВИМІРЮВАННЯ (код виходу 1) ===", file=sys.stderr)
+        for r in reasons:
+            print(f"  - {r}", file=sys.stderr)
+        return 1
     return 0
 
 
