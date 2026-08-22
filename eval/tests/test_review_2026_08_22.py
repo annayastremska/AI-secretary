@@ -137,3 +137,128 @@ def test_exit_code_is_nonzero_below_the_fail_under_threshold():
 def test_exit_code_is_zero_on_a_clean_run():
     code = main(["--no-llm", "--input", _LEAVE_DOCX, "--fail-under", "99.0"])
     assert code == 0
+
+
+# --- A-06: holdout-еталон і гілка freeform -------------------------------
+#
+# `load_ground_truth` читав лише `per-document/*.json` і ключував за
+# `data["id"]`; holdout-еталони цього ключа не мають, тому не мірялись НІЧИМ,
+# а `grep -rin freeform eval/tests` давав 0 рядків.
+
+_HOLDOUT = os.path.join(_PROJECT_ROOT, "data", "eval", "samples", "holdout")
+
+
+def test_holdout_ground_truth_is_loaded_without_an_id_key():
+    from eval.evaluate import load_ground_truth
+
+    truth = load_ground_truth(_HOLDOUT)
+    assert truth, "holdout-еталони мусять читатись, а не тихо не знаходитись"
+    key = "ДОВІДКА_ЛІКУВАННЯ_01"
+    assert key in truth, sorted(truth)
+    # id виведено з назви файлу; сам еталон не редагувався.
+    assert truth[key]["id"] == "довідка_лікування_01"
+    assert "правильні_відповіді" in truth[key]
+
+
+def test_holdout_document_is_matched_to_its_ground_truth():
+    from eval.evaluate import doc_id_from_filename, load_ground_truth
+
+    truth = load_ground_truth(_HOLDOUT)
+    got = doc_id_from_filename("довідка_лікування_02.docx", tuple(truth))
+    assert got == "ДОВІДКА_ЛІКУВАННЯ_02"
+
+
+def test_ground_truth_answers_nobody_compares_are_reported():
+    """Дзеркало `unmeasured:`: відповідь еталона, якої прилад не питає, більше
+    не зникає в тиші. На holdout таких 11 з 11."""
+    from eval.evaluate import load_ground_truth
+
+    truth = load_ground_truth(_HOLDOUT)["ДОВІДКА_ЛІКУВАННЯ_01"]
+    row = evaluate_record(_meta("unresolved", (), template=None, facts=[]),
+                          truth, {}, None)
+    assert set(row["unmeasured_expected"]) == set(truth["правильні_відповіді"])
+
+
+def test_run_without_a_single_field_check_is_not_a_success():
+    """Прогін на holdout без моделі дає 100% з інваріантів при нулі
+    порівняних значень. Код виходу мусить це називати провалом."""
+    code = main(["--no-llm", "--eval-dir", _HOLDOUT, "--input", _HOLDOUT])
+    assert code == 1
+
+
+def test_the_expected_json_is_not_processed_as_a_document():
+    """`*.expected.json` містить ID у назві, тому доти прилад міряв кожен
+    holdout-документ двічі -- другий раз на його ж еталоні."""
+    import glob as _glob
+
+    from eval.evaluate import doc_id_from_filename, load_ground_truth
+
+    truth = load_ground_truth(_HOLDOUT)
+    names = [os.path.basename(p) for p in _glob.glob(os.path.join(_HOLDOUT, "*"))]
+    docs = [n for n in names
+            if not n.endswith(".expected.json")
+            and doc_id_from_filename(n, tuple(truth))]
+    assert len(docs) == 3, docs
+
+
+def test_freeform_record_is_always_a_draft():
+    """Гілка `_build_freeform_record` (форма не впізнана жодною схемою) не
+    покривалась ЖОДНИМ тестом, а вона -- єдина, якою поїдуть holdout-документи
+    на бойовому прогоні з моделлю. Правило продукту: форма невідома ->
+    завжди чернетка, скільком би полям LLM не «вгадала» значення."""
+    from pipeline.config import load_config
+    from pipeline.run import _build_freeform_record, build_resources
+
+    text = ("Довідка № 214/мед. Гарнізонний військовий госпіталь. "
+            "молодший сержант ГАЙДУЧЕНКО Остап Миронович перебував на "
+            "лікуванні 18 діб.")
+    cfg = load_config(os.path.join(_PROJECT_ROOT, "config.yaml"))
+    res = build_resources(cfg, force_no_llm=True)
+    res["store"] = None
+
+    class _Llm:
+        """Модель, яка «вгадала» ВСЕ: жодне поле не порожнє."""
+        def extract_batch(self, field_defs, context_text, json_schema):
+            out = {}
+            for f in field_defs:
+                name = f["name"]
+                if name == "person_rank":
+                    out[name] = "молодший сержант"
+                elif name == "person_surname":
+                    out[name] = "ГАЙДУЧЕНКО"
+                elif name == "person_given_name":
+                    out[name] = "Остап"
+                elif name == "person_patronymic":
+                    out[name] = "Миронович"
+                elif name == "document_title":
+                    out[name] = "Довідка"
+                elif name == "key_number":
+                    out[name] = 18
+                elif name == "document_number":
+                    out[name] = "214/мед"
+            return out
+
+    res = dict(res, llm=_Llm())
+    base_meta = {"id": "H-001", "source_file": "довідка.docx"}
+    meta = _build_freeform_record(text, [], {"domain": "medical", "score": 0.1},
+                                  base_meta, "electronic", [], res, cfg)
+
+    assert meta["status"] == "needs_review"
+    assert meta["template"] == "unrecognized"
+    assert meta["review_queue"] == "unknown_type"
+    assert meta["create_subject_object"] is False
+    assert meta["facts"], "витяг мусив дати хоч один факт"
+    assert all(f["confirmed"] is False for f in meta["facts"]), \
+        "форма не впізнана -> факт не може бути підтвердженим"
+
+
+def test_freeform_record_passes_the_instrument_invariants():
+    """І той самий запис мусить проходити інваріанти приладу: відмова тут
+    ОБҐРУНТОВАНА (форма не впізнана), а не необґрунтована."""
+    from eval.evaluate import evaluate_record as ev
+
+    meta = _meta("needs_review", (False,), template="unrecognized",
+                 review_queue="unknown_type",
+                 warnings=["форма не впізнана жодною схемою"])
+    row = ev(meta, {"id": "H-001"}, {}, None)
+    assert row["fields_ok"] == row["fields_total"]

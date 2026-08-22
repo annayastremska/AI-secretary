@@ -84,11 +84,27 @@ def doc_id_from_filename(name: str, known_ids):
 
 
 def load_ground_truth(eval_dir: str = None) -> dict:
+    """Еталони каталогу: РОЗКЛАДКА `per-document/<ID>.json` (ключ `id` усередині)
+    плюс РОЗКЛАДКА holdout (`<назва>.expected.json`, ключа `id` немає).
+
+    Друга гілка додана 22.08.2026 (A-06): доти читалась ЛИШЕ перша, тому
+    holdout-еталони (`data/eval/samples/holdout/*.expected.json`) не міряв
+    ЖОДЕН прогін приладу -- вони не потрапляли навіть у перелік ID, тобто
+    `--eval-dir data/eval/samples/holdout` давав «немає файлів». Ідентифікатор
+    виводиться з НАЗВИ файлу; самі еталони не редагуються (додавати в них `id`
+    заборонено правилом «еталон не редагується»).
+    """
+    root = eval_dir or EVAL_DIR
     truth = {}
-    for path in glob.glob(os.path.join(eval_dir or EVAL_DIR, "per-document", "*.json")):
+    for path in glob.glob(os.path.join(root, "per-document", "*.json")):
         with io.open(path, encoding="utf-8") as f:
             data = json.load(f)
         truth[data["id"].upper()] = data
+    for path in glob.glob(os.path.join(root, "*.expected.json")):
+        with io.open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        doc_id = data.get("id") or os.path.basename(path)[: -len(".expected.json")]
+        truth.setdefault(doc_id.upper(), dict(data, id=doc_id))
     return truth
 
 
@@ -770,6 +786,17 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
             "range_conflict": dict(conflict, flagged=flagged, confirmed=counted),
         })
 
+    # КЛЮЧІ ЕТАЛОНА, ЯКІ НЕ ПОРІВНЮВАЛИСЬ (A-06). `check_mapping` робить
+    # зворотний прохід «поле схеми -> хтось його міряє»; цього проходу
+    # («правильна відповідь -> хтось її звіряє») не було, тому еталон міг мати
+    # відповідь, якої прилад не питає, і цифра прогону від цього не страждала.
+    # Найгостріше -- на holdout: там правильних відповідей 11, а перевірок
+    # значень нема жодної, бо шаблону немає й `templates:` не діє.
+    measured_keys = {c["key"] for c in checks}
+    unmeasured_expected = sorted(
+        [k for k in expected if k not in measured_keys]
+        + [k for k in person if k not in measured_keys])
+
     # ТРИ ЦИФРИ ОКРЕМО, а не одна (A-09, рев'ю 22.08.2026). Заміряно: у «224»
     # входило 178 польових перевірок, 32 інваріанти й 14 «очікується null», і
     # єдина надрукована цифра давала зрозуміти, що це все -- витягнуті поля.
@@ -795,8 +822,13 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         "чинний": truth.get("чинний"),
         "template": template,
         # Та сама мапа, що в check_mapping -- одне джерело (R-A1-05).
-        "template_ok": (template == (mapping.get("doc_types") or {})
-                        .get(truth.get("тип"))),
+        # None, а не True, коли еталон не оголошує `тип` (holdout, A-06):
+        # доти `None == doc_types.get(None)` давало True, тобто прилад
+        # звітував «шаблон визначено правильно» про документ, про який еталон
+        # взагалі не каже, який шаблон правильний.
+        "template_ok": (None if not truth.get("тип") else
+                        (template == (mapping.get("doc_types") or {})
+                         .get(truth.get("тип")))),
         "status": meta.get("status"),
         # Причина, чому документ не дійшов до екстракції. Без неї звіт не
         # відрізняв "OCR віддав порожнє" від "текст є, анкори не збіглись", і
@@ -809,6 +841,7 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         "date_range_error": meta.get("date_range_error"),
         "unknown_critical_fields": meta.get("unknown_critical_fields") or [],
         "checks": checks,
+        "unmeasured_expected": unmeasured_expected,
         "fields_ok": sum(1 for c in checks if c["ok"]),
         "fields_total": len(checks),
         "by_group": {g: group_count(g) for g in ("field", "invariant", "blank")},
@@ -870,8 +903,14 @@ def main(argv=None):
 
     known_ids = tuple(truth.keys())
     paths = sorted(glob.glob(os.path.join(args.input, "*")))
+    # Сам ЕТАЛОН документом не є: у holdout-розкладці `*.expected.json` лежить
+    # поруч із документом і містить його ID у назві, тому без цього фільтра
+    # прилад міряв кожен holdout-документ ДВІЧІ -- другий раз на його ж
+    # еталоні (A-06, виявлено при першому прогоні на holdout).
     paths = [p for p in paths
-             if os.path.isfile(p) and doc_id_from_filename(os.path.basename(p), known_ids)]
+             if os.path.isfile(p)
+             and not p.endswith(".expected.json")
+             and doc_id_from_filename(os.path.basename(p), known_ids)]
     if args.only:
         wanted = {s.strip().upper() for s in args.only.split(",") if s.strip()}
         paths = [p for p in paths
@@ -1034,8 +1073,27 @@ def main(argv=None):
               f"без них: {pen_ok}/{pen_all} "
               f"({100 * pen_ok / max(1, pen_all):.1f}%) -- саме цю цифру "
               f"порівнюйте з замірами до 13.08")
+    # ВІДПОВІДІ ЕТАЛОНА, ЯКИХ ПРИЛАД НЕ ПИТАЄ (A-06). Дзеркало розділу
+    # `unmeasured:` у мапінгу: там оголошуються неміряні поля СХЕМИ, а тут
+    # видно неміряні ключі ЕТАЛОНА. Без цього блоку прогін на holdout друкував
+    # би 100% при нулі порівняних значень.
+    unmeasured = collections.Counter(
+        k for r in results for k in r.get("unmeasured_expected") or [])
+    if unmeasured:
+        print(f"\n  ? ВІДПОВІДІ ЕТАЛОНА, ЯКІ НЕ ПОРІВНЮВАЛИСЬ "
+              f"({len(unmeasured)} ключів):")
+        for key, n in unmeasured.most_common():
+            print(f"     {key:24} на {n} документах")
+        print("     ^ на ці ключі прилад не питає нічого: у мапінгу немає рядка "
+              "для них\n       (або документ пішов гілкою без шаблону -- тоді "
+              "`templates:` не діє взагалі).")
+
+    typed = [r for r in results if r["template_ok"] is not None]
     print("шаблон визначено правильно: "
-          f"{sum(1 for r in results if r['template_ok'])}/{len(results)}")
+          f"{sum(1 for r in typed if r['template_ok'])}/{len(typed)}"
+          + (f" (ще {len(results) - len(typed)} документів без оголошеного "
+             f"`тип` в еталоні -- правильний шаблон невідомий)"
+             if len(typed) != len(results) else ""))
     print("статуси:", dict(collections.Counter(r["status"] for r in results)))
     # ЧАСТКА ПІДТВЕРДЖЕНИХ (A-01). Це не перевірка й у знаменник не входить --
     # «правильної» частки не існує: на корпусі з дефектами частина документів
@@ -1115,6 +1173,11 @@ def main(argv=None):
                        f"(поле, яке не міряється, дає тихий 0%)")
     if dead:
         reasons.append("поля на нулі: " + ", ".join(k for k, _ in dead))
+    if not groups["field"]["total"]:
+        # Прогін, у якому не порівняно ЖОДНОГО значення, показує 100% з
+        # інваріантів (заміряно на holdout: 18/18 при нулі полів). Це не успіх.
+        reasons.append("жодної польової перевірки -- прогін не порівняв ні "
+                       "одного значення (відсоток тримається на інваріантах)")
     inv = groups["invariant"]
     if inv["ok"] < inv["total"]:
         reasons.append(f"інваріанти: {inv['total'] - inv['ok']} провалених "
