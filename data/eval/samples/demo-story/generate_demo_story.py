@@ -342,14 +342,21 @@ def render_pdf(path, pages, *, fontsize=11, line_h=15, gap=11):
                 f'<div style="font-family:serif;font-size:{fontsize}px;'
                 f'line-height:1.25">{body}</div>')
             y += height + gap
-    doc.save(path)
+    # subset_fonts + garbage/deflate: інакше кожен PDF важить ~1.3 МБ (повний
+    # вбудований шрифт), а в git їх шість.
+    try:
+        doc.subset_fonts()
+    except Exception:
+        pass
+    doc.save(path, garbage=4, deflate=True, clean=True)
     doc.close()
 
 
 # ---------------------------------------------------------------------------
 # «Знімок телефоном»: навмисно погана якість
 # ---------------------------------------------------------------------------
-def pdf_first_page_image(pdf_path, dpi=200):
+# 150 dpi, а не 200: і ближче до знімка аркуша телефоном, і файл утричі менший.
+def pdf_first_page_image(pdf_path, dpi=150):
     import fitz
 
     doc = fitz.open(pdf_path)
