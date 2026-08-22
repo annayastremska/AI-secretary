@@ -1328,3 +1328,39 @@ def test_normative_document_is_not_queued_for_human_review():
     # OK -- це маркер статусу confirmed у виводі CLI; UNRS означав би, що
     # документ знову поїхав у чергу як невпізнаний тип.
     assert "UNRS" not in (out.stdout or ""), out.stdout[-500:]
+
+
+def test_normative_act_caught_by_formal_markers_not_topic():
+    """Нормативний акт упізнається за ФОРМАЛЬНИМИ ознаками, а не за темою.
+
+    Причина (Анна, 22.08.2026): `normative` -- це РІД тексту, не тема. Закон
+    «Про оборону України» говорить про техніку, наказ про зміни до інструкції
+    -- про штат; змагаючись балами з тематичними доменами, вони й отримували
+    `equipment` і `staffing`, а з тематичним доменом акту дістається ще й вид
+    суб'єкта, тобто фантомний об'єкт у реєстрі.
+
+    Тест перевіряє ОБА боки правила, бо тільки разом вони щось означають:
+    формальні маркери ловлять акт незалежно від довжини й теми -- і НЕ ловлять
+    заповнений бланк.
+    """
+    from pipeline.classification.classify import (
+        classify_domain_rules, load_domain_keyphrases)
+    domains = load_domain_keyphrases(
+        os.path.join(_PROJECT_ROOT, "pipeline", "dictionaries",
+                     "domain_keyphrases.yaml"))
+
+    # Короткий акт: 300 символів, тобто НИЖЧЕ порога довжини (20000) -- саме
+    # цей випадок раніше провалювався, маючи досить ознак.
+    act = ("НАКАЗ Міністерства оборони України. Про внесення змін до "
+           "Інструкції з організації обліку. НАКАЗУЮ: 1. Затвердити Зміни. "
+           "Цей наказ набирає чинності з дня його офіційного опублікування.")
+    domain, scores = classify_domain_rules(act, domains)
+    assert domain == "normative", (domain, scores)
+    assert "formal_markers" in str(scores.get("normative")), scores
+
+    # Заповнений бланк -- формальних ознак акта не має за побудовою.
+    ticket = ("ВІДПУСКНИЙ КВИТОК № 118 сержант ПРИЙМАК Остап Русланович "
+              "військова частина Ж3085 щорічна основна відпустка "
+              "з 24 серпня 2026 по 06 вересня 2026 на 14 діб м. Тихолісся")
+    domain, _ = classify_domain_rules(ticket, domains)
+    assert domain != "normative", domain
