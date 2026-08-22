@@ -14,7 +14,7 @@
 | профіль пайплайна | `config-app.yaml` зашитий | `APP_PIPELINE_CONFIG` → на сервері `demos/upload_app/config-gpu.yaml` |
 | шари 12B на GPU | `n_gpu_layers: 0` | `-1` у `config-gpu.yaml` (усі шари у VRAM) |
 | шари OCR на GPU | `0` (CPU, бо Vulkan на ноуті нестабільний) | `99` (CUDA) |
-| `llama_server_path` | абсолютний Windows-шлях | `null` (на Linux surya знаходить сама) |
+| `llama_server_path` | абсолютний Windows-шлях | `null` — але **не** тому, що «surya знайде сама»: на NVIDIA вона взагалі не шукає бінарник, а піднімає vllm у docker (п. 3.5) |
 | батч полів LLM | 4 | 8 (на GPU вузьке місце — кількість викликів, не prefill) |
 | модель чату (4B) | `n_gpu_layers=0` зашито | `CHAT_N_GPU_LAYERS` з оточення |
 | хост/порт апки | лише в командному рядку | `APP_HOST`/`APP_PORT`, дефолт `127.0.0.1:8000` |
@@ -44,74 +44,221 @@ Basic поверх plain HTTP передає пароль відкритим т�
 випадкового сканера, а не захист даних — саме тому правило «лише синтетика»
 не обговорюється.
 
-## 3. Розгортання з нуля
+## 3. Розгортання з нуля — зроблено 22.08.2026
+
+Далі — те, що реально виконано на машині, з пастками, у які ми там вступили.
+Порядок збережено; кроки, яких у плані не було, позначені словом **пастка**.
+
+Машина: H100-80C (vGPU, 80 ГіБ), 188 ГБ RAM, 16 ядер, Ubuntu 24.04,
+Python 3.12.3, драйвер 580.126.09 (тобто CUDA 13 на рівні драйвера).
+Диск на початку — 48 ГБ (вільно 32), під час розгортання його **розширили до
+96,9 ГБ** (не ми; provider або хтось із команди). Це змінило висновок по
+розпізнаванню на GPU — див. п. 3.5.
+
+### 3.1 Код на сервер
+
+Репозиторій приватний, а креденшели GitHub на спільний сервер не кладемо.
+Тому — `git bundle` через scp, без жодного токена на машині:
 
 ```bash
-ssh -p 7301 -i <KEY_FILE> ubuntu@185.9.41.1
-nvidia-smi                                   # переконатись, що H100 видно
-sudo apt update && sudo apt install -y python3-venv git tmux docker.io docker-compose-v2
+# у себе
+git bundle create repo.bundle anya-pipeline origin/andriy-db     # 38 МБ
+scp -P 7301 -i <KEY_FILE> repo.bundle ubuntu@185.9.41.1:~/anya/
+# на сервері
+cd ~/anya && git clone -b anya-pipeline repo.bundle ai-secretary && cd ai-secretary
+git fetch ~/anya/repo.bundle "refs/remotes/origin/andriy-db:refs/remotes/origin/andriy-db"
+```
 
-git clone <repo> ai-secretary && cd ai-secretary
-git checkout anya-pipeline
+Бандл несе лише закомічене, тобто `data-private/` у нього не потрапляє
+за побудовою — це додатковий запобіжник до правила «лише синтетика».
+
+### 3.2 Системні пакети
+
+```bash
+sudo apt update && sudo apt install -y python3-venv python3-pip docker.io docker-compose-v2
+```
+
+docker на машині не було. Стало: docker 29.1.3, docker compose 2.40.3.
+`sudo usermod -aG docker ubuntu` — щоб docker працював без sudo (діє з
+наступного входу).
+
+### 3.3 Python-оточення
+
+```bash
 python3 -m venv .venv && . .venv/bin/activate
-
-pip install -r requirements.txt
-pip install -r requirements-gpu.txt          # ПОВЕРХ: CUDA-збірки
-pip install -r requirements-optional.txt     # surya-ocr
-pip install -r demos/upload_app/requirements.txt
+pip install --no-cache-dir -r requirements.txt
+pip install --no-cache-dir -r requirements-gpu.txt
+pip install --no-cache-dir -r requirements-optional.txt
+grep -v -i "^gradio" demos/upload_app/requirements.txt > /tmp/app-req.txt
+pip install --no-cache-dir -r /tmp/app-req.txt        # апка БЕЗ gradio
+pip install --no-cache-dir -r requirements-dev.txt    # pytest
+pip install --no-cache-dir alembic "psycopg[binary]"  # бік БД, для Андрія
 ```
 
-**Ваги моделей** (важкий крок, ~9,3 ГБ, десятки хвилин на завантаження):
+`--no-cache-dir` не косметика: кеш коліс torch — це кілька ГБ на диску, який
+тут вузьке місце. `gradio` не ставимо свідомо (рішення Анни: чат у розробці),
+Ollama — теж ні (тримала б другу копію ваг).
+
+**Пастка 1 — після цієї послідовності llama-cpp-python лишається CPU-збіркою.**
+На індексі `/cpu` лежить 0.3.35, на `/cu124` — максимум 0.3.19 для cp312. pip
+бере найвищу версію, тобто CPU-колесо; далі `requirements-gpu.txt` бачить
+`llama-cpp-python>=0.3.0,<0.4` уже «задоволеним» і **нічого не переставляє**.
+Помилки немає, просто LLM тихо на CPU. Лікування — версія прямо:
 
 ```bash
-python pipeline/scripts/download_model.py            # 12B, ~6.8 ГБ -> models/
-python pipeline/scripts/download_model.py --size 4b  # 4B,  ~2.5 ГБ (модель чату)
+pip install --no-cache-dir --force-reinstall --no-deps "llama-cpp-python==0.3.19" \
+  --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+python -c "import llama_cpp; print(llama_cpp.llama_supports_gpu_offload())"   # мусить бути True
 ```
 
-Surya довантажує власні ваги розпізнавання при першому запуску (з HuggingFace,
-кілька ГБ) — це нормально; `ocr.hub_offline` лишаємо `false`, інакше перший
-запуск зламається.
-
-**База** (зона команди БД, їхній README — `db/README.md`):
+**Пастка 2 — torch приїде cu130, не cu124, і це нормально.** `surya-ocr`
+вимагає `torch>=2.7`, а на індексі cu124 максимум 2.6.0 — тому torch
+береться з PyPI: `2.13.0+cu130`. З драйвером 580 він працює
+(`torch.cuda.is_available() == True`). Наслідок: у venv немає
+`libcudart.so.12`/`libcublas.so.12`, яких хоче cu124-збірка llama-cpp, і
+`import llama_cpp` падає з `libcudart.so.12: cannot open shared object file`.
+Лікування — доставити саме ці бібліотеки й показати їх лінкеру:
 
 ```bash
-cp .env.example .env && nano .env            # паролі -- тільки тут, не в git
-docker compose up -d postgres minio
-alembic upgrade head
+pip install --no-cache-dir nvidia-cuda-runtime-cu12 nvidia-cublas-cu12
+export LD_LIBRARY_PATH=$SP/nvidia/cuda_runtime/lib:$SP/nvidia/cublas/lib:$LD_LIBRARY_PATH
 ```
 
-**Запуск апки:**
+(`$SP` — site-packages venv.) Це, разом з іншим оточенням, лежить у
+`~/anya/env.sh` на сервері: `. ~/anya/env.sh` перед будь-яким прогоном.
+
+### 3.4 Ваги моделі — 27B
+
+Рішення Анни: 27B, не 12B. 12B і 4B на сервер **не** качали взагалі — другої
+копії ваг диск не витримає, а чат ми не запускаємо.
 
 ```bash
-tmux new -s app
-export APP_PIPELINE_CONFIG=demos/upload_app/config-gpu.yaml
-export CHAT_N_GPU_LAYERS=-1
-export APP_HOST=0.0.0.0
-export APP_PORT=80
-export APP_BASIC_USER=<логін> APP_BASIC_PASS=<пароль>
-sudo -E .venv/bin/python -m demos.upload_app.app     # порт 80 -> потрібен root
+python pipeline/scripts/download_model.py --size 27b --models-dir ~/shared/models
 ```
 
-Ззовні: `http://185.9.41.1:7302` (чат — `/chat`), логін/пароль ті, що вище.
+Точно: репозиторій `INSAIT-Institute/MamayLM-Gemma-3-27B-IT-v2.0-GGUF`, файл
+`MamayLM-Gemma-3-27B-IT-v2.0-Q4_K_M.gguf`, **15,41 ГіБ** (16 546 689 152 Б),
+лягає як `~/shared/models/mamaylm-27b-q4_k_m.gguf`. Це спільна тека
+(домовленість `~/README-домовленості.md`), не своя.
 
-## 4. Перевірка після розгортання — обов'язкова
+Скрипт тепер знає `--size 27b` і **перевіряє вільне місце ДО** завантаження:
+обірватись на 90% шістнадцятигігабайтного файлу — це змарновані десятки
+хвилин.
+
+### 3.5 Розпізнавання фото на GPU — окрема історія
+
+Коментар у `config-gpu.yaml` («на Linux surya знаходить llama-server сама»)
+**неправильний**. Реальність: surya вибирає бекенд за наявністю NVIDIA, і на
+GPU-машині це `vllm`, який піднімається **лише як docker-контейнер із
+nvidia-runtime**. Без `nvidia-container-toolkit` перший же фото-документ дає
+`SpawnError: docker run failed: unknown or invalid runtime name: nvidia`.
+
+```bash
+# репозиторій nvidia-container-toolkit + встановлення
+sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+docker run --rm --gpus all ubuntu:24.04 nvidia-smi -L      # мусить показати H100
+```
+
+Ціна питання — **образ `vllm/vllm-openai:v0.20.1` займає 31,8 ГБ на диску.**
+На початковому диску 48 ГБ це не вміщалося поруч із 27B, і ми вже були готові
+віддати OCR на CPU (у `~/anya/llamacpp` лежить CPU-складання `llama-server`,
+реліз b10586 — прогін фото на ньому: 42 с). Диск розширили до 96,9 ГБ, тому
+пішли правильним шляхом — vllm на GPU. Якщо диск колись знову стане вузьким:
+
+```bash
+docker image rm vllm/vllm-openai:v0.20.1     # звільняє 31,8 ГБ
+# запасний шлях: SURYA_INFERENCE_BACKEND=llamacpp + ocr.llama_server_path
+# на ~/anya/llamacpp/llama-b10586/llama-server (розпізнавання піде на CPU)
+```
+
+**Пам'ять GPU.** Дефолт surya — `VLLM_GPU_MEMORY_UTILIZATION=0.85`, тобто ~68
+ГіБ під vllm. Але в тому ж GPU одночасно живе наша 27B (~19 ГіБ), тож
+виставляємо `0.35`: заміряно, що обидва процеси тримають VRAM разом
+(vllm 28,9 ГіБ + llama 18,9 ГіБ) і нічого не падає.
+
+### 3.6 Профіль цієї машини
+
+`demos/upload_app/config-server.yaml` — зроблений із `config-gpu.yaml`,
+відрізняється абсолютним шляхом до ваг 27B. У git не їде (шлях конкретної
+машини), лежить лише на сервері; що саме в ньому змінено — у `~/anya/README.md`.
+
+### 3.7 База — підготовлено, але не піднято (зона Андрія)
+
+Що вже стоїть, щоб Андрій прийшов на готове: docker + compose v2, образ
+**`pgvector/pgvector:pg16`** (621 МБ) завантажений, `alembic 1.19.1` і
+`psycopg 3.3.4` у venv, гілка `origin/andriy-db` є в клоні `~/anya/ai-secretary`.
+
+Розширення `vector` — усередині образу, окремо ставити нічого не треба.
+
+**Що змінилось проти цього рунбука:** MinIO у Андрієвому `docker-compose.yml`
+**більше немає** (прибраний 20.08 — оригінали лежать текою, 30-денне видалення
+робить `db/scripts/purge_expired_originals.py`). Тому «образи postgres і minio»
+= один образ postgres.
+
+Ми **не** підіймали базу й не робили міграцій свідомо: `.env` вимагає паролів,
+а вигадувати їх за власника бази — гірше, ніж лишити один крок. Йому лишається:
+
+```bash
+cd ~/anya/ai-secretary && git checkout origin/andriy-db -- docker-compose.yml .env.example db/ alembic.ini
+cp .env.example .env && nano .env && docker compose up -d postgres && alembic upgrade head
+```
+
+Два попередження для нього: (1) у його `docker-compose.yml` сервіси airflow
+монтують **Windows-шлях** `D:/AI-secretary-anya/...` — на Linux це зламається,
+образи airflow ми не тягнули; (2) `docker` без sudo працює з наступного входу
+(група додана).
+
+### 3.8 Апку не запускали
+
+Свідомо (рішення Анни): чат ще в розробці, `gradio` не встановлений, гейт на
+апку не ставили. Порт 80 вільний. На сервері перевірявся **лише пайплайн**
+через `run_pipeline.py`.
+
+## 4. Перевірка після розгортання — результати 22.08.2026
+
+Усі цифри нижче зняті на комміті `8272ad6` (клон на сервері доведений до нього;
+тести й регресію прогнали двічі — до й після оновлення коду, збіглося). Тестові
+виходи (`data/output`, `data/output-demo`, `data/processed`) після перевірок
+почищені, як вимагають критерії приймання демо-прогону.
 
 Порядок саме такий: спершу переконатись, що GPU справді задіяний, і лише
 потім міряти час, інакше «швидко» може виявитись «швидко на CPU».
 
-1. `nvidia-smi` під час прогону — процес `python` має тримати VRAM;
-2. у виводі старту пайплайна перевірити рядок `LLM: увімкнено | OCR: surya`;
-3. три файли наскрізь через апку: `TRIP-002.docx`, `LEAVE-002.png`,
-   `data/eval/samples/holdout/довідка_лікування_01.docx` (невідома форма —
-   мусить дати чесний `unresolved`, а не вигадку);
-4. **регресія якості** — головне: `python -m eval.evaluate --no-llm` на
-   leave/deployment docx мусить дати ті самі **224/224** і **183/183**, що
-   локально. Інша цифра означає, що GPU-шлях змінив РЕЗУЛЬТАТ, а не лише
-   швидкість, і це блокер, а не дрібниця;
-5. `python -m pytest eval/tests -q` — 223 зелених;
-6. заміряти й записати часи по кроках (OCR, LLM, запис у базу) у
-   `demos/upload_app/README.md`, розділ «Заміряний час кроків», окремою
-   колонкою «H100» поруч із локальними цифрами.
+| # | Перевірка | Результат |
+|---|---|---|
+| 1 | `nvidia-smi` | H100-80C, 81 920 МіБ, драйвер 580.126.09 — видно |
+| 2 | GPU справді задіяний | `nvidia-smi` під прогоном: процес python тримає **18 921 МіБ** VRAM, у логу `offloaded 63/63 layers to GPU`, `CUDA0 model buffer size = 15773.97 MiB` |
+| 3 | `python -m pytest eval/tests -q` | **224 passed** за 5,76 с |
+| 4 | регресія якості (`--no-llm`) | leave/synthetic-2026-05/docx — **224/224 (100%)**; deployment/synthetic-2026-05/docx — **183/183 (100%)**. Тобто середовище не змінило результат |
+| 5 | наскрізь із моделлю | docx і фото — див. таблицю часу нижче |
+
+Пункт 2 варто робити саме так: перший наш docx (`DEMO-01.docx`) закрився
+детермінованим шляхом і LLM не викликав узагалі — GPU при цьому чистий, і за
+цим легко прийняти хибний висновок. Документ, який гарантовано доходить до
+моделі, — невідома форма `data/eval/samples/holdout/довідка_лікування_01.docx`.
+
+**Заміряний час (H100, 27B Q4_K_M на GPU, OCR через vllm):**
+
+| Вхід | Час | Результат |
+|---|---|---|
+| `DEMO-02.docx` (детермінований шлях, без LLM) | 2,5 с | `confirmed` |
+| `довідка_лікування_01.docx` (невідома форма, через LLM) | 37,5 с | `needs_review`, `unrecognized` — чесно, без вигадки |
+| одне фото (`DEMO-06.png`), окремим процесом | 2 хв 46 с | `confirmed` |
+| 4 фото однією командою (`story-photo/`) | 4 хв 05 с | 3 `confirmed`, 1 `needs_review` |
+
+З останніх двох рядків видно головне про фото: **~2,5 хв — це холодний старт
+контейнера vllm, і він платиться раз на процес**, далі ~23 с на фото. Тобто для
+демо контейнер треба піднімати заздалегідь (`SURYA_INFERENCE_URL`), а не
+запускати пайплайн по одному файлу.
+
+Генерація 27B: ~10,6 токен/с на декодуванні, prompt eval ~47 токен/с
+(заміряно `~/anya/gpu_check.py`). Для H100 це небагато — машина віддана як
+vGPU-профіль `H100-80C`; окремо це не досліджували, бо на час обробки
+документа не впливає критично.
+
+**Диск після всього:** 74 ГБ зайнято з 96,9, **вільно 18 ГБ**. З них
+найбільше: vllm-образ 31,8 ГБ, ваги 27B 16 ГБ, venv 11 ГБ (torch cu130 з
+бібліотеками nvidia), образ postgres 0,6 ГБ, ваги surya 1,4 ГБ.
 
 ## 5. Чого цей перенос НЕ вирішує
 
@@ -124,12 +271,20 @@ sudo -E .venv/bin/python -m demos.upload_app.app     # порт 80 -> потрі
 - **Термін.** Сервер обіцяний до 31.08. Локальний шлях лишається основним;
   сервер — для демо.
 
-## 6. Не перевірено на живому сервері
+## 6. Що на сервері так і НЕ перевірено
 
-Цей документ і зміни в коді підготовлені **без доступу до самої машини**
-(ключа в нас немає). Локально перевірено: конфіг `config-gpu.yaml`
-завантажується, `app.py` і `chat.py` синтаксично й імпортово цілі, запобіжник
-відмови на не-localhost працює, тести 223 зелені. **Що може відрізнятись на
-сервері:** назви пакетів apt, версія CUDA (файл цілиться в cu124 — якщо на
-машині інша, індекс колеса треба замінити), права на порт 80, наявність
-docker compose v2. Це виявиться на першому ж запуску й правиться на місці.
+Розгортання 22.08 закрило пайплайн, але не все:
+
+- **апка й чат** — не запускались узагалі (gradio не встановлений). Тобто
+  ланцюг «браузер → апка → пайплайн → база» на сервері не бачив ніхто;
+- **база** — не піднята, міграції не робились (п. 3.7): це крок Андрія;
+- **пункт «часи по кроках» окремою колонкою H100** у
+  `demos/upload_app/README.md` — не заповнений: заміри в п. 4 зняті через
+  `run_pipeline.py`, а не через апку, тож у ту таблицю вони не кладуться
+  прямо;
+- **`hub_offline`** лишається `false`: surya ходить по свої ваги на
+  HuggingFace, у логах видно попередження про неавтентифіковані запити.
+
+Крім того, диск на машині **розширили під час нашої роботи** (48 → 96,9 ГБ) —
+не нами. Тобто на спільній машині хтось ще щось міняє, і 18 ГБ вільного місця
+не варто вважати гарантією: перед довгим завантаженням дивіться `df -h /`.
