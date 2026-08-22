@@ -3,6 +3,13 @@
 
     python pipeline/scripts/download_model.py            # 12B, ~6.8 ГБ (за замовчуванням)
     python pipeline/scripts/download_model.py --size 4b  # 4B, ~2.5 ГБ (якщо машина не тягне 12B)
+    python pipeline/scripts/download_model.py --size 27b # 27B, ~16.5 ГБ (лише GPU-сервер)
+
+27B має сенс тільки там, де вся модель влазить у VRAM (H100 80 ГБ) -- на
+ноутбуці вона не поміститься ні у пам'ять, ні в розумний час. На спільному
+сервері ваги кладемо в спільну папку, а не собі:
+
+    python pipeline/scripts/download_model.py --size 27b --models-dir ~/shared/models
 
 Файл кладеться під ФІКСОВАНОЮ локальною назвою (models/mamaylm-<size>-q4_k_m.gguf),
 на яку вже вказує config.example.yaml, тому після завантаження конфіг правити
@@ -21,7 +28,10 @@ import sys
 REPOS = {
     "4b": "INSAIT-Institute/MamayLM-Gemma-3-4B-IT-v1.0-GGUF",
     "12b": "INSAIT-Institute/MamayLM-Gemma-3-12B-IT-v2.0-GGUF",
+    "27b": "INSAIT-Institute/MamayLM-Gemma-3-27B-IT-v2.0-GGUF",
 }
+# Приблизний розмір Q4_K_M -- лише для повідомлень і підказки в --help.
+SIZES_GB = {"4b": 2.5, "12b": 6.8, "27b": 16.5}
 QUANT = "Q4_K_M"
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,17 +39,32 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Завантажити ваги MamayLM у models/")
     parser.add_argument("--size", choices=sorted(REPOS), default="12b",
-                        help="12b (~6.8 ГБ, основна) або 4b (~2.5 ГБ, якщо машина не тягне 12B)")
+                        help="12b (~6.8 ГБ, основна), 4b (~2.5 ГБ, якщо машина не тягне 12B) "
+                             "або 27b (~16.5 ГБ, лише для GPU-сервера)")
     parser.add_argument("--models-dir", default=os.path.join(PROJECT_ROOT, "models"))
     parser.add_argument("--filename", default=None,
                         help="конкретний .gguf у репозиторії, якщо їх кілька")
     args = parser.parse_args(argv)
 
-    target = os.path.join(args.models_dir, f"mamaylm-{args.size}-q4_k_m.gguf")
+    models_dir = os.path.expanduser(args.models_dir)
+    target = os.path.join(models_dir, f"mamaylm-{args.size}-q4_k_m.gguf")
     if os.path.exists(target):
         print(f"Ваги вже на місці: {target}")
         print(f"({round(os.path.getsize(target) / 1024 ** 3, 2)} ГБ) -- нічого не завантажую.")
         return 0
+
+    # Місце перевіряємо ДО завантаження: обірватись на 90% 16-гігабайтного
+    # файлу через забитий диск -- це змарновані десятки хвилин, та ще й на
+    # спільному сервері, де диск закінчується не лише для тебе.
+    need_gb = SIZES_GB[args.size]
+    probe = models_dir if os.path.isdir(models_dir) else os.path.dirname(os.path.abspath(models_dir)) or "."
+    free_gb = shutil.disk_usage(probe).free / 1024 ** 3
+    print(f"Вільно на диску: {free_gb:.1f} ГБ, потрібно ~{need_gb} ГБ")
+    if free_gb < need_gb * 1.1:
+        print(f"Замало місця для {args.size.upper()}: потрібно ~{need_gb} ГБ плюс запас, "
+              f"вільно {free_gb:.1f} ГБ. Звільніть місце або візьміть менший розмір.",
+              file=sys.stderr)
+        return 1
 
     try:
         from huggingface_hub import hf_hub_download, list_repo_files
@@ -72,10 +97,10 @@ def main(argv=None):
 
     filename = args.filename or candidates[0]
     print(f"Файл: {filename}\nЗавантаження (це кілька ГБ, буде довго)...")
-    os.makedirs(args.models_dir, exist_ok=True)
+    os.makedirs(models_dir, exist_ok=True)
     try:
         downloaded = hf_hub_download(repo_id=repo_id, filename=filename,
-                                     local_dir=args.models_dir)
+                                     local_dir=models_dir)
     except KeyboardInterrupt:
         print("\nПерервано користувачем -- частково завантажений файл лишився "
               "в кеші huggingface_hub, повторний запуск продовжить з того місця.",
@@ -97,7 +122,12 @@ def main(argv=None):
     print(f"\nГотово: {target}")
     print(f"Розмір: {round(os.path.getsize(target) / 1024 ** 3, 2)} ГБ")
     rel = os.path.relpath(target, PROJECT_ROOT).replace(os.sep, "/")
-    if args.size == "12b":
+    if rel.startswith(".."):
+        # Ваги поза репозиторієм (напр. спільна папка на сервері) -- відносний
+        # шлях виду ../../shared/... у конфізі нічого не пояснює й ламається
+        # при переносі. Показуємо абсолютний.
+        rel = os.path.abspath(target).replace(os.sep, "/")
+    if args.size == "12b" and not rel.startswith("/"):
         print("\nconfig.example.yaml уже вказує на цей шлях -- правити нічого не потрібно.")
     else:
         print(f"\nУ config.yaml вкажіть:\n  llm:\n    model_path: {rel}")
