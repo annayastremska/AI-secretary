@@ -1328,25 +1328,72 @@ def _compile_variants(field_def):
     return out
 
 
+#: Патерн збігся БІЛЬШЕ НІЖ ОДИН раз, і збіги дають РІЗНІ значення: документ
+#: каже дві різні речі, а `search()` тихо брав перше. Це не значення, а
+#: питання до людини. Константа, не літерал: build_record читає цей префікс,
+#: щоб показати рев'юеру самі кандидати (raw_text), і перейменування не сміє
+#: тихо розірвати зв'язок -- та сама дисципліна, що з NAME_TAIL_METHOD.
+AMBIGUOUS_MATCH_METHOD = "ambiguous_multiple_matches"
+
+
+def _variant_value(groups, is_date, fix):
+    """Значення одного збігу у формі, яку віддає extract_field_regex."""
+    if is_date:
+        return {"day": fix(groups.get("day")),
+                "month": fix(groups.get("month")),
+                "year": fix(groups.get("year"))}
+    return fix(groups.get("value"))
+
+
 def extract_field_regex(field_def, text: str):
     """Пробує всі відомі варіанти по черзі. Групи стандартизовані за типом
     поля: date -> (day, month, year); інші -> (value).
+
+    БІЛЬШЕ ОДНОГО РІЗНОГО збігу одного варіанта -> `ambiguous_multiple_matches`,
+    не перше значення (рев'ю 22.08.2026, C-03). Раніше тут стояв
+    `pattern.search(text)`, тобто ПЕРШИЙ збіг у ВСЬОМУ тексті, і документ із
+    згадкою чужих реквізитів («Відповідно до наказу командира № 777/К від
+    01.01.2020 р.» перед текстом квитка) віддавав `document_number = 777/К`,
+    `document_date = 2020-01-01` з provenance `matched`/0.9 -- і ці значення
+    доїжджали в БД ОКРЕМИМИ підтвердженими рядками `facts`, тобто найсильніше
+    твердження системи («прочитано з бланка») стояло на пошуку по всьому
+    тексту. Однакові збіги (той самий номер, надрукований двічі) неоднозначністю
+    НЕ є -- порівнюються саме РІЗНІ значення.
+
+    Правило свідомо загальне, а не на два поля: «у документі два різних
+    кандидати» -- це неоднозначність для будь-якого поля, витягнутого regex-ом,
+    і опція «бери перший» ніде не була обґрунтована, вона просто дісталась від
+    `search()`.
 
     Захоплене значення проганяється через `fix_declared_numeric` ЛИШЕ якщо
     патерн справді був розширений (`was_expanded`). Якщо `\\d` у патерні не
     було, автор схеми не оголошував це число -- і перетворювати літери на
     цифри в захопленому тексті не можна (напр. вид відпустки чи мета
     відрядження -- вільний текст, де "б" має лишитись "б")."""
+    is_date = field_def.get("type") == "date"
     for pattern, was_expanded in _compile_variants(field_def):
-        m = pattern.search(text)
-        if m:
-            groups = m.groupdict()
-            fix = fix_declared_numeric if was_expanded else (lambda x: x)
-            if field_def.get("type") == "date":
-                return {"day": fix(groups.get("day")),
-                        "month": fix(groups.get("month")),
-                        "year": fix(groups.get("year"))}, "matched"
-            return fix(groups.get("value")), "matched"
+        fix = fix_declared_numeric if was_expanded else (lambda x: x)
+        values = []
+        for m in pattern.finditer(text):
+            value = _variant_value(m.groupdict(), is_date, fix)
+            # Порівнюємо за нормалізованим виглядом, а не за об'єктом: dict
+            # date-груп не хешується, а зайві пробіли не роблять збіг іншим.
+            key = tuple(sorted((k, (v or "").strip()) for k, v in value.items())) \
+                if isinstance(value, dict) else (value or "").strip()
+            if all(key != k for k, _ in values):
+                values.append((key, value))
+        if not values:
+            continue
+        if len(values) == 1:
+            return values[0][1], "matched"
+        # Кандидати -- у reason, щоб рев'юер бачив, МІЖ ЧИМ вибирати: голе
+        # resolved:false без причини вже одного разу коштувало нам розбору
+        # (R-B1-04, дата «31 лютого»).
+        shown = ", ".join(
+            (" ".join(str(v).strip() for v in val.values() if v)
+             if isinstance(val, dict) else str(val).strip())
+            for _, val in values[:5])
+        return None, f"{AMBIGUOUS_MATCH_METHOD}:{shown}"
     return None, "no_value"
 
 

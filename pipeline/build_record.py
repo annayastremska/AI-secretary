@@ -16,6 +16,7 @@ import datetime
 import re
 
 from pipeline.extraction.extract import (
+    AMBIGUOUS_MATCH_METHOD,
     NAME_PART_ROLES,
     NAME_TAIL_METHOD,
     UNVERIFIED_METHOD,
@@ -482,10 +483,12 @@ def build_record(schema: dict, raw_extraction: dict, dictionaries: dict) -> dict
                                   if v is not None and str(v).strip())
                 raw_text = joined or None
             elif (reason or "").startswith(("rank_not_in_dictionary:",
-                                            NAME_TAIL_METHOD + ":")):
+                                            NAME_TAIL_METHOD + ":",
+                                            AMBIGUOUS_MATCH_METHOD + ":")):
                 # Значення в документі Є (звання поза довідником / хвіст ПІБ
-                # після по батькові, R-B1-02) -- рев'юер мусить бачити, що
-                # саме там стояло, а не голий null.
+                # після по батькові, R-B1-02; кілька різних збігів одного
+                # патерна, C-03) -- рев'юер мусить бачити, що саме там
+                # стояло, а не голий null.
                 raw_text = reason.split(":", 1)[1].strip() or None
             if raw_text and not is_placeholder(raw_text, field_placeholder_tokens(field)):
                 unresolved_values[name] = raw_text

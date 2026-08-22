@@ -249,8 +249,13 @@ fields:
     extraction: regex
     link_type: supersedes
     llm_fallback: false
+    # ВИПРАВЛЕНО 22.08.2026 (рев'ю, C-02) -- те саме, що в leave_ticket:
+    # позначка мусить стояти В ДУЖКАХ і бути окремим словом, інакше згадка
+    # "порядок анульовання" у суцільному тексті давала supersedes при
+    # confirmed=True. Обґрунтування повністю -- schemas/leave_ticket.yaml,
+    # поле supersession_note.
     regex_variants:
-      - pattern: '(?P<value>переоформлено|анульован\w*|скасован\w*)'
+      - pattern: '\((?P<value>[^()]{0,120}?\b(?:переоформлено|анульован\w*|скасован\w*)\b[^()]{0,120}?)\)'
     db_target: additional_info
 
   # --- Реєстр об'єктів, не довідник значень ---
