@@ -1,0 +1,61 @@
+# Профіль апки для GPU-сервера (H100), НЕ для ноутбука.
+#
+# Локальний профіль -- config-app.yaml (CPU, Windows-шляхи). Цей файл
+# вибирається змінною оточення:
+#     APP_PIPELINE_CONFIG=demos/upload_app/config-gpu.yaml
+#
+# Навіщо окремий файл, а не правки в тому самому: config-app.yaml містить
+# абсолютний Windows-шлях до llama-server і n_gpu_layers: 0 -- на Linux із
+# H100 обидва значення неправильні, а тримати один файл із коментарями
+# «на сервері закоментуй це» означає, що хтось колись закоментує не те.
+#
+# Розгортання -- docs/deploy-gpu-server.md.
+
+paths:
+  input_dir: data/inbox
+  output_dir: data/output
+
+intake:
+  archive: true
+  processed_dir: data/processed
+  failed_dir: data/failed
+
+llm:
+  enabled: true
+  # Ваги кладе `python pipeline/scripts/download_model.py` -- саме сюди.
+  model_path: models/mamaylm-12b-q4_k_m.gguf
+  # -1 = ВСІ шари на GPU. На ноуті тут 0 (немає CUDA), і саме це давало
+  # десятки секунд на виклик; на H100 12B у 4-бітному кванті цілком у VRAM
+  # (~7 ГБ з 80), тож сенсу тримати шари на CPU немає жодного.
+  n_gpu_layers: -1
+  # На GPU вузьке місце -- не prefill, а кількість викликів. Більший батч
+  # полів на один виклик дешевший, ніж кілька викликів.
+  batch_size: 8
+  # Кілька семплів + голосування: на CPU це було непозичально дорого
+  # (кожен семпл -- десятки секунд), на GPU стає реальним варіантом.
+  # Лишаємо 1 за замовчуванням: спершу замір, потім вмикання (правило
+  # docs/improvement-plan-2026-08-15.md -- без цифри не змінюємо поведінку).
+  self_consistency_n: 1
+  max_context_chars: 6000
+
+ocr:
+  engine: surya
+  # На Linux surya сама збирає/знаходить llama-server; абсолютний шлях
+  # потрібен лише на Windows. null = не підказувати.
+  llama_server_path: null
+  inference_parallel: 2
+  # 99 = усі шари розпізнавання на GPU (дефолт самої surya). На ноуті ми
+  # тримали 0/CPU через нестабільність Vulkan; CUDA на H100 -- інший шлях,
+  # і саме він тут очікувано найшвидший.
+  n_gpu_layers: 99
+  # Кеш промптів внутрішнього llama-server. Лишаємо 0 (наш дефолт): в OCR
+  # кожен промпт містить унікальне зображення, влучень у кеш немає за
+  # побудовою, а на 80 ГБ VRAM 8 ГіБ кешу -- це просто 8 ГіБ ні за що.
+  # Заміряно на ноуті: +145 МБ/фото -> +0 (docs/improvement-2026-08-15/r1-ocr.md).
+  cache_ram_mb: 0
+
+storage:
+  local_root: data/output
+
+review:
+  sample_rate: 20

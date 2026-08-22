@@ -30,7 +30,14 @@ from fastapi.responses import FileResponse, JSONResponse
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(APP_DIR))
-CONFIG_PATH = os.path.join(APP_DIR, "config-app.yaml")
+# Профіль пайплайна: локальний CPU-дефолт, на GPU-сервері перевизначається
+# змінною оточення (docs/deploy-gpu-server.md). Env, а не прапорець CLI:
+# апку запускає uvicorn, і власних аргументів у неї немає.
+CONFIG_PATH = os.environ.get(
+    "APP_PIPELINE_CONFIG",
+    os.path.join(APP_DIR, "config-app.yaml"))
+if not os.path.isabs(CONFIG_PATH):
+    CONFIG_PATH = os.path.join(PROJECT_ROOT, CONFIG_PATH)
 
 # Тимчасові завантаження -- у гітігнорений шлях (data/inbox/* у .gitignore
 # цілком). Підпапка, а не сам inbox: пакетний прогін `python run_pipeline.py`
@@ -57,7 +64,52 @@ PIPELINE_TIMEOUT_S = 30 * 60
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
-app = FastAPI(title="ai-secretary upload demo")
+app = FastAPI(title="AI-секретар")
+
+# ── Гейт доступу ────────────────────────────────────────────────────────────
+#
+# Локально апка слухає 127.0.0.1 і гейт не потрібен. На спільному сервері
+# порт прокинутий НАЗОВНІ (HTTP 7302), а в апці немає жодного поняття
+# користувача: будь-хто, хто знає адресу, може завантажити документ і
+# ставити питання до бази. Тому: якщо виставлено APP_BASIC_USER/PASS --
+# вимагаємо HTTP Basic на ВСІХ маршрутах (включно з /chat, який Gradio
+# обслуговує своїми XHR -- браузер підставляє Basic автоматично, тому
+# схема працює і для нього, на відміну від токена в заголовку).
+#
+# Чесна межа: Basic поверх plain HTTP передає пароль у відкритому вигляді.
+# Це загорожа від випадкового сканера, а НЕ захист даних. Саме тому окреме
+# правило розгортання: на сервер їдуть лише синтетичні документи
+# (docs/deploy-gpu-server.md, розд. «Що НЕ їде на сервер»).
+BASIC_USER = os.environ.get("APP_BASIC_USER") or ""
+BASIC_PASS = os.environ.get("APP_BASIC_PASS") or ""
+
+
+@app.middleware("http")
+async def _basic_auth(request, call_next):
+    if not (BASIC_USER and BASIC_PASS):
+        return await call_next(request)
+    import base64
+    import hmac
+    header = request.headers.get("authorization") or ""
+    ok = False
+    if header.lower().startswith("basic "):
+        try:
+            raw = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8")
+            user, _, password = raw.partition(":")
+            # compare_digest на обох полях: порівняння рядків == видає
+            # довжину спільного префікса через час відповіді.
+            ok = (hmac.compare_digest(user, BASIC_USER)
+                  and hmac.compare_digest(password, BASIC_PASS))
+        except Exception:
+            ok = False
+    if not ok:
+        # realm -- ЛАТИНКОЮ: HTTP-заголовки кодуються latin-1, і кириличний
+        # realm валив увесь гейт у 500 замість 401 (перевірено curl-ом:
+        # UnicodeEncodeError у starlette при формуванні raw_headers). Тіло
+        # відповіді українською -- воно в UTF-8 і це дозволено.
+        return JSONResponse({"error": "потрібна авторизація"}, status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="AI-sekretar"'})
+    return await call_next(request)
 
 
 def _now():
@@ -367,3 +419,28 @@ import gradio as gr  # noqa: E402
 app = gr.mount_gradio_app(app, chat_app.build_blocks(), path="/chat",
                           theme=chat_app.make_theme(),
                           head=chat_app.make_head_css())
+
+
+# ── Запуск ──────────────────────────────────────────────────────────────────
+#
+# Локально: python -m demos.upload_app.app  ->  127.0.0.1:8000
+# На GPU-сервері: APP_HOST=0.0.0.0 APP_PORT=80 (ззовні доступно як :7302).
+#
+# Дефолт саме 127.0.0.1, а не 0.0.0.0: апка без гейта не має слухати
+# зовнішній інтерфейс навіть випадково. Нижче -- явна відмова стартувати на
+# 0.0.0.0 без пароля, щоб «забув виставити APP_BASIC_*» не перетворювалось
+# на публічний доступ до бази.
+if __name__ == "__main__":
+    import uvicorn
+
+    host = os.environ.get("APP_HOST", "127.0.0.1")
+    port = int(os.environ.get("APP_PORT", "8000"))
+    if host not in ("127.0.0.1", "localhost") and not (BASIC_USER and BASIC_PASS):
+        raise SystemExit(
+            f"Відмова стартувати: host={host} слухає зовнішній інтерфейс, а "
+            "APP_BASIC_USER/APP_BASIC_PASS не виставлені. Апка не має поняття "
+            "користувача -- без гейта будь-хто отримає доступ до завантаження "
+            "документів і до бази. Див. docs/deploy-gpu-server.md.")
+    print(f"AI-секретар: http://{host}:{port}  (чат -- /chat, "
+          f"конфіг пайплайна -- {os.path.relpath(CONFIG_PATH, PROJECT_ROOT)})")
+    uvicorn.run(app, host=host, port=port)

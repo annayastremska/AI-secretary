@@ -125,8 +125,14 @@ def _get_model():
             return None
         try:
             from llama_cpp import Llama
+            # n_gpu_layers з оточення: локально 0 (немає CUDA), на
+            # GPU-сервері CHAT_N_GPU_LAYERS=-1 -> усі шари 4B у VRAM.
+            # Саме ця модель робить маршрутизацію питання, тобто її
+            # латентність люди відчувають безпосередньо.
             _MODEL = Llama(model_path=MODEL_PATH, n_ctx=4096,
-                           n_gpu_layers=0, verbose=False)
+                           n_gpu_layers=int(os.environ.get(
+                               "CHAT_N_GPU_LAYERS", "0")),
+                           verbose=False)
         except Exception:
             _MODEL_FAILED = True
             return None

@@ -1,0 +1,24 @@
+# Залежності для GPU-сервера (H100, CUDA). НЕ для ноутбука.
+#
+# Локально ставиться requirements.txt -- там CPU-колеса llama-cpp-python.
+# Тут те саме, але зібране під CUDA: у цьому й уся різниця між «десятки
+# секунд на виклик» і «миттєво».
+#
+# Порядок на чистому сервері:
+#     pip install -r requirements.txt          # спільна база (pyyaml, docx, pymupdf, морфологія)
+#     pip install -r requirements-gpu.txt      # ПОВЕРХ: перезбирає llama-cpp-python під CUDA + torch cu124
+#     pip install -r requirements-optional.txt # surya-ocr (потягне torch, якщо його ще немає)
+#     pip install -r demos/upload_app/requirements.txt
+#
+# Чому саме так, а не одним файлом: requirements.txt мусить лишатись
+# робочим на ноуті без CUDA -- це наш основний режим розробки.
+
+# llama-cpp-python, зібраний під CUDA 12.4. Індекс -- офіційний для проєкту
+# (той самий, що для /cpu у requirements.txt, інша гілка).
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+llama-cpp-python>=0.3.0,<0.4
+
+# torch під CUDA -- для surya (розпізнавання). Без цього рядка pip поставить
+# CPU-збірку torch, і OCR на H100 працюватиме як на ноуті.
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch>=2.4
