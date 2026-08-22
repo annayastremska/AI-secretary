@@ -1364,3 +1364,44 @@ def test_normative_act_caught_by_formal_markers_not_topic():
               "з 24 серпня 2026 по 06 вересня 2026 на 14 діб м. Тихолісся")
     domain, _ = classify_domain_rules(ticket, domains)
     assert domain != "normative", domain
+
+
+def test_recognized_blank_stays_blank_even_if_it_quotes_a_law():
+    """Бланк, упізнаний ВЛАСНИМИ АНКОРАМИ, лишається бланком -- навіть якщо
+    цитує закон (регресія C-01, знайдена сліпим рецензентом 22.08.2026).
+
+    Причина була в парі рішень того самого дня: процедурний вирок отримав
+    третій шлях -- формальні ознаки акта БЕЗ гейту довжини, -- а стоїть він
+    перед вибором шаблону. Тому справжній відпускний квиток із «НАКАЗУЮ:» і
+    «набирає чинності» ставав `normative`, після чого run.py давав йому
+    status=confirmed, facts=[] і НЕ ставив у чергу: документ зникав тихо.
+    Наказ командира про надання відпустки -- типовий носій обох маркерів.
+
+    Обидва боки правила перевіряються разом, бо окремо кожен нічого не
+    доводить: заповнений бланк із маркерами лишається бланком; нормативний
+    документ (нуль анкорів) лишається нормативним.
+    """
+    import glob
+    from pipeline.classification.classify import load_domain_keyphrases
+    from pipeline.identification import identify_template, load_schemas
+    from pipeline.ingestion.ingest import load_document_blocks
+
+    schemas = load_schemas(os.path.join(_PROJECT_ROOT, "pipeline", "schemas"))
+    domains = load_domain_keyphrases(os.path.join(
+        _PROJECT_ROOT, "pipeline", "dictionaries", "domain_keyphrases.yaml"))
+
+    ticket = os.path.join(_PROJECT_ROOT, "data", "eval", "samples", "leave",
+                          "synthetic-2026-05", "docx", "LEAVE-001.docx")
+    if not os.path.exists(ticket):
+        return
+    text, _ = load_document_blocks(ticket)
+    spiked = text + " НАКАЗУЮ: Набирає чинності з дня опублікування."
+    assert identify_template(spiked, schemas, domains=domains)["template"] == "leave_ticket"
+
+    normative = glob.glob(os.path.join(
+        _PROJECT_ROOT, "data", "eval", "samples", "normative", "інструкція_діловодство.docx"))
+    if normative:
+        ntext, _ = load_document_blocks(normative[0])
+        verdict = identify_template(ntext, schemas, domains=domains)
+        assert verdict["template"] is None, verdict
+        assert verdict["domain"] == "normative", verdict

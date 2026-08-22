@@ -665,7 +665,34 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
     # ловить лише документ, що впізнається як КІЛЬКА бланків одночасно
     # (Інструкція з діловодства містить обидва додатки). Документ, що згадує
     # ЛИШЕ один бланк, проходив мимо.
-    if coarse_domain and (domains.get(coarse_domain) or {}).get("kind") == "procedural":
+    # АЛЕ: бланк, упізнаний ВЛАСНИМИ АНКОРАМИ, лишається бланком -- навіть
+    # якщо цитує закон. Це виправлення регресії, яку відкрив сліпий рецензент
+    # коду 22.08.2026 (C-01), і причина в моїй же правці того самого дня:
+    # процедурний вирок отримав третій шлях (формальні ознаки акта) БЕЗ гейту
+    # довжини, а стоїть він перед вибором шаблону -- тож справжній відпускний
+    # квиток, у якому трапились «НАКАЗУЮ:» і «набирає чинності», ставав
+    # `normative`. Далі run.py давав йому status=confirmed, facts=[] і НЕ
+    # ставив у чергу: документ зникав тихо, без цифри, без прогалини, без
+    # аудиту. Наказ командира про надання відпустки -- типовий носій обох
+    # маркерів, тобто це не екзотика.
+    #
+    # Розрізнювач саме АНКОРИ, а не бал: заміряний початковий дефект (статут
+    # згадує «посвідчення про відрядження» один раз -> бал рівно 5) має НУЛЬ
+    # анкорів, а всі 60 реальних бланків набору мають 5 із 5. Тому умова нижче
+    # зберігає обидві поведінки: звід правил, що лише згадує бланк, і далі
+    # процедурний; заповнений бланк -- ні.
+    procedural = coarse_domain and (domains.get(coarse_domain) or {}).get("kind") == "procedural"
+    if procedural and best_template is not None:
+        best_ident = (by_template[best_template].get("identification") or {})
+        best_anchors = list(best_ident.get("anchors") or [])
+        best_anchor_hits = sum(1 for p in best_anchors
+                               if phrase_in_text((text or "").lower(), p))
+        if (best_score >= best_ident.get("min_score", DEFAULT_MIN_SCORE)
+                and best_score > runner_up_score
+                and (not best_anchors or best_anchor_hits > 0)):
+            procedural = False
+
+    if procedural:
         return {
             "schema": None, "template": None, "domain": coarse_domain,
             "source": None, "score": best_score, "runner_up": runner_up_score,
