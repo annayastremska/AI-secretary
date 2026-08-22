@@ -29,8 +29,9 @@ from pipeline.normalization.normalize import (
     fix_numeric_homoglyphs, number_from_words, number_word_value)
 from pipeline.extraction.schema_grammar import build_json_schema_for_fields, chunk_fields
 from pipeline.extraction.blank_form import (
-    is_printed_form_text, label_order_index, printed_after_label, printed_lines,
-    printed_order, resegment_by_blank)
+    MIN_REPEATED_CUTTERS, is_printed_form_text, label_order_index,
+    printed_after_label, printed_lines, printed_order, printed_skeleton_repeats,
+    resegment_by_blank)
 # Імпортом, а не літералом "pdf_text": позначка походження блоку ставиться в
 # інжесті й читається тут, тож рядок мусить мати ОДНЕ джерело -- інакше
 # перейменування тихо вимкнуло б добір хвоста значення на pdf (той самий
@@ -1656,6 +1657,25 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     # схема не оголосила `blank_template:` -- тоді всі перевірки нижче
     # інертні, тобто новий бланк без шаблону поводиться точно як раніше.
     printed = printed_lines(schema)
+    # ЧИ СТОЇТЬ СКЕЛЕТ БЛАНКА В ДОКУМЕНТІ ДВІЧІ (рев'ю 22.08.2026, C-06).
+    # Доказ порожнечі слота (`empty_pattern` і сигнали П5-А) обіцяє в
+    # докстрінгу CONFIRMED_EMPTY_SLOT_METHOD, що вимагає ЛОКАЛІЗОВАНОГО
+    # слота, а шукається по всьому тексту. При двох примірниках полів
+    # (двосторонній аркуш, другий незаповнений примірник) скелет порожнечі з
+    # одного примірника «доводить» порожнечу поля, значення якого стоїть в
+    # іншому -- відтворено наскрізь: `actual_return_date` зі значенням
+    # 2026-05-23 у документі отримував `confirmed_empty_slot:empty_pattern`.
+    # Хибний ДОКАЗ гірший за прогалину: рев'юер, побачивши «слот порожній»,
+    # підтвердить порожнечу й не піде дивитись у документ. Тому при другому
+    # примірнику доказ не оголошується взагалі -- поле йде у звичайний
+    # фолбек, тобто повертається до поведінки «не знаємо».
+    slot_ambiguous = (printed_skeleton_repeats(ocr_text, schema)
+                      >= MIN_REPEATED_CUTTERS)
+    # ФОРМА НЕ ВПІЗНАНА -> доказ порожнечі теж не оголошується. Досі це
+    # тримала лише емпірика одного файлу (`відпускний_квиток_інша_редакція.docx`
+    # справді не дає жодного confirmed_empty_slot), а не умова в коді: скелет
+    # порожнечі ЧУЖОЇ редакції нічого не доводить про наш бланк.
+    empty_proof_allowed = form_recognized and not slot_ambiguous
     # Порядок друкованих рядків бланка -- окремо від їх множини: множина
     # відповідає на "чи це друкований текст", порядок -- на "де він стоїть
     # відносно лейбла" (див. find_block_before_label / printed_after_label).
@@ -1707,7 +1727,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 results[name] = (None, f"rank_not_in_dictionary:{leftover}")
                 hints[name] = rank_raw_line or ""
                 localized_gaps.append(name)
-            elif rank_raw_line and is_printed_form_text(rank_raw_line, printed):
+            elif (rank_raw_line and empty_proof_allowed
+                  and is_printed_form_text(rank_raw_line, printed)):
                 # Локалізована прогалина, чия підказка -- ДРУКОВАНИЙ рядок
                 # бланка: лейбл знайдено, «значенням» перед ним стоїть сам
                 # бланк, тобто вписаного значення немає (заміряний випадок --
@@ -1756,7 +1777,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 # кандидат -- це якраз НЕПРАВИЛЬНИЙ текст).
                 value, value_reason = validate_block_value(
                     field, raw, label_heads, printed)
-                if value is None and value_reason in PROVEN_EMPTY_REASONS:
+                if (value is None and empty_proof_allowed
+                        and value_reason in PROVEN_EMPTY_REASONS):
                     # Слот знайдено, у ньому -- сам бланк: відповідь відома
                     # детерміновано, модель не питаємо (див.
                     # CONFIRMED_EMPTY_SLOT_METHOD).
@@ -1771,7 +1793,7 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
             value, reason = extract_field_regex(field, ocr_text)
             if value is not None:
                 value, reason = validate_regex_value(field, value, printed)
-            if value is None and reason in PROVEN_EMPTY_REASONS:
+            if value is None and empty_proof_allowed and reason in PROVEN_EMPTY_REASONS:
                 # Патерн зматчив сам порожній слот / друкований рядок форми --
                 # доведено-порожньо, фолбек не потрібен (те саме правило, що
                 # для block_before_label вище).
@@ -1814,7 +1836,7 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
     # можуть стояти в документі одночасно (двосторінковий бланк, друга
     # незаповнена копія полів) -- знайдене значення важливіше за доказ
     # порожнечі, інакше правка ЗАБИРАЛА Б дані.
-    for field in schema["fields"]:
+    for field in (schema["fields"] if empty_proof_allowed else []):
         name = field["name"]
         if not field.get(EMPTY_PATTERN_KEY):
             continue
