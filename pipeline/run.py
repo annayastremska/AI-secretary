@@ -645,9 +645,30 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         kind_info = resolve_subject_kind(
             schema=None, domain=ident.get("domain"), domains=res.get("domains"),
             llm_choose=_subject_kind_llm(res, cfg), text=text)
-        meta = dict(base_meta, status="unresolved", domain=ident.get("domain"),
+        # Нормативний документ -- НЕ «невпізнаний тип», і саме тому не в чергу.
+        # Класифікація тут спрацювала: домен `normative`, причина
+        # `procedural_document:normative`. Статус же відповідає на ІНШЕ
+        # питання -- чи вийшов із документа факт, -- і для статуту відповідь
+        # «ні» законна: полів у ньому немає за визначенням. Раніше ці дві
+        # різні речі злипались: `unresolved` давав `unknown_type`, тобто
+        # людину просили розібратися, «що це за документ», хоч це вже
+        # відомо. На демо це означало 40 статутів у черзі рев'ю, які затулили
+        # б справжні чернетки; у завантажувача БД -- ще гірше:
+        # `doc_status = "failed" if status == "unresolved"`, тобто закон
+        # лягав у базу як ЗБІЙ обробки (ai_secretary_loader.py:335).
+        #
+        # `confirmed` (рішення Анни 22.08): критичних полів, які лишились
+        # невирішеними, нема -- бо полів нема взагалі; фактів теж нема, тож
+        # у підрахунки документ не додає нічого. `review_queue=None` --
+        # окремо й явно: лоадер читає саме цей ключ і не вигадує черги за
+        # статусом, а вибірка аудиту (1 з 20 confirmed) черги теж не додасть.
+        procedural = (ident.get("reason") or "").startswith("procedural_document")
+        meta = dict(base_meta,
+                    status="confirmed" if procedural else "unresolved",
+                    domain=ident.get("domain"),
                     source_kind=source_kind,
-                    review_queue="unknown_type", review_reason="unresolved",
+                    review_queue=None if procedural else "unknown_type",
+                    review_reason=None if procedural else "unresolved",
                     warnings=list(ingest_warnings),
                     reason=ident.get("reason") or "шаблон не визначено",
                     subject_kind=kind_info["kind"],

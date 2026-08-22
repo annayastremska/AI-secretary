@@ -1296,3 +1296,35 @@ def _run_all():
 
 if __name__ == "__main__":
     raise SystemExit(_run_all())
+
+
+def test_normative_document_is_not_queued_for_human_review():
+    """Нормативний документ не потрапляє в чергу рев'ю (рішення Анни 22.08).
+
+    Класифікація для нього СПРАЦЮВАЛА: домен `normative`, причина
+    `procedural_document:normative`. Статус же відповідає на інше питання --
+    чи вийшов факт, -- і «ні» тут законне: полів у статуті немає за
+    визначенням. Раніше ці дві речі злипались (`unresolved` ->
+    `unknown_type`), і людину просили визначити тип документа, який уже
+    визначено. Ціна була подвійна: 40 статутів затулили б справжні чернетки в
+    черзі, а завантажувач БД клав закон у базу як ЗБІЙ обробки
+    (`doc_status = "failed" if status == "unresolved"`).
+
+    Тест перевіряє САМЕ ЦЕ, а не «статус дорівнює рядку»: у чергу не йде,
+    фактів нема, фантомного об'єкта нема -- і при цьому домен збережений.
+    """
+    import subprocess
+    import sys as _sys
+    path = os.path.join(_PROJECT_ROOT, "data", "eval", "samples", "normative",
+                        "інструкція_діловодство.docx")
+    if not os.path.exists(path):
+        return  # набір зразків не розгорнуто -- не привід валити прогін
+    out = subprocess.run(
+        [_sys.executable, "run_pipeline.py", "--no-llm", "--dry-run",
+         "--reprocess", "--input", path],
+        cwd=_PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8",
+        timeout=600)
+    assert "procedural_document:normative" in (out.stdout or ""), out.stdout[-500:]
+    # OK -- це маркер статусу confirmed у виводі CLI; UNRS означав би, що
+    # документ знову поїхав у чергу як невпізнаний тип.
+    assert "UNRS" not in (out.stdout or ""), out.stdout[-500:]
