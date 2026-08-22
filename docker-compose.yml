@@ -1,6 +1,14 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector, не postgres:16-alpine: розширення `vector` у alpine-
+    # образі відсутнє, а збирати його в контейнері -- зайва морока. Той самий
+    # мажор 16, тож міграції не змінюються.
+    #
+    # УВАГА при переході з alpine: образ debian-базований, тобто інша libc і
+    # інші версії collation. Datadir, створений alpine-складанням, тут
+    # відкривати НЕ можна -- текстові індекси можуть тихо зіпсуватись.
+    # Переносити через логічний дамп (pg_dump), а не копіюванням теки.
+    image: pgvector/pgvector:pg16
     container_name: milidoc-postgres
     restart: unless-stopped
     environment:
@@ -20,9 +28,13 @@ services:
       # Hunspell-словник української для FTS (Postgres не має її з коробки).
       # Монтуємо окремі файли, не всю tsearch_data/ -- інакше приховали б
       # стандартні словники інших мов, які там уже лежать.
-      - ./db/tsearch_data/uk_ua.dict:/usr/local/share/postgresql/tsearch_data/uk_ua.dict:ro
-      - ./db/tsearch_data/uk_ua.affix:/usr/local/share/postgresql/tsearch_data/uk_ua.affix:ro
-      - ./db/tsearch_data/ukrainian.stop:/usr/local/share/postgresql/tsearch_data/ukrainian.stop:ro
+      # Шлях -- Debian-складання (pgvector/pgvector). В alpine-образі тека
+      # інша: /usr/local/share/postgresql/tsearch_data. Після зміни образу
+      # словник не знаходився саме через це, а помилка виглядала як
+      # «text search dictionary does not exist».
+      - ./db/tsearch_data/uk_ua.dict:/usr/share/postgresql/16/tsearch_data/uk_ua.dict:ro
+      - ./db/tsearch_data/uk_ua.affix:/usr/share/postgresql/16/tsearch_data/uk_ua.affix:ro
+      - ./db/tsearch_data/ukrainian.stop:/usr/share/postgresql/16/tsearch_data/ukrainian.stop:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER} -d postgres"]
       interval: 5s
