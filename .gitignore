@@ -129,3 +129,8 @@ data/eval/reports/
 airflow/logs/
 data/postgres/
 data/originals/
+
+# Завантажений нормативний корпус -- похідне, 16 МБ. Відтворюється
+# db/scripts/load_normative_corpus.py за переліком у
+# docs/tasks/2026-08-21_normative-corpus.md. Те саме правило, що для дампів.
+data/eval/samples/normative/downloaded/
