@@ -44,16 +44,29 @@ CANDIDATES = 70          # з кожної гілки, як у банківсь�
 FUSED_MIN_SOURCES = 1    # 2 = показувати лише те, що знайшли ОБИДВІ гілки
 
 
-def lexical(cur, query, limit=CANDIDATES):
-    cur.execute("""
+def lexical(cur, query, limit=CANDIDATES, mode="or"):
+    """mode='or' -- як BM25: слова об'єднані АБО, впорядковує ts_rank.
+    mode='and' -- як websearch_to_tsquery за замовчуванням.
+
+    Чому за замовчуванням АБО. websearch_to_tsquery зліплює слова через `&`,
+    тобто вимагає ВСІ слова в ОДНОМУ фрагменті. На документах цілком це
+    працювало, а на фрагментах по 1200 символів -- ні: виміряно, запит «за
+    скільки днів подавати рапорт на відпустку» давав лексикою РІВНО НУЛЬ
+    кандидатів, і гібрид ставав звичайним векторним пошуком.
+
+    АБО дає повноту, а порядок усе одно визначає ts_rank (він враховує, скільки
+    слів збіглося і як часто). Для точного пошуку за номером пункту `and`
+    лишається доступним.
+    """
+    tsq = ("websearch_to_tsquery('ukrainian', %(q)s)" if mode == "and" else
+           "replace(websearch_to_tsquery('ukrainian', %(q)s)::text, ' & ', ' | ')::tsquery")
+    cur.execute(f"""
         SELECT ch.id, ch.document_id,
-               ts_rank(to_tsvector('ukrainian', ch.text),
-                       websearch_to_tsquery('ukrainian', %(q)s)) AS score
+               ts_rank(to_tsvector('ukrainian', ch.text), {tsq}) AS score
           FROM document_chunks ch
           JOIN documents d ON d.id = ch.document_id
          WHERE d.domain = 'normative' AND d.validity = 'current'
-           AND to_tsvector('ukrainian', ch.text)
-               @@ websearch_to_tsquery('ukrainian', %(q)s)
+           AND to_tsvector('ukrainian', ch.text) @@ {tsq}
          ORDER BY score DESC
          LIMIT %(lim)s
     """, {"q": query, "lim": limit})
@@ -111,6 +124,8 @@ def main(argv=None):
     ap.add_argument("--compare", action="store_true", help="три списки поруч")
     ap.add_argument("--both-only", action="store_true",
                     help="лише фрагменти, знайдені обома гілками")
+    ap.add_argument("--lexical-and", action="store_true",
+                    help="вимагати ВСІ слова в одному фрагменті (для точного пошуку)")
     args = ap.parse_args(argv)
     query = " ".join(args.query)
 
@@ -122,7 +137,7 @@ def main(argv=None):
     vec = str(encode([QUERY_PREFIX + query])[0])
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-        lex = lexical(cur, query)
+        lex = lexical(cur, query, mode="and" if args.lexical_and else "or")
         sem = semantic(cur, vec)
         fused = rrf(lex, sem)
         if args.both_only:
