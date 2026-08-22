@@ -1,7 +1,7 @@
 # upload_app — демо «завантажив фото → воно в базі»
 
 Виконання запиту команди БД
-([`docs/contracts/2026-08-14_upload-app-task-for-pipeline-team.md`](../../docs/contracts/2026-08-14_upload-app-task-for-pipeline-team.md)):
+([`docs/tasks/2026-08-22_plan-to-demo.md`](../../docs/tasks/2026-08-22_plan-to-demo.md)):
 локальна веб-апка, у якій людина завантажує фото/скан/docx документа,
 бачить, що витягнув пайплайн, і **окремою кнопкою** записує це в PostgreSQL.
 

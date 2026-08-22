@@ -350,7 +350,7 @@ def test_recognition_max_retries_is_capped_via_backend_patch():
 
 def test_recognition_max_retries_untouched_by_default():
     """Дефолт -- НЕ чіпати surya: стеля/ліміт повторів відкочені за
-    результатом заміру якості (p2-execution.md розд. 2). Без явного конфігу
+    результатом заміру якості (known-weak-spots.md розд. 9). Без явного конфігу
     chat_completions_batch лишається оригіналом."""
     import functools
     with _fake_surya(attempts=[["текст"]], healthy=True):

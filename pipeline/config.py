@@ -79,7 +79,7 @@ DEFAULTS = {
         # (env LLAMA_ARG_CACHE_RAM; дефолт самого сервера 8192). 0 = вимкнено:
         # в OCR кожен промпт містить унікальне зображення, кеш не має влучень
         # і монотонно ріс +170…195 МБ/фото, впираючи пакет у стіну RAM
-        # (docs/improvement-2026-08-15/r1-ocr.md, №3). null тут означає «наш
+        # (docs/known-weak-spots.md розд. 2.18, №3). null тут означає «наш
         # дефолт 0» (surya_reader.DEFAULT_CACHE_RAM_MB), не «дефолт сервера».
         "cache_ram_mb": None,
         # Guided decoding для layout-проходу surya. null = дефолт пайплайна
@@ -92,7 +92,7 @@ DEFAULTS = {
         # 3 повтори). Стеля 3072 + 1 повтор давали 2.4× на кадрі LEAVE-011,
         # але з заміряним просіданням якості (154/154 -> 150/154: примусовий
         # поблоковий шлях -> чужий ПІБ з довірою 0.9) -- вмикати лише з
-        # передзаміром якості (p2-execution.md розд. 2).
+        # передзаміром якості (known-weak-spots.md розд. 9).
         "max_tokens_full_page": None,
         "recognition_max_retries": None,
         # HF_HUB_OFFLINE=1 для surya: заборонити їй звертатись до HuggingFace

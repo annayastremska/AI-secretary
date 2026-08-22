@@ -639,7 +639,7 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
     #
     # До 14.08.2026 статуси й позначки confirmed поверталися лише полями звіту
     # поза `checks`, тому в fields_ok/fields_total не входили. Заміряно
-    # (b2-verdicts, repro_03): пайплайн, який КОЖЕН документ віддає як
+    # (рев'ю 14.08, repro_03 -- known-weak-spots розд. 8): пайплайн, який КОЖЕН документ віддає як
     # needs_review з facts[*].confirmed=true -- тобто з повним розривом правила
     # «чернетка ≠ факт» -- отримував ті самі 176/176 і 16/16. Саме тому
     # R-A1-01 (needs_review-документ їде в підрахунки як підтверджений факт)

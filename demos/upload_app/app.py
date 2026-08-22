@@ -1,5 +1,5 @@
 """Демо-апка «завантажив фото → воно в базі» (запит команди БД,
-docs/contracts/2026-08-14_upload-app-task-for-pipeline-team.md).
+docs/tasks/2026-08-22_plan-to-demo.md).
 
 Головне правило: апка НЕ дублює мапінг. Два виклики:
   1) пайплайн -- subprocess `python run_pipeline.py --config ... --input <файл>`;

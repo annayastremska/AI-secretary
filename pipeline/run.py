@@ -809,7 +809,7 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         # таким, яким його зібрав build_record за критичними полями. Споживач
         # фільтрує підрахунки за facts.confirmed, а не за meta.status -- тобто
         # needs_review-документ ішов у підрахунки як підтверджений факт.
-        # Заміряно (b2-verdicts, repro_01): ident.source="llm" давав
+        # Заміряно (рев'ю 14.08, repro_01 -- known-weak-spots розд. 8): ident.source="llm" давав
         # status=needs_review при facts=[True]*8.
         if not confirmed:
             for fact in record["facts"]:
