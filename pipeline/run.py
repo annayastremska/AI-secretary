@@ -381,6 +381,20 @@ def blank_meta(**overrides) -> dict:
         # unconfirmed_fact | handwritten | qa_sample. None = у чергу не треба.
         "review_queue": None,
         "subject": {},
+        # ЧИ ОЧІКУЮТЬСЯ ФАКТИ ВЗАГАЛІ (рев'ю 22.08.2026, C-04). Три стани, які
+        # доти злипались у два:
+        #   True  + facts НЕ порожні -- звичайний факт-документ;
+        #   True  + facts порожні    -- ПОРУШЕННЯ: витяг нічого не дав;
+        #   False + facts порожні    -- НОРМА: нормативний акт, статут, у
+        #                               якому полів немає за визначенням.
+        # Доти нормативний документ виходив `status=confirmed, facts=[]`, і це
+        # неможливо було відрізнити від «пайплайн на якомусь класі документів
+        # перестав віддавати факти»: перевірка `чернетка_не_факт` у приладі
+        # називала порушенням саме те, що пайплайн навмисно виробляє (0/16 на
+        # мутованій мети), і симетрично видавала «ok» масовій відмові. Ключ --
+        # НАШ бік цієї пари; сама перевірка -- на боці приладу.
+        # None -- до питання не дійшли (дублікат, нечитабельний файл).
+        "facts_expected": None,
         "facts": [],
         "field_provenance": {},
         "unknown_fields": [],
@@ -544,6 +558,9 @@ def _build_freeform_record(text: str, blocks: list, ident: dict, base_meta: dict
     return dict(
         base_meta,
         status="needs_review",
+        # Вільний витяг застосовується лише там, де документ СХОЖИЙ на
+        # факт-документ невідомої форми, тобто факт очікується (C-04).
+        facts_expected=True,
         source_kind=source_kind,
         domain=ident.get("domain"),
         template=FREEFORM_SCHEMA["template"],
@@ -616,7 +633,8 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
     try:
         text, blocks = load_document_blocks(path, ocr_fn=res.get("ocr"),
                                             warnings=ingest_warnings,
-                                            info=ingest_info)
+                                            info=ingest_info,
+                                            max_ocr_pages=cfg["ocr"].get("max_pages"))
     except Exception as exc:
         meta = dict(base_meta, status="unresolved",
                     source_kind=ingest_info.get("source_kind"),
@@ -709,6 +727,9 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         procedural = (ident.get("reason") or "").startswith("procedural_document")
         meta = dict(base_meta,
                     status="confirmed" if procedural else "unresolved",
+                    # Нормативний акт -- ЄДИНИЙ клас, де порожні facts є
+                    # нормою, а не збоєм витягу (C-04).
+                    facts_expected=not procedural,
                     domain=ident.get("domain"),
                     source_kind=source_kind,
                     review_queue=None if procedural else "unknown_type",
@@ -873,6 +894,9 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         meta = dict(
             base_meta,
             status=status,
+            # Схема є -> факт очікується. Порожні facts тут -- порушення, і
+            # саме цю різницю ключ і несе (C-04).
+            facts_expected=True,
             source_kind=source_kind,
             domain=ident["domain"],
             template=ident["template"],
@@ -930,7 +954,7 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
         )
     except Exception as exc:
         meta = dict(base_meta, status="unresolved", domain=ident.get("domain"),
-                    source_kind=source_kind,
+                    source_kind=source_kind, facts_expected=True,
                     review_queue="unknown_type", review_reason="unresolved",
                     warnings=list(warnings),
                     reason=f"не вдалося обробити вміст документа: {type(exc).__name__}: {exc}")

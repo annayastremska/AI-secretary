@@ -215,7 +215,8 @@ def file_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
-def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
+def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None,
+                       max_ocr_pages=None):
     """PDF, рішення "текстовий шар чи скан" ПО КОЖНІЙ СТОРІНЦІ окремо:
 
     - сторінка з текстом -> `page.get_text("blocks")` дає блоки РАЗОМ з
@@ -232,6 +233,15 @@ def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
     порядком: спільне сортування по всьому документу перемішало б сторінки
     між собою, бо y-координати на кожній сторінці починаються з нуля.
 
+    max_ocr_pages -- СТЕЛЯ кількості сторінок, які підуть у розпізнавання
+    (`ocr.max_pages` у конфізі; None = без межі, рівно попередня поведінка).
+    Навіщо (рев'ю 22.08.2026, A-19): розпізнавання коштує хвилини НА СТОРІНКУ,
+    а межі не було ніякої -- 200-сторінковий скан означав годинний прогін, у
+    якому ще й немає посторінкового збереження: виняток будь-де в інжесті дає
+    ОДИН `unresolved` на весь файл, тобто вся робота втрачається. Стеля --
+    не оптимізація, а вихід: документ обробляється частково, і в попередженнях
+    прямо сказано, ЯКІ сторінки не читались.
+
     PyMuPDF імпортується ліниво -- решта пайплайна працює без нього.
     """
     try:
@@ -245,12 +255,24 @@ def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
 
     blocks = []
     pages_needing_ocr = []
+    # Сторінки, у яких Є І текстовий шар, І растр, і сторінки зовсім порожні
+    # (рев'ю 22.08.2026, C-05). Обидва класи раніше пропускались МОВЧКИ:
+    # `continue` після текстової гілки навіть не питав `page.get_images()`.
+    # Реальний вхід замовника саме такий -- сканований бланк, на який сканер
+    # додав текстовий колонтитул, або PDF із текстової лицьової сторінки й
+    # ВКЛЕЄНОЇ фотографії зворотного боку: 40 символів колонтитула досить, щоб
+    # уся сторінка пішла текстовим шляхом, і зворотний бік зник без слідів.
+    text_pages_with_images = []
+    empty_pages = []
+    pages_over_limit = []
     ocr_pages = 0
     with fitz.open(path) as doc:
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, page in enumerate(doc):
                 page_text = page.get_text() or ""
                 if len(page_text.strip()) >= MIN_TEXT_CHARS_PER_PAGE:
+                    if page.get_images():
+                        text_pages_with_images.append(i + 1)
                     page_blocks = []
                     for b in page.get_text("blocks"):
                         # (x0, y0, x1, y1, text, block_no, block_type); 1 -- зображення
@@ -282,10 +304,20 @@ def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
                 # вхід до черги «рукописне»). Скан за визначенням містить
                 # растр; сторінка без растра -- просто порожній аркуш.
                 if not page.get_images():
+                    empty_pages.append(i + 1)
                     continue
                 if ocr_fn is None:
                     pages_needing_ocr.append(i + 1)
                     continue
+                if max_ocr_pages is not None and ocr_pages >= max_ocr_pages:
+                    pages_over_limit.append(i + 1)
+                    continue
+                # ПОСТОРІНКОВИЙ ПРОГРЕС. Прогін на 200 сторінок без жодного
+                # рядка виводу неможливо відрізнити від зависання -- саме це й
+                # робило довгий скан «усе або нічого» ще й на вигляд.
+                print(f"    OCR: сторінка {i + 1} з {doc.page_count}"
+                      + (f" (стеля {max_ocr_pages})" if max_ocr_pages else ""),
+                      flush=True)
                 image_path = os.path.join(tmpdir, f"page_{i:03d}.png")
                 page.get_pixmap(dpi=PDF_RENDER_DPI).save(image_path)
                 ocr_blocks = ocr_fn(image_path)
@@ -308,6 +340,35 @@ def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
     if info is not None:
         info["ocr_pages"] = ocr_pages
         info["scan_pages_detected"] = ocr_pages > 0 or bool(pages_needing_ocr)
+        # Окремими ключами, а не в scan_pages_detected: сторінка з текстом і
+        # растром -- це НЕ доказ скана. Замір по всіх 1122 сторінках PDF
+        # репозиторію: 31 така сторінка, і всі -- у нормативних актах (штамп
+        # або логотип на першій сторінці), у жодному факт-документі жодної.
+        # Зарахувати їх у scan_pages_detected означало б перевести цілком
+        # born-digital закон у `photo`, тобто в чужу планку якості й у чергу
+        # «рукописне» -- це була б регресія, а не захист. Тому ключ окремий, а
+        # рішення «чи OCR-ити растр на текстовій сторінці» лишається відкритим
+        # (fixes-pipeline.md, «потребує рішення»).
+        info["text_pages_with_images"] = list(text_pages_with_images)
+        info["empty_pages"] = list(empty_pages)
+        info["pages_over_ocr_limit"] = list(pages_over_limit)
+
+    if pages_over_limit and warnings is not None:
+        warnings.append(
+            f"досягнуто стелі ocr.max_pages={max_ocr_pages}: не розпізнано "
+            f"{len(pages_over_limit)} сторінок (№ "
+            f"{', '.join(map(str, pages_over_limit[:10]))}"
+            f"{' …' if len(pages_over_limit) > 10 else ''}) -- документ "
+            "оброблено ЧАСТКОВО")
+
+    if text_pages_with_images and warnings is not None:
+        warnings.append(
+            "растр без OCR на сторінках № "
+            f"{', '.join(map(str, text_pages_with_images[:10]))}"
+            f"{' …' if len(text_pages_with_images) > 10 else ''} "
+            f"(усього {len(text_pages_with_images)}): на сторінці є І текстовий "
+            "шар, І растр -- усе, що намальовано на растрі (вклеєна "
+            "фотографія зворотного боку, штамп, підпис), у текст не потрапило")
 
     if pages_needing_ocr:
         if not blocks:
@@ -327,7 +388,8 @@ def extract_pdf_blocks(path: str, ocr_fn=None, warnings=None, info=None):
     return join_block_texts(blocks), blocks
 
 
-def load_document_blocks(path: str, ocr_fn=None, warnings=None, info=None):
+def load_document_blocks(path: str, ocr_fn=None, warnings=None, info=None,
+                         max_ocr_pages=None):
     """ocr_fn: (image_path) -> list[{"text","bbox"}] або list[str];
     обов'язковий лише для зображень. Невідоме розширення -- явна помилка,
     без мовчазного fallback.
@@ -345,7 +407,8 @@ def load_document_blocks(path: str, ocr_fn=None, warnings=None, info=None):
         return extract_docx_blocks(path)
 
     if ext in PDF_EXTS:
-        result = extract_pdf_blocks(path, ocr_fn=ocr_fn, warnings=warnings, info=info)
+        result = extract_pdf_blocks(path, ocr_fn=ocr_fn, warnings=warnings,
+                                    info=info, max_ocr_pages=max_ocr_pages)
         if info is not None:
             # НЕ info.get("ocr_pages"): скан-сторінка, пропущена через
             # ocr.engine: none, ніколи не збільшує ocr_pages, але документ
