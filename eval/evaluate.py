@@ -740,6 +740,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Оцінка проти еталона синтетичного набору")
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--input", required=True, help="папка з документами набору")
+    # Каталог еталона параметром, а не лише константою: демо-набір
+    # (data/eval/demo-story) має власні правильні відповіді, і без цього його
+    # доводилось міряти обгорткою, що підмінює EVAL_DIR -- тобто прилад міряв
+    # не тим, чим міряють у прогонах.
+    parser.add_argument("--eval-dir", default=None,
+                        help="каталог еталона (за замовчуванням "
+                             "data/eval/synthetic-2026-05)")
     parser.add_argument("--no-llm", action="store_true")
     parser.add_argument("--report", default=None, help="куди писати JSON-звіт")
     parser.add_argument("--limit", type=int, default=None)
@@ -764,7 +771,7 @@ def main(argv=None):
     # Власний читач, не res["dictionaries"] (R-A2-10) -- див. load_rank_aliases.
     RANK_ALIASES = load_rank_aliases()
 
-    truth = load_ground_truth()
+    truth = load_ground_truth(args.eval_dir)
     with io.open(MAPPING_PATH, encoding="utf-8") as f:
         mapping = yaml.safe_load(f)
 
