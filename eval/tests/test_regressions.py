@@ -1405,3 +1405,16 @@ def test_recognized_blank_stays_blank_even_if_it_quotes_a_law():
         verdict = identify_template(ntext, schemas, domains=domains)
         assert verdict["template"] is None, verdict
         assert verdict["domain"] == "normative", verdict
+
+    # ДРУГА половина правила, і саме вона -- нетривіальна. Наказ МОУ № 280
+    # ОПИСУЄ відпускний квиток, тому бере його анкори; перша версія гейта
+    # (лише анкори) робила з нормативного наказу `leave_ticket`. Розрізняє їх
+    # покриття оголошеного бланка: у наказі 4 мітки з 27, у справжньому
+    # квитку -- майже всі. Знайдено робочим прогоном 22.08.2026.
+    order = glob.glob(os.path.join(
+        _PROJECT_ROOT, "data", "eval", "samples", "normative", "*280*"))
+    if order:
+        otext, _ = load_document_blocks(order[0])
+        verdict = identify_template(otext, schemas, domains=domains)
+        assert verdict["template"] is None, verdict
+        assert verdict["domain"] == "normative", verdict

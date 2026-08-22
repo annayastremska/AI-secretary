@@ -687,9 +687,23 @@ def identify_template(text: str, schemas: list, domains: dict = None, llm_choose
         best_anchors = list(best_ident.get("anchors") or [])
         best_anchor_hits = sum(1 for p in best_anchors
                                if phrase_in_text((text or "").lower(), p))
+        # Анкорів САМИХ ПО СОБІ не досить -- потрібне ще й покриття
+        # оголошеного бланка. Це друга половина виправлення C-01, і її
+        # знайшов робочий прогін 22.08: наказ МОУ № 280 (нормативний!) бере
+        # анкори відпускного квитка, бо описує саме цей бланк, і після
+        # першої версії гейта ставав `template: leave_ticket`. При цьому в
+        # ТОМУ Ж записі власна перевірка редакції казала 4 мітки з 27
+        # (покриття 0.15) -- тобто відповідь уже була, лише не питалась.
+        #
+        # Тепер питається: анкори перебивають процедурний вирок лише тоді,
+        # коли документ справді схожий на наш бланк. Схема без оголошеного
+        # `blank_template:` отримує recognized=True за побудовою
+        # (blank_edition_verdict), тобто для неї поведінка не змінюється.
+        edition = blank_edition_verdict(text, by_template[best_template])
         if (best_score >= best_ident.get("min_score", DEFAULT_MIN_SCORE)
                 and best_score > runner_up_score
-                and (not best_anchors or best_anchor_hits > 0)):
+                and (not best_anchors or best_anchor_hits > 0)
+                and edition.get("recognized")):
             procedural = False
 
     if procedural:
