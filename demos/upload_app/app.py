@@ -435,12 +435,22 @@ if __name__ == "__main__":
 
     host = os.environ.get("APP_HOST", "127.0.0.1")
     port = int(os.environ.get("APP_PORT", "8000"))
-    if host not in ("127.0.0.1", "localhost") and not (BASIC_USER and BASIC_PASS):
-        raise SystemExit(
-            f"Відмова стартувати: host={host} слухає зовнішній інтерфейс, а "
-            "APP_BASIC_USER/APP_BASIC_PASS не виставлені. Апка не має поняття "
-            "користувача -- без гейта будь-хто отримає доступ до завантаження "
-            "документів і до бази. Див. docs/deploy-gpu-server.md.")
+    # Гейт -- ОПЦІЯ, не вимога: локально (127.0.0.1) він не потрібен, і за
+    # замовчуванням жодного пароля в проєкті немає. Але «слухати зовнішній
+    # інтерфейс без будь-якої авторизації» -- рішення, яке має бути свідомим,
+    # а не наслідком забутої змінної: у апки немає поняття користувача, тож
+    # відкритий порт означає доступ будь-кого до завантаження документів і до
+    # бази. Тому не відмова, а явне підтвердження APP_ALLOW_PUBLIC=1.
+    public = host not in ("127.0.0.1", "localhost")
+    if public and not (BASIC_USER and BASIC_PASS):
+        if os.environ.get("APP_ALLOW_PUBLIC") != "1":
+            raise SystemExit(
+                f"host={host} слухає зовнішній інтерфейс без авторизації. "
+                "Обери одне: APP_BASIC_USER + APP_BASIC_PASS -- закрити "
+                "гейтом, або APP_ALLOW_PUBLIC=1 -- свідомо відкрито. "
+                "Деталі -- docs/deploy-gpu-server.md, розд. 2.")
+        print(f"[УВАГА] {host} -- відкрито БЕЗ авторизації "
+              "(APP_ALLOW_PUBLIC=1). Реальних документів тут бути не має.")
     print(f"AI-секретар: http://{host}:{port}  (чат -- /chat, "
           f"конфіг пайплайна -- {os.path.relpath(CONFIG_PATH, PROJECT_ROOT)})")
     uvicorn.run(app, host=host, port=port)
