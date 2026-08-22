@@ -262,3 +262,91 @@ def test_freeform_record_passes_the_instrument_invariants():
                  warnings=["форма не впізнана жодною схемою"])
     row = ev(meta, {"id": "H-001"}, {}, None)
     assert row["fields_ok"] == row["fields_total"]
+
+
+# --- A-12: чутливість мірки «інша редакція» мусить бути ЗАМІРЯНА -----------
+#
+# Сама мірка (`blank_edition_verdict`) живе в пайплайні; тут -- прилад, який
+# міряє її чутливість. Доти чутливість не міряв ніхто: test_foreign_edition.py
+# перевіряє лише ДВІ точки (наш бланк вище порога, штучна чужа редакція --
+# нижче), а що між ними -- невідомо.
+#
+# Драбина нижче -- перефразування N найдовших друкованих рядків бланка
+# (вставка одного слова в середину рядка: саме та зміна, якою відрізняються
+# редакції). Заміряно 22.08.2026 на LEAVE-001 (27 різаків, поріг 0.5):
+#     базове              0.926  recognized=True
+#     6 рядків (3 влучні)  0.815  recognized=True
+#     10 (7 влучних)       0.667  recognized=True
+#     13 (9 влучних)       0.593  recognized=True   <-- половина бланка інша
+#     20 (13 влучних)      0.444  recognized=False
+#     29 (21 влучний)      0.148  recognized=False
+# Тобто документ, у якого КОЖЕН ДРУГИЙ друкований рядок інший, вердикт усе ще
+# називає «наша форма» -- і жодного проміжного стану («схоже, але не воно»)
+# мірка не має за побудовою.
+
+_SCHEMAS_DIR = os.path.join(_PROJECT_ROOT, "pipeline", "schemas")
+_LEAVE_001 = os.path.join(_LEAVE_DOCX, "LEAVE-001.docx")
+
+
+def _edition_ladder():
+    """[(скільки рядків перефразовано, покриття, recognized)] -- замір, а не
+    твердження. Повертає драбину, щоб і тест, і людина бачили ту саму цифру."""
+    from pipeline.extraction.blank_form import (MIN_CUTTER_CHARS, _read_lines,
+                                                blank_template_path,
+                                                printed_cutters)
+    from pipeline.identification import blank_edition_verdict, load_schemas
+    from pipeline.ingestion.ingest import extract_docx_blocks
+
+    schemas = load_schemas(_SCHEMAS_DIR)
+    leave = next(s for s in schemas if s["template"] == "leave_ticket")
+    text, _blocks = extract_docx_blocks(_LEAVE_001)
+    lines = sorted([l.strip() for l in _read_lines(blank_template_path(leave))
+                    if len(l.strip()) >= MIN_CUTTER_CHARS],
+                   key=len, reverse=True)
+    total_cutters = len(printed_cutters(leave))
+
+    def paraphrase(line):
+        words = line.split()
+        mid = len(words) // 2
+        return " ".join(words[:mid] + ["відповідно"] + words[mid:])
+
+    ladder = []
+    for n in (0, 6, 10, 13, 20, 29):
+        mutated = text
+        for line in lines[:n]:
+            if line in mutated:
+                mutated = mutated.replace(line, paraphrase(line))
+        verdict = blank_edition_verdict(mutated, leave)
+        ladder.append((n, verdict["coverage"], verdict["recognized"]))
+    return total_cutters, ladder
+
+
+def test_edition_metric_degrades_monotonically():
+    """Мінімум, який прилад мусить гарантувати: мірка взагалі РЕАГУЄ на
+    перефразування, і реагує в один бік."""
+    total_cutters, ladder = _edition_ladder()
+    assert total_cutters > 20, total_cutters
+    coverages = [c for _n, c, _r in ladder]
+    assert coverages == sorted(coverages, reverse=True), ladder
+    assert coverages[0] > 0.9 and coverages[-1] < 0.2, ladder
+
+
+def test_the_band_between_native_and_foreign_is_documented():
+    """МЕЖА МІРКИ, зафіксована як замір: половина перефразованих рядків дає
+    покриття ~0.6, і це ще «наша форма». Тест не схвалює цю поведінку -- він
+    не дає їй змінитись непоміченою."""
+    _total, ladder = _edition_ladder()
+    half = next(c for n, c, _r in ladder if n == 13)
+    assert 0.5 < half < 0.78, half
+
+
+@pytest.mark.xfail(strict=False, reason="A-12: вердикт бінарний, проміжного "
+                                        "стану «схоже, але не воно» немає")
+def test_half_paraphrased_blank_should_not_pass_as_our_form():
+    """ЧОГО МИ ХОЧЕМО (падає сьогодні): документ, у якого кожен другий
+    друкований рядок інший, не має проходити як впізнана форма зі статусом
+    confirmed і без жодного попередження. Коли мірку виправлять (не бінарний
+    вердикт: recognized | partial | foreign), цей тест почне проходити."""
+    _total, ladder = _edition_ladder()
+    recognized_at_half = next(r for n, _c, r in ladder if n == 13)
+    assert recognized_at_half is False
