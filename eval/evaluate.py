@@ -1065,40 +1065,54 @@ def main(argv=None):
         for key, ok, total in weak:
             print(f"     {key:20} {ok}/{total}")
 
-    # РОЗРІЗ ЗА СТАТТЮ (23.08.2026). Найгірший ВІДОМИЙ клас полів -- прізвища
-    # на -а (weak-spots 2.20): морфологія бере їх за жіночі або не бере
-    # взагалі. Агрегат по корпусу це ховає за побудовою: у leave 15 чоловічих
-    # людей проти 1 жіночої, тобто повний провал на жіночих прізвищах коштує
-    # 1/16 цифри й читається як шум. Ключ `стать` у еталоні для цього й є --
-    # доти прилад його не питав ЗОВСІМ (оголошений у `unmeasured_expected`).
+    # РОЗРІЗ ЗА ЗАКІНЧЕННЯМ ПРІЗВИЩА (23.08.2026). Найгірший ВІДОМИЙ клас --
+    # прізвища на -а/-я (weak-spots 2.20): морфологія бере їх за жіночі або не
+    # бере взагалі, і документ їде в needs_review при чітко надрукованому ПІБ.
+    # Агрегат по корпусу цей клас ховає за побудовою: таких документів 4 з 30,
+    # тобто повний провал на них коштує 13% цифри й читається як шум.
+    #
+    # ЧОМУ НЕ ЗА СТАТТЮ. Спершу тут стояв розріз за ключем `стать` еталона --
+    # хибне припущення, що проблемний клас це жіночі прізвища. Замір показав
+    # протилежне: у корпусі всі чотири прізвища на -а ЧОЛОВІЧІ (Гайдамака,
+    # Давимука, Конопля, Скиба), а обидві жінки мають прізвища на приголосний.
+    # Тобто стать і справжній клас відмов не корелюють, а закінчення -- це те,
+    # що ламається, і воно видно з НАШОГО виходу, без еталона.
     #
     # Це РОЗРІЗ, не перевірка: у знаменник не входить, «правильної» частки не
     # існує. Його робота -- показати перекіс, коли він є.
-    by_gender = collections.defaultdict(lambda: [0, 0])
+    def _surname_class(row):
+        alias = ((row.get("subject") or {}).get("person_alias")
+                 or (truth.get(row["id"]) or {}).get("людина", {}).get("ПІБ") or "")
+        parts = str(alias).split()
+        if not parts:
+            return None
+        return "на -а/-я" if parts[0][-1:].lower() in ("а", "я") else "решта"
+
+    by_class = collections.defaultdict(lambda: [0, 0])
+    docs_by_class = collections.Counter()
     for row in results:
-        gender = ((truth.get(row["id"]) or {}).get("людина") or {}).get("стать")
-        if not gender:
+        cls = _surname_class(row)
+        if not cls:
             continue
+        docs_by_class[cls] += 1
         for c in row["checks"]:
             if c.get("group") != "field":
                 continue
-            by_gender[gender][1] += 1
+            by_class[cls][1] += 1
             if c["ok"]:
-                by_gender[gender][0] += 1
-    if len(by_gender) > 1:
-        print("\n=== польова точність за статтю (розріз, не перевірка) ===")
+                by_class[cls][0] += 1
+    if len(by_class) > 1:
+        print("\n=== польова точність за закінченням прізвища "
+              "(розріз, не перевірка) ===")
         shares = {}
-        for gender, (ok, total) in sorted(by_gender.items()):
-            shares[gender] = ok / max(1, total)
-            print(f"  {gender:10} {ok:>3}/{total:<3} {100 * shares[gender]:5.1f}%")
+        for cls, (ok, total) in sorted(by_class.items()):
+            shares[cls] = ok / max(1, total)
+            print(f"  {cls:10} {ok:>3}/{total:<3} {100 * shares[cls]:5.1f}%"
+                  f"   документів: {docs_by_class[cls]}")
         spread = max(shares.values()) - min(shares.values())
-        docs = collections.Counter(
-            ((truth.get(r["id"]) or {}).get("людина") or {}).get("стать")
-            for r in results)
-        print("  документів:", dict(docs))
         if spread > 0.05:
-            print(f"  !! перекіс {100 * spread:.1f} в.п. -- перевірте морфологію "
-                  f"прізвищ (weak-spots 2.20)")
+            print(f"  !! перекіс {100 * spread:.1f} в.п. -- морфологія прізвищ "
+                  f"(weak-spots 2.20)")
 
     # Значення, що пройшли лише завдяки м'якому `contains`.
     surplus = collections.Counter(
