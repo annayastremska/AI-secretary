@@ -5,7 +5,7 @@
    "bad": 0,
    "exit_code": 0,
    "ok": 489,
-   "seconds": 2.6,
+   "seconds": 2.3,
    "total": 489
   },
   "deployment": {
@@ -28,7 +28,7 @@
    "fields_total": 178,
    "mapping_problems": 0,
    "ok": 240,
-   "seconds": 1.3,
+   "seconds": 1.2,
    "total": 240,
    "ungrounded_refusals": 0
   },
@@ -39,13 +39,13 @@
    ],
    "deviations": 1,
    "documents": 42,
-   "seconds": 129.6
+   "seconds": 140.0
   },
   "tests": {
    "exit_code": 0,
    "failed": 0,
-   "passed": 254,
-   "seconds": 24.3,
+   "passed": 260,
+   "seconds": 28.6,
    "xfailed": 1
   }
  }
