@@ -70,6 +70,13 @@ fact_types:
     label: Фактична дата повернення з відпустки
     validity_model: permanent_event
 
+  # ДОДАНО 23.08.2026 (weak-spots 10.2). Дзеркало leave_actual_return для
+  # відрядження: доти фактичне повернення з відрядження не витягувалось
+  # узагалі, тому дострокове повернення було системі невидиме.
+  - code: deployment_actual_return
+    label: Фактична дата повернення з відрядження
+    validity_model: permanent_event
+
   - code: unit_to_report
     label: Частина, до якої зобов'язаний прибути
     validity_model: ranged

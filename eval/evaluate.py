@@ -447,8 +447,10 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
                         f"НЕ міряється взагалі, і його поломка буде невидима")
 
     def check_printed(where, key, spec, templates):
-        keys = spec.get("printed") or ([spec["expected_printed"]]
-                                       if spec.get("expected_printed") else None)
+        source = spec.get("expected_printed")
+        keys = spec.get("printed") or (
+            list(source) if isinstance(source, (list, tuple))
+            else ([source] if source else None))
         if not keys:
             problems.append(f"{where}: '{key}' без `printed` -- правило "
                             f"«порожнє на бланку -> null» для нього не діє")
@@ -457,6 +459,13 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
             known = printed_seen.get(tpl) or set()
             unknown = [k for k in keys if known and k not in known]
             if unknown and len(unknown) == len(keys):
+                if spec.get("expected_printed"):
+                    # Очікуване значення цього поля живе САМЕ на папері, тому
+                    # корпус без цих ключів -- не помилка мапінгу, а корпус,
+                    # який їх не оголошує: перевірка просто не робиться (див.
+                    # коментар у `add`). Помилкою лишається ЧАСТКОВА
+                    # відсутність -- ознака опечатки в назві ключа.
+                    continue
                 problems.append(f"{where}: '{key}' printed={keys} -- жодного "
                                 f"такого ключа немає в 'надруковано' шаблону "
                                 f"{tpl}; правило порожнього поля не діятиме")
@@ -716,10 +725,28 @@ def evaluate_record(meta: dict, truth: dict, mapping: dict, schema: dict) -> dic
         # з яким розходитись. Еталонні відповіді при цьому НЕ редагуються.
         printed_source = spec.get("expected_printed")
         if printed_source:
-            if printed_source not in printed:
-                continue
-            exp = printed.get(printed_source)
-            printed_keys = spec.get("printed") or [printed_source]
+            # Список ключів (23.08.2026): дата на бланку розкладена на три
+            # ключі (ARR2_D/M/Y), і зібрати з них очікуване вміє
+            # `printed_expected` -- та сама функція, що вирішує «папір проти
+            # сценарію», тобто нового правила складання дати не з'являється.
+            #
+            # Головне тут -- ПРОПУСК перевірки, коли корпус цих ключів не
+            # оголошує. Заміряно на demo-story: таблиця відміток у ньому
+            # порожня на всіх 7 посвідченнях, а `правильні_відповіді.повернення`
+            # містить дату СЦЕНАРІЮ. Порівняння з нею карало б чесний null --
+            # рівно те, проти чого рішення 13.08.2026 («міряємо проти
+            # надрукованого»). Немає паперу -- немає перевірки.
+            if isinstance(printed_source, (list, tuple)):
+                exp = printed_expected(printed, list(printed_source),
+                                       spec["compare"])
+                if exp is None:
+                    continue
+                printed_keys = spec.get("printed") or list(printed_source)
+            else:
+                if printed_source not in printed:
+                    continue
+                exp = printed.get(printed_source)
+                printed_keys = spec.get("printed") or [printed_source]
         elif key in expected:
             exp = expected[key]
             printed_keys = spec.get("printed")

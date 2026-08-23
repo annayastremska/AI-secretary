@@ -380,10 +380,12 @@ def test_unanswered_ground_truth_key_is_a_mapping_error():
 
     assert check_mapping(mapping, schemas, truth) == []
 
+    # Ключ навмисно з тих, що ЛИШАЮТЬСЯ оголошеними: `супутники` з 23.08.2026
+    # міряються (weak-spots 10.1), тому для цього тесту вони більше не годяться.
     stripped = copy.deepcopy(mapping)
-    del stripped["unmeasured_expected"]["відпускний квиток"]["супутники"]
+    del stripped["unmeasured_expected"]["відпускний квиток"]["підписант"]
     problems = check_mapping(stripped, schemas, truth)
-    assert any("супутники" in p for p in problems), problems
+    assert any("підписант" in p for p in problems), problems
 
 
 def test_stale_declaration_is_an_error_too():
@@ -405,7 +407,7 @@ def test_stale_declaration_is_an_error_too():
     assert any("застарів" in p for p in problems), problems
 
     empty = copy.deepcopy(mapping)
-    empty["unmeasured_expected"]["відпускний квиток"]["супутники"] = "  "
+    empty["unmeasured_expected"]["відпускний квиток"]["підписант"] = "  "
     problems = check_mapping(empty, schemas, truth)
     assert any("без причини" in p for p in problems), problems
 

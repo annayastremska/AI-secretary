@@ -723,7 +723,8 @@ def _previous_value_block(blocks, label_i, label_index, order):
 
 def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
                             boundaries=(), printed=(), order=None,
-                            oversized_chars=OVERSIZED_CANDIDATE_CHARS):
+                            oversized_chars=OVERSIZED_CANDIDATE_CHARS,
+                            preceded_by=None):
     """blocks: результат group_blocks_into_lines() -- список
     {"lines": [...], "bbox": (...)|None}.
 
@@ -732,6 +733,14 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
     була.
     boundaries -- скомпільовані патерни `value_starts_after` зі схеми
     (compile_value_boundaries); () -> поведінка як була.
+    preceded_by -- необов'язковий друкований рядок бланка, який стоїть ПЕРЕД
+    потрібним входженням лейбла (`label_preceded_by` зі схеми). Потрібен
+    тому, що бланк повторює свої дужкові примітки дослівно: у Додатку 30
+    «(військове звання, прізвище та ініціали» стоїть ДВІЧІ -- раз під ПІБ
+    відпускника, раз під супутниками, -- і без цього уточнення обидва
+    входження дають законний `ambiguous_label`. Обирається входження, НАЙБЛИЖЧЕ
+    ПІСЛЯ цього рядка; порогу відстані немає навмисно (див. коментар у тілі).
+    None -> поведінка як була.
     Повертає (значення_або_None, причина), причина:
     matched | no_label | ambiguous_label | denylisted |
     oversized_block_suspect.
@@ -791,6 +800,45 @@ def find_block_before_label(blocks, label_substring, denylist=None, anchor=None,
 
     if not hits:
         return None, "no_label"
+
+    # УТОЧНЕННЯ ВХОДЖЕННЯ (`label_preceded_by`, 23.08.2026). Бланк повторює
+    # свої примітки дослівно, тому лейбл сам себе не ідентифікує. Розрізняє
+    # їх ПОРЯДОК: потрібне входження -- те, що йде після відомого друкованого
+    # рядка ("Разом з" для супутників).
+    #
+    # Порогу відстані тут немає СВІДОМО: беремо найближче входження ПІСЛЯ
+    # якоря, а не «в межах N рядків». Поріг доводилось би калібрувати під
+    # верстку кожного бланка -- і саме такий поріг у геометрії двічі виявився
+    # замалим (weak-spots 11.1). Порядок же не залежить ні від щільності
+    # верстки, ні від того, як OCR порізав блоки.
+    #
+    # Якщо якоря в документі немає (інша редакція, поганий OCR) -- уточнення
+    # не діє, і лейбл лишається неоднозначним: чесна відмова, а не вгадування
+    # першого входження.
+    if preceded_by:
+        starts = []
+        offset = 0
+        low_anchor = preceded_by.lower()
+        for block in blocks:
+            for j, line in enumerate(block["lines"]):
+                if phrase_in_text(line.lower(), low_anchor):
+                    starts.append(offset + j)
+            offset += len(block["lines"])
+        if starts:
+            ranked = []
+            offset = 0
+            for i, block in enumerate(blocks):
+                for j in range(len(block["lines"])):
+                    if (i, j) not in hits:
+                        continue
+                    gi = offset + j
+                    before = [gi - s for s in starts if s < gi]
+                    if before:
+                        ranked.append((min(before), (i, j)))
+                offset += len(block["lines"])
+            if ranked:
+                ranked.sort(key=lambda t: t[0])
+                hits = [ranked[0][1]]
 
     h_med = _median_block_height(blocks)
 
@@ -1408,6 +1456,20 @@ def extract_field_regex(field_def, text: str):
             continue
         if len(values) == 1:
             return values[0][1], "matched"
+        # ВИНЯТОК, ОГОЛОШЕНИЙ ПОЛЕМ: `multiple_matches: last` (23.08.2026).
+        # Правило вище («два різних кандидати -> неоднозначність») правильне
+        # там, де значення в документі ОДНЕ, а другий збіг -- чужий реквізит.
+        # Але бланк має й рядки, які ПОВТОРЮЮТЬСЯ за побудовою: таблиця
+        # відміток посвідчення про відрядження -- чотири однакові рядки
+        # «Прибув до ... дата», і заповнених серед них стільки, скільки
+        # реально було зупинок. Там кілька збігів -- не суперечність, а
+        # хроніка, і поточний стан дає ОСТАННІЙ.
+        #
+        # Дефолт лишається строгим: без цього ключа поведінка та сама, що й
+        # була. Ключ навмисно оголошується полем, а не вгадується кодом --
+        # інакше «бери останній» тихо повернуло б клас помилки C-03.
+        if field_def.get("multiple_matches") == "last":
+            return values[-1][1], "matched"
         # Кандидати -- у reason, щоб рев'юер бачив, МІЖ ЧИМ вибирати: голе
         # resolved:false без причини вже одного разу коштувало нам розбору
         # (R-B1-04, дата «31 лютого»).
@@ -1851,7 +1913,8 @@ def extract_document(schema: dict, ocr_text: str, ocr_blocks: list, dictionaries
                 grouped_blocks, field["label_before"], denylist,
                 anchor=field.get("strip_prefix"),
                 boundaries=compile_value_boundaries(field), printed=printed,
-                order=blank_order, oversized_chars=oversized_chars)
+                order=blank_order, oversized_chars=oversized_chars,
+                preceded_by=field.get("label_preceded_by"))
             if raw is not None and field.get("strip_prefix"):
                 raw = strip_literal_prefix(raw, field["strip_prefix"])
             if raw is None:

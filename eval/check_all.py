@@ -1,7 +1,7 @@
-"""П'ять цифр одною командою: «не ламає» як діф, а не як відчуття.
+"""Сім цифр одною командою: «не ламає» як діф, а не як відчуття.
 
 Причина існування. Правило Ані від 23.08.2026 -- після КОЖНОЇ правки
-перевіряти, чи не зламалось щось в іншому місці. Доти ці п'ять замірів
+перевіряти, чи не зламалось щось в іншому місці. Доти ці заміри
 збирались руками, по одному, з різними прапорцями й з різних папок, тому
 перевірка була дорога -- а дорогу перевірку пропускають. Тут вона одна
 команда:
@@ -42,6 +42,14 @@ LEAVE_DOCX = "data/eval/samples/leave/synthetic-2026-05/docx"
 DEPLOYMENT_DOCX = "data/eval/samples/deployment/synthetic-2026-05/docx"
 NORMATIVE_DIR = "data/eval/samples/normative"
 DEMO_VALIDATOR = "data/eval/samples/demo-story/validate_demo_set.py"
+# Демо-набір міряється ще й ПОЛЬОВО, не лише валідатором зв'язності. Додано
+# 23.08.2026 після того, як два нові поля просіли саме тут (story 248 -> 258/265,
+# 7 хибних невірних), а `check_all` цього не побачив: валідатор перевіряє
+# ЛОГІКУ набору, а не витяг. Тобто перевірка «не ламає» пропускала той корпус,
+# який найближчий до демо.
+DEMO_STORY_DOCX = "data/eval/samples/demo-story/story"
+DEMO_STORY_PDF = "data/eval/samples/demo-story/story-pdf"
+DEMO_STORY_EVAL = "data/eval/demo-story"
 
 
 def _run(argv):
@@ -174,8 +182,12 @@ MEASUREMENTS = {
     "tests": ("тести", measure_tests),
     "leave": ("leave docx", lambda: measure_eval(LEAVE_DOCX)),
     "deployment": ("deployment docx", lambda: measure_eval(DEPLOYMENT_DOCX)),
+    "story": ("демо-історія docx", lambda: measure_eval(DEMO_STORY_DOCX,
+                                                        DEMO_STORY_EVAL)),
+    "story_pdf": ("демо-історія pdf", lambda: measure_eval(DEMO_STORY_PDF,
+                                                           DEMO_STORY_EVAL)),
     "normative": ("нормативний корпус", measure_normative),
-    "demo": ("демо-набір", measure_demo_set),
+    "demo": ("демо-набір (звʼязність)", measure_demo_set),
 }
 
 # Що вважається погіршенням. Ключ -> (шлях у результаті, напрямок).
@@ -187,6 +199,10 @@ WORSE_IF = {
               ("ungrounded_refusals", "down")],
     "deployment": [("ok", "up"), ("fields_ok", "up"), ("mapping_problems", "down"),
                    ("ungrounded_refusals", "down")],
+    "story": [("ok", "up"), ("fields_ok", "up"), ("mapping_problems", "down"),
+              ("ungrounded_refusals", "down")],
+    "story_pdf": [("ok", "up"), ("fields_ok", "up"), ("mapping_problems", "down"),
+                  ("ungrounded_refusals", "down")],
     "normative": [("confirmed_normative", "up"), ("deviations", "down")],
     "demo": [("ok", "up"), ("bad", "down")],
 }
@@ -200,7 +216,7 @@ def _fmt(key, value):
     if key == "tests":
         tail = f", xfail {value['xfailed']}" if value.get("xfailed") else ""
         return (f"{value['passed']} passed, {value['failed']} failed{tail}")
-    if key in ("leave", "deployment"):
+    if key in ("leave", "deployment", "story", "story_pdf"):
         return (f"{value['ok']}/{value['total']} усього, "
                 f"{value['fields_ok']}/{value['fields_total']} польових, "
                 f"підтверджено {value['confirmed']}/{value['documents']}")

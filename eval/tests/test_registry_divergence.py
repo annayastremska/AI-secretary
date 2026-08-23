@@ -50,6 +50,11 @@ KNOWN_MISSING_IN_LOADER = {
     "rank": "current_state",
     "travel_document": "permanent_event",
     "unrecognized": "permanent_event",
+    # ДОДАНО НАМИ 23.08.2026 разом із полем `actual_return_date` посвідчення
+    # (weak-spots 10.2). Тобто цей рядок -- не дрейф чужої копії, а НАШ новий
+    # тип факту, якого в ній ще не може бути. Саме тому він у переліку з
+    # причиною, а не «оновили тест, щоб зелений».
+    "deployment_actual_return": "permanent_event",
 }
 
 #: Виміри, які створює міграція БД -- на них дефолт лоадера не діє.
@@ -93,7 +98,9 @@ def test_the_divergence_that_actually_reaches_the_database():
              if c not in theirs and c not in PRESEEDED_BY_MIGRATION
              and ours[c] != LOADER_DEFAULT}
     assert wrong == {"travel_document": ("permanent_event", "ranged"),
-                     "unrecognized": ("permanent_event", "ranged")}, wrong
+                     "unrecognized": ("permanent_event", "ranged"),
+                     # третій із 23.08.2026 -- наше нове поле
+                     "deployment_actual_return": ("permanent_event", "ranged")}, wrong
 
 
 def test_our_side_ships_the_model_with_every_fact():
