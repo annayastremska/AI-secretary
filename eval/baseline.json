@@ -44,8 +44,8 @@
   "tests": {
    "exit_code": 0,
    "failed": 0,
-   "passed": 251,
-   "seconds": 35.7,
+   "passed": 254,
+   "seconds": 24.3,
    "xfailed": 1
   }
  }

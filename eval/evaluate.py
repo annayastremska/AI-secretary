@@ -383,6 +383,12 @@ def values_by_field(meta: dict, schema: dict) -> dict:
 # Ключі, які пайплайн кладе в meta["subject"] поза списком полів схеми.
 SUBJECT_EXTRA_KEYS = {"person_alias", "person_complete"}
 
+# Кошики розділу `unmeasured_expected` мапінгу, які не є типом документа.
+# Літералами в двох місцях вони б розійшлися -- саме той клас помилки, який
+# R-A2-09 і закривав для doc_types.
+ROSTER_BUCKET = "людина"        # атрибути штатки, спільні для всіх типів
+NO_TYPE_BUCKET = "(без типу)"   # еталон без ключа `тип` (розкладка holdout)
+
 
 def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
     """Помилки САМОГО зіставлення, а не пайплайна.
@@ -423,6 +429,16 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
         answered |= set((doc.get("правильні_відповіді") or {}).keys())
         answered |= set((doc.get("людина") or {}).keys())
 
+    # Скоуп перевірки -- лише типи, ЯКІ Є в завантаженому еталоні. `--eval-dir`
+    # перемикає корпус (synthetic / demo-story / holdout), і на holdout, де
+    # немає жодного квитка й посвідчення, ця перевірка інакше видавала 24
+    # хибні помилки мапінгу («ключ не міряється взагалі») і код виходу 1 --
+    # тобто прогін на невідомому типі документа виглядав як поламаний прилад.
+    # Виявлено 23.08.2026 при першому прогоні на holdout після A-06.
+    templates_in_truth = {tpl_of[t] for t in
+                          (doc.get("тип") for doc in (truth or {}).values())
+                          if t in tpl_of}
+
     def check_answered(where, key, spec):
         if key in answered or spec.get("expected_printed"):
             return
@@ -457,7 +473,8 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
                                 f"'{spec['field']}' немає в схемі {tpl} -- "
                                 f"перевірка дасть тихий 0%")
             check_printed(f"templates.{tpl}", key, spec, [tpl])
-            check_answered(f"templates.{tpl}", key, spec)
+            if tpl in templates_in_truth:
+                check_answered(f"templates.{tpl}", key, spec)
 
     all_names = set(SUBJECT_EXTRA_KEYS)
     for s in schemas or []:
@@ -516,6 +533,86 @@ def check_mapping(mapping: dict, schemas: list, truth: dict) -> list:
             elif not (why and str(why).strip()):
                 problems.append(f"unmeasured.{tpl}.{name}: без причини -- "
                                 f"оголошення мусить казати, ЧОМУ не міряється")
+
+    # ЗВОРОТНИЙ ПРОХІД №2 (23.08.2026): ВІДПОВІДЬ ЕТАЛОНА, ЯКОЇ ПРИЛАД НЕ
+    # ПИТАЄ. Прохід вище замикає напрямок «поле схеми -> хтось його міряє».
+    # Цей замикає симетричний: «правильна відповідь -> хтось її звіряє».
+    #
+    # Чому потрібні обидва. Після A-06 прилад ПОКАЗУВАВ такі ключі переліком у
+    # кінці прогону -- 8 на leave, 8 на deployment. Але перелік у виводі це
+    # повідомлення, а не вирок: цифра прогону від нього не змінюється, отже
+    # ключ може лежати неміряним скільки завгодно. Тепер це помилка мапінгу
+    # (код виходу 1), доки рішення не записане у файл: або ключ міряється, або
+    # в `unmeasured_expected` стоїть причина.
+    #
+    # Скоуп навмисно вузький. Вимога ставиться лише до тих типів документів,
+    # які РЕАЛЬНО є в завантаженому еталоні: `--eval-dir` перемикає корпус
+    # (synthetic / demo-story / holdout), і оголошення для типу, відсутнього в
+    # поточному корпусі, не є ні застарілим, ні порушенням.
+    declared_answers = mapping.get("unmeasured_expected") or {}
+    person_measured_keys = set(mapping.get("person") or {})
+    answers_by_type = collections.defaultdict(set)
+    roster_answers = set()
+    roster_present = False
+    for doc in (truth or {}).values():
+        doc_type = doc.get("тип")
+        # Тип, відсутній у doc_types, уже дав свою помилку вище; документ БЕЗ
+        # типу (розкладка holdout) отримує власний кошик, бо шаблону в нього
+        # немає за побудовою й `templates:` до нього не застосовується.
+        bucket = doc_type if doc_type in tpl_of else (
+            NO_TYPE_BUCKET if not doc_type else None)
+        if bucket:
+            answers_by_type[bucket] |= set((doc.get("правильні_відповіді") or {}).keys())
+        if doc.get("людина"):
+            roster_present = True
+            roster_answers |= set((doc.get("людина") or {}).keys())
+
+    def _measured_keys(bucket):
+        if bucket == NO_TYPE_BUCKET:
+            # Документ без шаблону йде гілкою без `templates:` -- жоден
+            # ключ-значення для нього не міряється взагалі.
+            return set()
+        tpl = tpl_of.get(bucket)
+        return set(((mapping.get("templates") or {}).get(tpl) or {}))
+
+    for bucket, keys in sorted(answers_by_type.items()):
+        acked = declared_answers.get(bucket) or {}
+        measured = _measured_keys(bucket)
+        for key in sorted(keys - measured - set(acked)):
+            problems.append(f"еталон '{bucket}': відповідь '{key}' не звіряє "
+                            f"ніхто -- ні ключ у templates, ні оголошення в "
+                            f"unmeasured_expected.{bucket!r} з причиною")
+        for key, why in acked.items():
+            if key in measured:
+                problems.append(f"unmeasured_expected.{bucket}.{key}: ключ "
+                                f"насправді міряється -- приберіть з переліку")
+            elif key not in keys:
+                problems.append(f"unmeasured_expected.{bucket}.{key}: такої "
+                                f"відповіді немає в еталоні цього типу -- "
+                                f"запис застарів")
+            elif not (why and str(why).strip()):
+                problems.append(f"unmeasured_expected.{bucket}.{key}: без "
+                                f"причини -- оголошення мусить казати, ЧОМУ "
+                                f"відповідь не звіряється")
+
+    if roster_present:
+        acked = declared_answers.get(ROSTER_BUCKET) or {}
+        for key in sorted(roster_answers - person_measured_keys - set(acked)):
+            problems.append(f"еталон '{ROSTER_BUCKET}': відповідь '{key}' не "
+                            f"звіряє ніхто -- ні ключ у person, ні оголошення "
+                            f"в unmeasured_expected.{ROSTER_BUCKET!r}")
+        for key, why in acked.items():
+            if key in person_measured_keys:
+                problems.append(f"unmeasured_expected.{ROSTER_BUCKET}.{key}: "
+                                f"ключ насправді міряється -- приберіть")
+            elif key not in roster_answers:
+                problems.append(f"unmeasured_expected.{ROSTER_BUCKET}.{key}: "
+                                f"такого ключа немає в розділі 'людина' -- "
+                                f"запис застарів")
+            elif not (why and str(why).strip()):
+                problems.append(f"unmeasured_expected.{ROSTER_BUCKET}.{key}: "
+                                f"без причини")
+
     return problems
 
 
@@ -968,6 +1065,41 @@ def main(argv=None):
         for key, ok, total in weak:
             print(f"     {key:20} {ok}/{total}")
 
+    # РОЗРІЗ ЗА СТАТТЮ (23.08.2026). Найгірший ВІДОМИЙ клас полів -- прізвища
+    # на -а (weak-spots 2.20): морфологія бере їх за жіночі або не бере
+    # взагалі. Агрегат по корпусу це ховає за побудовою: у leave 15 чоловічих
+    # людей проти 1 жіночої, тобто повний провал на жіночих прізвищах коштує
+    # 1/16 цифри й читається як шум. Ключ `стать` у еталоні для цього й є --
+    # доти прилад його не питав ЗОВСІМ (оголошений у `unmeasured_expected`).
+    #
+    # Це РОЗРІЗ, не перевірка: у знаменник не входить, «правильної» частки не
+    # існує. Його робота -- показати перекіс, коли він є.
+    by_gender = collections.defaultdict(lambda: [0, 0])
+    for row in results:
+        gender = ((truth.get(row["id"]) or {}).get("людина") or {}).get("стать")
+        if not gender:
+            continue
+        for c in row["checks"]:
+            if c.get("group") != "field":
+                continue
+            by_gender[gender][1] += 1
+            if c["ok"]:
+                by_gender[gender][0] += 1
+    if len(by_gender) > 1:
+        print("\n=== польова точність за статтю (розріз, не перевірка) ===")
+        shares = {}
+        for gender, (ok, total) in sorted(by_gender.items()):
+            shares[gender] = ok / max(1, total)
+            print(f"  {gender:10} {ok:>3}/{total:<3} {100 * shares[gender]:5.1f}%")
+        spread = max(shares.values()) - min(shares.values())
+        docs = collections.Counter(
+            ((truth.get(r["id"]) or {}).get("людина") or {}).get("стать")
+            for r in results)
+        print("  документів:", dict(docs))
+        if spread > 0.05:
+            print(f"  !! перекіс {100 * spread:.1f} в.п. -- перевірте морфологію "
+                  f"прізвищ (weak-spots 2.20)")
+
     # Значення, що пройшли лише завдяки м'якому `contains`.
     surplus = collections.Counter(
         c["key"] for row in results for c in row["checks"] if c.get("surplus")
@@ -1084,9 +1216,10 @@ def main(argv=None):
               f"({len(unmeasured)} ключів):")
         for key, n in unmeasured.most_common():
             print(f"     {key:24} на {n} документах")
-        print("     ^ на ці ключі прилад не питає нічого: у мапінгу немає рядка "
-              "для них\n       (або документ пішов гілкою без шаблону -- тоді "
-              "`templates:` не діє взагалі).")
+        print("     ^ кожен із них ОГОЛОШЕНИЙ у `unmeasured_expected` мапінгу "
+              "з причиною:\n       з 23.08.2026 незвірена відповідь без "
+              "оголошення -- помилка мапінгу (код 1),\n       тому цей перелік "
+              "тепер читається як «рішення», а не як «сліпота».")
 
     typed = [r for r in results if r["template_ok"] is not None]
     print("шаблон визначено правильно: "

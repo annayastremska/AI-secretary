@@ -468,7 +468,13 @@ def test_mapping_key_that_is_never_answered_is_reported():
                           "надруковано": {"DOC_NUMBER": "209"}}}
     schema = {"template": "deployment_certificate",
               "fields": [{"name": "document_number"}, {"name": "ghost_field"}]}
-    mapping = {"templates": {"deployment_certificate": {
+    # `doc_types` тут не косметика: з 23.08.2026 перевірка «ключ не міряється
+    # взагалі» ставиться лише до типів, ЯКІ Є в завантаженому еталоні (інакше
+    # прогін на holdout, де немає ні квитків, ні посвідчень, видавав 24 хибні
+    # помилки й код виходу 1). Без цього рядка тип документа не резолвиться в
+    # шаблон, і фікстура міряла б поведінку, якої в реальному мапінгу немає.
+    mapping = {"doc_types": {"посвідчення про відрядження": "deployment_certificate"},
+               "templates": {"deployment_certificate": {
         "номер_документа": {"field": "document_number", "compare": "exact",
                             "printed": ["DOC_NUMBER"]},
         "привид": {"field": "ghost_field", "compare": "exact",

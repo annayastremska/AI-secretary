@@ -350,3 +350,76 @@ def test_half_paraphrased_blank_should_not_pass_as_our_form():
     _total, ladder = _edition_ladder()
     recognized_at_half = next(r for n, _c, r in ladder if n == 13)
     assert recognized_at_half is False
+
+
+# --- 23.08.2026: сліпі зони приладу (продовження A-06) -----------------------
+#
+# A-06 закрив читання holdout і ПОКАЗ неміряних ключів переліком. Але показ --
+# це повідомлення: цифра прогону від нього не змінюється, тож ключ еталона міг
+# лежати незвіреним нескінченно (8 на leave, 8 на deployment). Тепер це
+# помилка мапінгу з кодом виходу 1, доки рішення не записане у файл.
+
+def _mapping_and_schemas():
+    import yaml
+    from pipeline.run import build_resources
+    from pipeline.config import load_config
+    with io.open(os.path.join(_PROJECT_ROOT, "eval", "field-mapping.yaml"),
+                 encoding="utf-8") as f:
+        mapping = yaml.safe_load(f)
+    cfg = load_config("config.yaml", project_root=_PROJECT_ROOT)
+    return mapping, build_resources(cfg, force_no_llm=True)["schemas"]
+
+
+def test_unanswered_ground_truth_key_is_a_mapping_error():
+    """Ключ еталона, якого не звіряє ніхто й для якого немає оголошення з
+    причиною, мусить ЗУПИНЯТИ прогін, а не лишатись рядком у виводі."""
+    import copy
+    from eval.evaluate import check_mapping, load_ground_truth
+    mapping, schemas = _mapping_and_schemas()
+    truth = load_ground_truth()
+
+    assert check_mapping(mapping, schemas, truth) == []
+
+    stripped = copy.deepcopy(mapping)
+    del stripped["unmeasured_expected"]["відпускний квиток"]["супутники"]
+    problems = check_mapping(stripped, schemas, truth)
+    assert any("супутники" in p for p in problems), problems
+
+
+def test_stale_declaration_is_an_error_too():
+    """Оголошення, яке розійшлося з реальністю, мусить падати в ОБА боки:
+    ключ, що насправді міряється, і ключ, якого в еталоні вже немає."""
+    import copy
+    from eval.evaluate import check_mapping, load_ground_truth
+    mapping, schemas = _mapping_and_schemas()
+    truth = load_ground_truth()
+
+    measured = copy.deepcopy(mapping)
+    measured["unmeasured_expected"]["відпускний квиток"]["днів"] = "причина"
+    problems = check_mapping(measured, schemas, truth)
+    assert any("насправді міряється" in p for p in problems), problems
+
+    gone = copy.deepcopy(mapping)
+    gone["unmeasured_expected"]["відпускний квиток"]["ключ_якого_немає"] = "причина"
+    problems = check_mapping(gone, schemas, truth)
+    assert any("застарів" in p for p in problems), problems
+
+    empty = copy.deepcopy(mapping)
+    empty["unmeasured_expected"]["відпускний квиток"]["супутники"] = "  "
+    problems = check_mapping(empty, schemas, truth)
+    assert any("без причини" in p for p in problems), problems
+
+
+def test_scoped_corpus_does_not_fake_mapping_errors():
+    """Прогін на корпусі, де немає квитків і посвідчень (holdout), не має
+    видавати «ключ не міряється взагалі» на кожен ключ мапінгу: заміряно 24
+    хибні помилки й код виходу 1, тобто прилад на невідомому типі документа
+    виглядав поламаним."""
+    from eval.evaluate import check_mapping
+    mapping, schemas = _mapping_and_schemas()
+    holdout = os.path.join(_PROJECT_ROOT, "data", "eval", "samples", "holdout")
+    from eval.evaluate import load_ground_truth
+    truth = load_ground_truth(holdout)
+    assert truth, "holdout-еталони мусять читатись (A-06)"
+    problems = check_mapping(mapping, schemas, truth)
+    assert not [p for p in problems if "не міряється взагалі" in p], problems
