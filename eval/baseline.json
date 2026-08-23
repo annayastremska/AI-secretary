@@ -1,0 +1,52 @@
+{
+ "_чому_в_репо": "Очікувані цифри мусять лежати в історії коду: тоді зміна видна в діффі, а не лише на чиємусь диску. Оновлювати ЛИШЕ разом із поясненням у коміті.",
+ "measurements": {
+  "demo": {
+   "bad": 0,
+   "exit_code": 0,
+   "ok": 489,
+   "seconds": 2.6,
+   "total": 489
+  },
+  "deployment": {
+   "confirmed": 13,
+   "documents": 14,
+   "exit_code": 0,
+   "fields_ok": 154,
+   "fields_total": 154,
+   "mapping_problems": 0,
+   "ok": 197,
+   "seconds": 1.2,
+   "total": 197,
+   "ungrounded_refusals": 0
+  },
+  "leave": {
+   "confirmed": 15,
+   "documents": 16,
+   "exit_code": 0,
+   "fields_ok": 178,
+   "fields_total": 178,
+   "mapping_problems": 0,
+   "ok": 240,
+   "seconds": 1.3,
+   "total": 240,
+   "ungrounded_refusals": 0
+  },
+  "normative": {
+   "confirmed_normative": 41,
+   "deviation_files": [
+    "СЗЧ -- роз'яснення про самовільне залишення військової частини - ХНУПС.pdf"
+   ],
+   "deviations": 1,
+   "documents": 42,
+   "seconds": 129.6
+  },
+  "tests": {
+   "exit_code": 0,
+   "failed": 0,
+   "passed": 251,
+   "seconds": 35.7,
+   "xfailed": 1
+  }
+ }
+}
