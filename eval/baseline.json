@@ -5,7 +5,7 @@
    "bad": 0,
    "exit_code": 0,
    "ok": 489,
-   "seconds": 2.2,
+   "seconds": 1.8,
    "total": 489
   },
   "deployment": {
@@ -16,7 +16,19 @@
    "fields_total": 168,
    "mapping_problems": 0,
    "ok": 211,
-   "seconds": 1.1,
+   "seconds": 1.0,
+   "total": 211,
+   "ungrounded_refusals": 0
+  },
+  "deployment_pdf": {
+   "confirmed": 13,
+   "documents": 14,
+   "exit_code": 0,
+   "fields_ok": 168,
+   "fields_total": 168,
+   "mapping_problems": 0,
+   "ok": 211,
+   "seconds": 1.2,
    "total": 211,
    "ungrounded_refusals": 0
   },
@@ -32,6 +44,18 @@
    "total": 256,
    "ungrounded_refusals": 0
   },
+  "leave_pdf": {
+   "confirmed": 15,
+   "documents": 16,
+   "exit_code": 0,
+   "fields_ok": 186,
+   "fields_total": 186,
+   "mapping_problems": 0,
+   "ok": 256,
+   "seconds": 1.2,
+   "total": 256,
+   "ungrounded_refusals": 0
+  },
   "normative": {
    "confirmed_normative": 41,
    "deviation_files": [
@@ -39,7 +63,7 @@
    ],
    "deviations": 1,
    "documents": 42,
-   "seconds": 141.7
+   "seconds": 63.9
   },
   "story": {
    "confirmed": 16,
@@ -68,8 +92,8 @@
   "tests": {
    "exit_code": 0,
    "failed": 0,
-   "passed": 271,
-   "seconds": 30.4,
+   "passed": 282,
+   "seconds": 16.3,
    "xfailed": 1
   }
  }

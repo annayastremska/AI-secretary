@@ -117,5 +117,3 @@ values:
   - code: general
     label: "Генерал"
     aliases: ["генерал", "генерал армії україни"]
-
-unmatched_term_policy: queue_for_review

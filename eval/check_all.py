@@ -1,4 +1,4 @@
-"""Сім цифр одною командою: «не ламає» як діф, а не як відчуття.
+"""Дев'ять цифр одною командою: «не ламає» як діф, а не як відчуття.
 
 Причина існування. Правило Ані від 23.08.2026 -- після КОЖНОЇ правки
 перевіряти, чи не зламалось щось в іншому місці. Доти ці заміри
@@ -40,6 +40,13 @@ BASELINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseli
 # ніхто не оновлює, а цей файл падає, якщо шлях зник.
 LEAVE_DOCX = "data/eval/samples/leave/synthetic-2026-05/docx"
 DEPLOYMENT_DOCX = "data/eval/samples/deployment/synthetic-2026-05/docx"
+# PDF-корпуси міряються ОКРЕМО від docx. Додано 24.08.2026 за найдешевшою
+# рекомендацією абляційного аудиту: обидві папки лежать у репо, але перевірка
+# «не ламає» їх не міряла -- а саме вони тримають pdf-специфічні константи
+# (межа блоку текстового шару, добір через перенос рядка). Без них 21 перевірку
+# не тримало ніщо: зламати pdf-шлях можна було, не зачепивши жодної цифри.
+LEAVE_PDF = "data/eval/samples/leave/synthetic-2026-05/pdf"
+DEPLOYMENT_PDF = "data/eval/samples/deployment/synthetic-2026-05/pdf"
 NORMATIVE_DIR = "data/eval/samples/normative"
 DEMO_VALIDATOR = "data/eval/samples/demo-story/validate_demo_set.py"
 # Демо-набір міряється ще й ПОЛЬОВО, не лише валідатором зв'язності. Додано
@@ -182,6 +189,8 @@ MEASUREMENTS = {
     "tests": ("тести", measure_tests),
     "leave": ("leave docx", lambda: measure_eval(LEAVE_DOCX)),
     "deployment": ("deployment docx", lambda: measure_eval(DEPLOYMENT_DOCX)),
+    "leave_pdf": ("leave pdf", lambda: measure_eval(LEAVE_PDF)),
+    "deployment_pdf": ("deployment pdf", lambda: measure_eval(DEPLOYMENT_PDF)),
     "story": ("демо-історія docx", lambda: measure_eval(DEMO_STORY_DOCX,
                                                         DEMO_STORY_EVAL)),
     "story_pdf": ("демо-історія pdf", lambda: measure_eval(DEMO_STORY_PDF,
@@ -199,6 +208,11 @@ WORSE_IF = {
               ("ungrounded_refusals", "down")],
     "deployment": [("ok", "up"), ("fields_ok", "up"), ("mapping_problems", "down"),
                    ("ungrounded_refusals", "down")],
+    "leave_pdf": [("ok", "up"), ("fields_ok", "up"), ("mapping_problems", "down"),
+                  ("ungrounded_refusals", "down")],
+    "deployment_pdf": [("ok", "up"), ("fields_ok", "up"),
+                       ("mapping_problems", "down"),
+                       ("ungrounded_refusals", "down")],
     "story": [("ok", "up"), ("fields_ok", "up"), ("mapping_problems", "down"),
               ("ungrounded_refusals", "down")],
     "story_pdf": [("ok", "up"), ("fields_ok", "up"), ("mapping_problems", "down"),
@@ -216,7 +230,8 @@ def _fmt(key, value):
     if key == "tests":
         tail = f", xfail {value['xfailed']}" if value.get("xfailed") else ""
         return (f"{value['passed']} passed, {value['failed']} failed{tail}")
-    if key in ("leave", "deployment", "story", "story_pdf"):
+    if key in ("leave", "deployment", "leave_pdf", "deployment_pdf",
+               "story", "story_pdf"):
         return (f"{value['ok']}/{value['total']} усього, "
                 f"{value['fields_ok']}/{value['fields_total']} польових, "
                 f"підтверджено {value['confirmed']}/{value['documents']}")
