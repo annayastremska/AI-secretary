@@ -78,6 +78,32 @@ MIN_DOCUMENT_TEXT_CHARS = 20
 # ідея "схемо-вільний витяг для невідомої форми", п.1).
 FREEFORM_ELIGIBLE_REASONS = {"no_template_match", "below_llm_floor"}
 
+#: Скільки тексту помилки лишаємо в `reason`. Причина існування -- заміряний
+#: 24.08.2026 випадок: OCR упав із багаторядковим повідомленням (SpawnError
+#: тягнув за собою лог сервера), і воно поїхало в `reason` як є. Frontmatter
+#: запису після цього -- НЕВАЛІДНИЙ YAML: `yaml.safe_load` падає з
+#: `found unexpected end of stream`.
+#:
+#: Ціна цього була б не «негарний файл», а зламаний завантажувач: він читає
+#: саме frontmatter, тобто один зіпсований запис валить завантаження пачки. І
+#: спрацювало б це рівно тоді, коли щось уже пішло не так -- на записі про
+#: помилку.
+MAX_REASON_CHARS = 300
+
+
+def one_line_reason(text: str) -> str:
+    """Причина відмови -- ОДИН рядок обмеженої довжини.
+
+    Багаторядковий текст (стектрейс, лог чужого процесу) у frontmatter
+    неприпустимий: див. MAX_REASON_CHARS. Повний текст помилки при цьому не
+    губиться -- він лишається в попередженнях прогону й у логах, а `reason`
+    відповідає на питання «що сталося», не «весь лог».
+    """
+    flat = " ".join(str(text or "").split())
+    if len(flat) <= MAX_REASON_CHARS:
+        return flat
+    return flat[:MAX_REASON_CHARS - 1] + "…"
+
 # Схема НЕ лежить у pipeline/schemas/*.yaml навмисно: тоді вона потрапила б у
 # load_schemas() і бала б проти анкорів у identify_template (score_schema) --
 # 0 анкорів означає 0 балів, тобто вона ніколи не переміг би, але вона й не
@@ -344,7 +370,8 @@ def build_resources(cfg: dict, force_no_llm=False) -> dict:
                                            cache_ram_mb=cfg["ocr"].get("cache_ram_mb"),
                                            max_tokens_full_page=cfg["ocr"].get("max_tokens_full_page"),
                                            guided_layout=cfg["ocr"].get("guided_layout"),
-                                           recognition_max_retries=cfg["ocr"].get("recognition_max_retries"))
+                                           recognition_max_retries=cfg["ocr"].get("recognition_max_retries"),
+                                           inference_backend=cfg["ocr"].get("inference_backend"))
         except Exception as exc:
             res["warnings"].append(f"OCR недоступний ({type(exc).__name__}: {exc}) -- зображення не обробляться")
 
@@ -669,7 +696,9 @@ def process_file(path: str, res: dict, cfg: dict, force_template=None,
                     source_kind=ingest_info.get("source_kind"),
                     review_queue="unknown_type", review_reason="unresolved",
                     warnings=list(ingest_warnings),
-                    reason=f"не вдалося прочитати документ: {type(exc).__name__}: {exc}")
+                    reason=one_line_reason(
+                        f"не вдалося прочитати документ: "
+                        f"{type(exc).__name__}: {exc}"))
         _persist(meta, "", res)
         return meta
 

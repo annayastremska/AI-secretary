@@ -154,7 +154,8 @@ def _health_of(manager):
 def make_surya_reader(llama_server_path=None, inference_parallel=None,
                       n_gpu_layers=None, hub_offline=False,
                       cache_ram_mb=None, max_tokens_full_page=None,
-                      guided_layout=None, recognition_max_retries=None):
+                      guided_layout=None, recognition_max_retries=None,
+                      inference_backend=None):
     """Повертає callable(image_path) -> list[{"text","bbox"}].
 
     Модель вантажиться один раз на процес (замикання), не на кожен файл --
@@ -212,6 +213,22 @@ def make_surya_reader(llama_server_path=None, inference_parallel=None,
     if isinstance(guided_layout, bool):
         guided_layout = int(guided_layout)
     os.environ["SURYA_GUIDED_LAYOUT"] = str(guided_layout)
+    # БЕКЕНД РОЗПІЗНАВАННЯ -- ОГОЛОШУЄТЬСЯ, А НЕ ВГАДУЄТЬСЯ (24.08.2026).
+    #
+    # Surya обирає його сама: `_autodetect_backend()` викликає `nvidia-smi -L`
+    # і при будь-якій знайденій карті бере "vllm" (docker), інакше "llamacpp".
+    # Заміряний випадок, коли це неправильно: на сервері vGPU втратив ліцензію,
+    # карта в `nvidia-smi` ЛИШИЛАСЬ, а CUDA-обчислення зникли. Автовизначення
+    # обрало vllm, той не піднявся, і кожне фото витрачало 600 с таймауту й
+    # виходило `unresolved` -- при тому що шлях llamacpp на CPU дає той самий
+    # документ за 47 с (перевірено на DEMO-01.jpg).
+    #
+    # "наявність карти" і "карта працює" -- різні твердження, і вгадувати
+    # друге за першим не можна. Тому бекенд тепер можна закріпити конфігом:
+    # `ocr.inference_backend: llamacpp | vllm`. None = попередня поведінка
+    # (автовизначення surya), тобто на робочих машинах нічого не змінюється.
+    if inference_backend:
+        os.environ["SURYA_INFERENCE_BACKEND"] = str(inference_backend)
     if llama_server_path:
         os.environ["LLAMA_CPP_BINARY"] = llama_server_path
     # `is not None`, а не `if n_gpu_layers`: 0 -- це осмислене значення

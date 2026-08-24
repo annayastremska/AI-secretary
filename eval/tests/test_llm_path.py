@@ -235,3 +235,36 @@ def test_model_returning_nothing_leaves_an_honest_gap(env):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([os.path.abspath(__file__), "-q"]))
+
+
+# --- 4. ЗАПИС ПРО ПОМИЛКУ МУСИТЬ ЛИШАТИСЬ ВАЛІДНИМ YAML ---------------------
+#
+# Заміряно 24.08.2026: OCR упав із багаторядковим повідомленням (SpawnError
+# тягнув за собою лог чужого процесу), і воно поїхало в `reason` як є.
+# Frontmatter після цього -- невалідний YAML, а завантажувач бази читає саме
+# frontmatter. Тобто один зіпсований запис валив би завантаження пачки -- і
+# рівно тоді, коли щось уже пішло не так.
+
+def test_multiline_failure_reason_stays_one_line():
+    from pipeline.run import MAX_REASON_CHARS, one_line_reason
+    raw = ("не вдалося прочитати документ: SpawnError: vllm server failed\n"
+           "--- last vllm server logs ---\n"
+           "ERROR 08-24 07:00:00 [core.py:123] traceback...\n" + "x" * 500)
+    out = one_line_reason(raw)
+    assert "\n" not in out and "\r" not in out, out
+    assert len(out) <= MAX_REASON_CHARS, len(out)
+    assert out.startswith("не вдалося прочитати документ:"), out
+
+
+def test_reason_survives_yaml_roundtrip():
+    """Головна перевірка -- не «немає переводів рядка», а «YAML читається»."""
+    import yaml
+    from pipeline.run import one_line_reason
+    reason = one_line_reason("помилка: рядок\nдругий рядок 'з лапкою' та \"ще\"")
+    doc = yaml.safe_dump({"reason": reason}, allow_unicode=True)
+    assert yaml.safe_load(doc)["reason"] == reason
+
+
+def test_short_reason_is_untouched():
+    from pipeline.run import one_line_reason
+    assert one_line_reason("немає схеми") == "немає схеми"
