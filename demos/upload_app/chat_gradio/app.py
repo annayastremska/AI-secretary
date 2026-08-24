@@ -32,6 +32,8 @@
 #   - Документи в нашій базі -- травень 2026: якщо рік не названо,
 #     підставляється 2026 (правило стенду доречне й для нашої бази).
 
+import datetime
+import difflib
 import os
 import sys
 import json
@@ -220,6 +222,32 @@ MONTHS = {"січ": 1, "лют": 2, "берез": 3, "квіт": 4, "трав": 
           "лип": 7, "серп": 8, "верес": 9, "жовт": 10, "листопад": 11,
           "груд": 12}
 
+# Відносні дати рахуються від СПРАВЖНЬОГО сьогодні, а не від травня 2026.
+# Стенд накриває травень, тож «сьогодні» майже напевно дасть порожньо -- і це
+# правильна відповідь: у підвалі видно зріз, людина одразу бачить, що на цю
+# дату документів немає. Раніше «сьогодні» не розпізнавалось узагалі, чат
+# питав «за яку дату рахувати?» і виглядало, ніби він не зрозумів слова.
+RELATIVE_DAYS = {"позавчора": -2, "вчора": -1, "сьогодні": 0, "сьогоднi": 0,
+                 "завтра": 1, "післязавтра": 2}
+
+# Повні форми -- для нечіткого збігу з одруківками. Стем-збіг вище ловить лише
+# помилки в ХВОСТІ слова («травнч»), бо там початок цілий. Помилка в самому
+# корені («тралня», «трвня») стем не проходить, а люди друкують саме так.
+# Доти одруківки виправляла модель -- але дату в неї забрали (вона підставляла
+# дати, яких у питанні не було), тож розпізнавати мусимо самі.
+MONTH_FORMS = {"січня": 1, "лютого": 2, "березня": 3, "квітня": 4,
+               "травня": 5, "червня": 6, "липня": 7, "серпня": 8,
+               "вересня": 9, "жовтня": 10, "листопада": 11, "грудня": 12}
+
+
+def _match_month(word):
+    """Номер місяця за словом: точний стем, інакше найближче за написанням."""
+    for stem, mon in MONTHS.items():
+        if word.startswith(stem):
+            return mon
+    near = difflib.get_close_matches(word, MONTH_FORMS, n=1, cutoff=0.7)
+    return MONTH_FORMS[near[0]] if near else None
+
 
 def extract_date(text):
     """ISO-форма -- як було. Плюс словесна («23 травня», «23-го травня»).
@@ -234,11 +262,18 @@ def extract_date(text):
     m = re.search(r"\d{4}-\d{2}-\d{2}", text)
     if m:
         return m.group(0)
+    m = re.search(r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b", text)   # 15.05.2026
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    low = text.lower()
+    for word, shift in RELATIVE_DAYS.items():
+        if word in low:
+            return str(datetime.date.today() + datetime.timedelta(days=shift))
     m = re.search(r"(\d{1,2})\s*(?:-?[а-яіїєґ]{1,3})?\s+([а-яіїєґ]+)", text.lower())
     if m and 1 <= int(m.group(1)) <= 31:
-        for stem, mon in MONTHS.items():
-            if m.group(2).startswith(stem):
-                return f"{STAND_YEAR}-{mon:02d}-{int(m.group(1)):02d}"
+        mon = _match_month(m.group(2))
+        if mon:
+            return f"{STAND_YEAR}-{mon:02d}-{int(m.group(1)):02d}"
     return None
 
 
@@ -671,22 +706,6 @@ def _history_text(content):
     return ""
 
 
-def _is_followup(question):
-    """Чи це коротке допитування до попереднього питання («а 23 травня?»,
-    «а по 2 роті?»), а не самостійне питання.
-
-    Ознака — питання несе сутність підрахунку (дату, підрозділ, номер
-    документа), але не несе власного наміру. Без цієї перевірки склейка
-    спрацьовувала на КОЖНОМУ питанні без наміру, а це всі питання до
-    довідника: «За скільки днів подавати рапорт?» після будь-якого
-    підрахунку клеїлось із ним і йшло в підрахунок, віддаючи зведення
-    замість цитати з документа.
-    """
-    return bool(extract_date(question)
-                or normalize_subdivision(question)
-                or extract_doc_number(question))
-
-
 # ── Перенесення слотів між ходами ───────────────────────────────────────────
 #
 # Замість склеювати попереднє питання з поточним в один рядок і сподіватись,
@@ -717,14 +736,52 @@ def _state_marker(params):
     return f"\n<!--slots:{json.dumps(keep, ensure_ascii=False)}-->"
 
 
+# Питання складається практично лише з числа: «а 22?», «22», «а 15-го?»,
+# «а 22 числа?». Саме така вимога і рятує від хибних спрацювань: у «а по 2
+# роті?» після числа стоїть іменник, тож воно сюди не підходить і 2-м числом
+# не стане.
+BARE_DAY_RE = re.compile(
+    r"^\W*(?:а|і|й|та|ну)?\s*(\d{1,2})\s*(?:-?[гґ]о|-?[ає]|числа)?\s*[?!.]*$")
+
+
+def _refine_day(question, prev_date):
+    """«а 22?» після відповіді за 23 травня -> 2026-05-22.
+
+    День без місяця extract_date розпізнати не може, тому доти дата
+    успадковувалась цілком: на «а 22?» чат відповідав за попереднє число і
+    навіть не показував, що не зрозумів. Місяць і рік беремо з попередньої
+    дати -- людина уточнює день у межах уже названого місяця.
+    """
+    if not prev_date:
+        return None
+    m = BARE_DAY_RE.match((question or "").strip().lower())
+    if not m:
+        return None
+    try:
+        base = datetime.date.fromisoformat(prev_date)
+        return str(base.replace(day=int(m.group(1))))
+    except ValueError:
+        return None          # 31 квітня і подібне -- не вигадуємо
+
+
 def _last_user_question(history):
-    """Попереднє питання користувача -- як позначений контекст для наміру."""
-    for m in reversed(history or []):
-        if isinstance(m, dict) and m.get("role") == "user":
-            text = _history_text(m.get("content")).strip()
-            if text:
-                return text
-    return None
+    """Попереднє питання -- як позначений контекст для наміру.
+
+    Береться останнє питання, у якому намір ВЗАГАЛІ Є: ланцюжок уточнень
+    («а 23 травня?» -> «а 22?») інакше давав моделі для контексту такий самий
+    безнамірний рядок, і успадковувати їй було нізвідки -- на «а 22?» намір
+    злітав на дефолтний. Якщо з наміром не знайшлось, беремо просто останнє.
+    """
+    questions = [
+        _history_text(m.get("content")).strip()
+        for m in (history or [])
+        if isinstance(m, dict) and m.get("role") == "user"
+        and _history_text(m.get("content")).strip()
+    ]
+    for text in reversed(questions):
+        if rules_params(text)["intent"]:
+            return text
+    return questions[-1] if questions else None
 
 
 def _params_input(question, history):
@@ -756,17 +813,6 @@ def _read_state(history):
     return None
 
 
-def _drop_invented_date(params, question):
-    """Модель інколи повертає дату, якої в питанні немає -- бачили, як 4B
-    підставляла дату з прикладу в системному промпті. Дата без жодної цифри
-    в питанні -- вигадана; краще порожній слот (його добере перенесення),
-    ніж тихо неправильна відповідь."""
-    if params.get("date") and not any(c.isdigit() for c in question):
-        params = dict(params)
-        params["date"] = None
-    return params
-
-
 def _drop_invented_name(params, question):
     """Аналог _drop_invented_date для імені: модель бачили на тому, що
     підставляє «Петренко» з прикладу в системному промпті. Ім'я, перших
@@ -790,6 +836,20 @@ def _carry_over(params, prev):
         if not out.get(slot):
             out[slot] = prev.get(slot)
     return out
+
+
+def _answers_clarification(question):
+    """Чи це справді ВІДПОВІДЬ на уточнення, а не нове питання.
+
+    Уточнення завжди просить конкретну сутність -- дату або людину. Тому
+    відповіддю вважаємо лише репліку, що цю сутність несе. Інакше людина,
+    яка після «За яку дату рахувати?» ставить наступне питання («а скільки
+    у відпустці?»), потрапляла в глухий кут: репліку зараховували як
+    відповідь, дати в ній не було, а повторно перепитувати вже не можна --
+    і замість відповіді йшла жорстка відмова.
+    """
+    return bool(extract_date(question) or extract_doc_number(question)
+                or extract_name(question))
 
 
 def _merge_clarification(question, history):
@@ -816,7 +876,9 @@ def _merge_clarification(question, history):
         content = _history_text(m.get("content")) if isinstance(m, dict) else ""
         if role in ("user", "assistant") and content:
             msgs.append((role, content))
-    if msgs and msgs[-1][0] == "assistant" and msgs[-1][1].startswith(CLARIFY_MARK):
+    if (msgs and msgs[-1][0] == "assistant"
+            and msgs[-1][1].startswith(CLARIFY_MARK)
+            and _answers_clarification(question)):
         prev_user = next((c for r, c in reversed(msgs[:-1]) if r == "user"), "")
         return f"{prev_user}\n{question}", True
     return question, False
@@ -966,14 +1028,20 @@ def answer(question, history=None):
     # («а 4 травня?») сюди не потрапляє -- ним займеться модель із
     # позначеним контекстом або перенесення слотів нижче.
     rp = rules_params(merged)
+    # «а 22?» -- день без місяця: сутність підрахунку, яку extract_date не
+    # бачить; добираємо її з дати попереднього ходу (_refine_day), інакше
+    # найкоротше з допитувань не потрапляє ні в швидкий шлях, ні у
+    # відновлення маршруту без моделі.
+    _prev_slots = _read_state(history) or {}
+    _bare_day = _refine_day(merged, _prev_slots.get("date"))
     if rp["intent"] and rules_route(merged) == "підрахунок":
         # fallback лишається True, лише якщо моделі взагалі немає (чесна
         # позначка «працюють правила»); з моделлю це не деградація, а
         # свідомий швидкий шлях
         route, params = "підрахунок", rp
-    elif (route is None and not rp["intent"] and _read_state(history)
+    elif (route is None and not rp["intent"] and _prev_slots
             and (rp["date"] or rp["subdivision"] or rp["doc_number"]
-                 or rp["name"])):
+                 or rp["name"] or _bare_day)):
         # Коротке допитування («а 4 травня?», «а по 2 роті?»): є сутність
         # підрахунку, немає власного наміру, а в історії лежать слоти
         # попереднього ходу -- намір добере _carry_over детерміновано, без
@@ -1040,9 +1108,9 @@ def answer(question, history=None):
         # у ньому є сутність підрахунку, але немає наміру. Якщо в історії є
         # збережені слоти -- перенесення (_carry_over нижче) добере намір
         # детерміновано, тож маршрут чесно лишається підрахунком.
-        if (route == "відмова" and _read_state(history)
+        if (route == "відмова" and _prev_slots
                 and (extract_date(merged) or extract_doc_number(merged)
-                     or normalize_subdivision(merged))):
+                     or normalize_subdivision(merged) or _bare_day)):
             route = "підрахунок"
     elif route == "відмова" and extract_doc_number(merged):
         # явна сутність підрахунку (№ документа) перемагає — див. шапку.
@@ -1054,25 +1122,46 @@ def answer(question, history=None):
     # Слоти, яких у питанні не було, добираємо з попереднього ходу. Робиться
     # ПІСЛЯ моделі й правил: спершу чесно дивимось, що є в самому питанні.
     if route == "підрахунок" and params is not None:
-        # дата з правил надійніша за модельну: правила читають саме текст
-        # питання, модель може підставити дату з прикладу в промпті
-        if not params.get("date"):
-            params = dict(params, date=extract_date(merged))
-        params = _drop_invented_date(params, merged)
+        # Дата -- ЛИШЕ з правил. Модель тут не авторитет: вона підставляла
+        # то дату зі стенду (на «скільки сьогодні повертаються?» відповідала
+        # за 2026-05-24), то дату з прикладу у власному промпті. Правила
+        # читають буквальний текст питання й покривають ISO, «23 травня»,
+        # «15.05.2026» і «сьогодні/вчора/завтра»; чого вони не впізнали --
+        # того в питанні й немає, слот лишається порожнім і його добере
+        # перенесення з попереднього ходу. merged, не question: склейка
+        # «бот спитав -- людина відповіла» не має губити дату з питання,
+        # до якого було уточнення.
+        params = dict(params, date=extract_date(merged))
         params = _drop_invented_name(params, merged)
-        params = _carry_over(params, _read_state(history))
-        # Запобіжник проти зайвого успадкування: якщо ПОТОЧНЕ питання само
-        # однозначно називає намір (№документа, ПІБ, «хто повертається»...),
-        # він головніший за успадкований. Без цього «Хто у відпустці за
-        # квитком №301?» після питання з датою відповідало старим наміром і
-        # старою датою -- розмітка «Попереднє:» робить модель надто охочою
-        # тягнути контекст. Правила тут працюють лише НА ПІДТВЕРДЖЕННЯ:
-        # не знайшли наміру -- нічого не блокуємо, лишається успадкований.
+        prev_state = _read_state(history)
+        if not params["date"]:
+            params["date"] = _refine_day(question, (prev_state or {}).get("date"))
+        params = _carry_over(params, prev_state)
         own = rules_params(question)
-        if own["intent"] and own["intent"] != params.get("intent"):
+        if not own["intent"] and (prev_state or {}).get("intent"):
+            # Питання власного наміру не називає («а 22?») -- тримаємо
+            # попередній, а не те, що вгадала модель. Вона мусить обрати
+            # щось із enum навіть коли обирати нема з чого, і на коротких
+            # уточненнях це «щось» стрибало: на «а 22?» -- «поза частиною»
+            # після двох питань про повернення.
+            params = dict(params, intent=prev_state["intent"])
+        elif own["intent"] and own["intent"] != params.get("intent"):
+            # Запобіжник проти зайвого успадкування: якщо ПОТОЧНЕ питання
+            # само однозначно називає намір (№документа, ПІБ, «хто
+            # повертається»...), він головніший за успадкований. Без цього
+            # «Хто у відпустці за квитком №301?» після питання з датою
+            # відповідало старим наміром і старою датою -- розмітка
+            # «Попереднє:» робить модель надто охочою тягнути контекст.
             params = dict(params, intent=own["intent"])
             for slot in ("date", "subdivision", "name", "doc_number"):
-                params[slot] = own[slot] if slot in INTENT_SLOTS[own["intent"]] else None
+                if slot not in INTENT_SLOTS[own["intent"]]:
+                    params[slot] = None          # чужий наміру -- геть
+                elif own[slot]:
+                    params[slot] = own[slot]     # своє з питання -- головніше
+                # інакше лишаємо успадковане: «а скільки у відпустці?» змінює
+                # НАМІР, але дату бере з попереднього ходу. Раніше цей цикл
+                # затирав її на None, і чат просив уточнити дату, яку щойно
+                # сам же й назвав у попередній відповіді.
 
     if route == "підрахунок":
         result = dispatch_count(params, clarified, clarify_hint, merged)
