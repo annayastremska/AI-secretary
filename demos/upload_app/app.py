@@ -332,7 +332,7 @@ def index():
 # цю саму FastAPI: один процес, один порт, і той самий Basic-auth гейт
 # (_basic_auth вище -- HTTP-middleware обгортає ВЕСЬ ASGI-стек, тож і
 # змонтований Gradio під /chat; перевіряється тестом
-# tests/test_auth_gate.py). Стара саморобна сторінка static/chat.html і
+# tests/test_app_gate.py). Стара саморобна сторінка static/chat.html і
 # /api/chat прибрані; колишній chat.py перенесено в chat_gradio/tiers.py --
 # звідти чат бере каталог шаблонів, ярус 2 і резидентну модель.
 
