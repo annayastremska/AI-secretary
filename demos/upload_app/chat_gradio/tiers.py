@@ -1,4 +1,8 @@
-"""Чат «AI-секретар»: відповіді українською за даними РЕАЛЬНОЇ Postgres.
+"""Яруси чата «AI-секретар»: каталог SQL-шаблонів і вільний SELECT під рейками.
+
+Перенесено з demos/upload_app/chat.py (задача 1.1 плану
+docs/tasks/2026-08-24_app-chat-plan.md): тепер це частина ЄДИНОЇ кодової
+бази чата (chat_gradio/), а не окремий модуль поруч. Логіка — без змін.
 
 Два яруси (рішення координатора із замовницею):
 
@@ -18,18 +22,23 @@
 
 Правило продукту: відмова краща за вигадку; чернетка (unconfirmed) у
 підрахунки не входить -- непідтверджені показуються окремим числом.
+
+Екранування (задача 1.5, знахідка Андрія §8): усі значення з бази (ПІБ,
+value, назви вимірів тощо) — це текст із ДОКУМЕНТІВ, тобто недовірений вхід;
+перед вставкою в Markdown/HTML чата вони проходять html.escape (_esc нижче).
 """
 import datetime
+import html
 import os
 import re
 import threading
-import time
 
 import psycopg
 import yaml
 from psycopg.rows import dict_row
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+CHAT_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = os.path.dirname(CHAT_DIR)          # demos/upload_app
 PROJECT_ROOT = os.path.dirname(os.path.dirname(APP_DIR))
 CATALOG_PATH = os.path.join(APP_DIR, "query_catalog.yaml")
 
@@ -40,8 +49,14 @@ MODEL_PATH = os.environ.get(
     "CHAT_MODEL_PATH",
     os.path.join(PROJECT_ROOT, "models", "mamaylm-4b-q4_k_m.gguf"))
 
-MODEL_NOTE = ("локальна модель недоступна -- відповідаю лише за "
-              "шаблонними питаннями")
+
+def _esc(value):
+    """Значення з бази чи з документа -> безпечний текст для Markdown/HTML.
+
+    quote=False: лапки в текстових вузлах безпечні, а ПІБ з апострофом
+    («Мар'яна») лишається читабельним у сирому тексті відповіді."""
+    return html.escape(str(value), quote=False)
+
 
 # ── Каталог ──────────────────────────────────────────────────────────────────
 
@@ -174,6 +189,12 @@ STOP_CAPS = {"Хто", "Скільки", "Який", "Яка", "Яке", "Які
 _AGGREGATE = re.compile(
     r"середн|найдовш|найкоротш|сумарн|медіан|максимальн|мінімальн")
 
+# Явно деструктивні прохання ріжемо правилами ще ДО моделі: чат нічого не
+# змінює в базі за визначенням (read-only), і чесно про це каже.
+_DESTRUCTIVE = re.compile(
+    r"вида[лл]|знищ|очист|drop\b|delete\b|truncate\b|update\b|insert\b|"
+    r"зміни\s|встанов\s|підтверд[иь]\b", re.I)
+
 
 def _month_from(text):
     low = text.lower()
@@ -289,7 +310,7 @@ def rules_route(question):
         return "documents_count", {}
 
     # Агрегати, яких у каталозі немає (середнє, мін/макс, суми) -- правила
-    # не хапають: такі питання йдуть одразу в ярус 2 (див. answer_question).
+    # не хапають: такі питання йдуть одразу в ярус 2 (див. answer у app.py).
     if _AGGREGATE.search(low):
         return None
 
@@ -450,7 +471,11 @@ def _fmt_period(r):
 
 
 def run_template(template_id, params):
-    """Виконати шаблон і скласти текст відповіді. -> (text, source_lines)."""
+    """Виконати шаблон і скласти текст відповіді. -> (text, source_lines).
+
+    Значення з бази (ПІБ, value, назви вимірів) прийшли з документів через
+    OCR -- недовірений вхід, тому кожне проходить _esc перед вставкою в
+    Markdown-відповідь (задача 1.5)."""
     sql_params, t = _sql_params(template_id, params)
     rows = _run_template_sql(t["sql"], sql_params)
     unconfirmed = None
@@ -485,14 +510,16 @@ def run_template(template_id, params):
         else:
             lines.append(f"{_people(len({r['name'] for r in rows}))} {state_lbl}:")
             for r in rows:
-                lines.append(f"- {r['name']} — {DIM_LABEL.get(r['dim'], r['dim'])}"
+                lines.append(f"- {_esc(r['name'])} — "
+                             f"{_esc(DIM_LABEL.get(r['dim'], r['dim']))}"
                              f", {_fmt_period(r)} (документ №{r['source_doc_id']} у базі)")
         lines.append(f"Зріз: {params['date_from']} — {params['date_to']}{denom}.")
         if u_rows:
             lines.append(f"Окремо непідтверджені (потребують перевірки людиною, "
                          f"у підсумок не входять): {len(u_rows)}")
             for r in u_rows:
-                lines.append(f"- {r['name']} — {DIM_LABEL.get(r['dim'], r['dim'])}"
+                lines.append(f"- {_esc(r['name'])} — "
+                             f"{_esc(DIM_LABEL.get(r['dim'], r['dim']))}"
                              f", {_fmt_period(r)} — непідтверджено")
         else:
             lines.append("Непідтверджених записів за цей період: 0.")
@@ -500,7 +527,7 @@ def run_template(template_id, params):
     elif template_id == "person_status":
         if not rows:
             lines.append(f"Не знайшла: у реєстрі немає особи за "
-                         f"«{params.get('name', params['name_pattern'])}».")
+                         f"«{_esc(params.get('name', params['name_pattern']))}».")
         else:
             by_person = {}
             for r in rows:
@@ -509,40 +536,41 @@ def run_template(template_id, params):
                 lines.append(f"Знайдено {len(by_person)} осіб за запитом — "
                              "уточніть ПІБ повніше.")
             for name, facts in by_person.items():
-                lines.append(f"{name}:")
+                lines.append(f"{_esc(name)}:")
                 for r in facts:
                     mark = ("підтверджено" if r["status"] == "confirmed"
                             else "НЕ підтверджено, потребує перевірки")
                     period = ""
                     if r["valid_from"] or r["valid_to"]:
                         period = f", {_fmt_period(r)}"
-                    lines.append(f"- {r['dim_name']}: {r['value']}{period} "
+                    lines.append(f"- {_esc(r['dim_name'])}: {_esc(r['value'])}{period} "
                                  f"[{mark}; документ №{r['source_doc_id']} у базі]")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     elif template_id == "doc_by_number":
         if not rows:
             lines.append(f"Не знайшла документа з номером "
-                         f"№{params['doc_number']} у базі. Номер не виправляю "
+                         f"№{_esc(params['doc_number'])} у базі. Номер не виправляю "
                          "і схожих не підставляю.")
         else:
             doc_ids = sorted({r["source_doc_id"] for r in rows})
             if len(doc_ids) > 1:
-                lines.append(f"Документів із номером №{params['doc_number']} "
+                lines.append(f"Документів із номером №{_esc(params['doc_number'])} "
                              f"у базі {len(doc_ids)} — показую всі.")
             for did in doc_ids:
                 facts = [r for r in rows if r["source_doc_id"] == did]
                 who = facts[0]["name"]
                 n_unc = sum(1 for r in facts if r["status"] != "confirmed")
-                lines.append(f"Документ №{params['doc_number']} "
-                             f"(запис №{did} у базі) — {who}:")
+                lines.append(f"Документ №{_esc(params['doc_number'])} "
+                             f"(запис №{did} у базі) — {_esc(who)}:")
                 for r in facts:
                     mark = ("" if r["status"] == "confirmed"
                             else " [НЕ підтверджено]")
                     period = ""
                     if r["valid_from"] or r["valid_to"]:
                         period = f", {_fmt_period(r)}"
-                    lines.append(f"- {r['dim_name']}: {r['value']}{period}{mark}")
+                    lines.append(f"- {_esc(r['dim_name'])}: "
+                                 f"{_esc(r['value'])}{period}{mark}")
                 if n_unc:
                     lines.append(f"Непідтверджених полів у документі: {n_unc} — "
                                  "вони не входять у підрахунки, доки людина "
@@ -555,7 +583,7 @@ def run_template(template_id, params):
             total_q = sum(r["n"] for r in rows)
             lines.append(f"У черзі перевірки {_plural(total_q, 'запис', 'записи', 'записів')}:")
             for r in rows:
-                lines.append(f"- {QUEUE_LABEL.get(r['queue_type'], r['queue_type'])}: {r['n']}")
+                lines.append(f"- {_esc(QUEUE_LABEL.get(r['queue_type'], r['queue_type']))}: {r['n']}")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     elif template_id == "unconfirmed_count":
@@ -571,7 +599,7 @@ def run_template(template_id, params):
         total_d = sum(r["n"] for r in rows)
         lines.append(f"Документів у базі: {total_d}.")
         for r in rows:
-            lines.append(f"- {r['domain']}: {r['n']}")
+            lines.append(f"- {_esc(r['domain'])}: {r['n']}")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     source = [f"шаблон каталогу: {template_id} ({t['title']})",
@@ -691,9 +719,11 @@ def tier2_answer(question):
                 "Спробуйте перефразувати питання."), src
     lines = ["Відповідь на нешаблонний запит (перевірте джерело у згортці):"]
     cols = list(rows[0].keys())
-    lines.append(" | ".join(cols))
+    # і назви колонок, і значення їдуть у Markdown-рендер чата -- екрануємо
+    # (значення в базі прийшли з документів, недовірений вхід)
+    lines.append(" | ".join(_esc(c) for c in cols))
     for r in rows[:50]:
-        lines.append(" | ".join("" if r[c] is None else str(r[c]) for c in cols))
+        lines.append(" | ".join("" if r[c] is None else _esc(r[c]) for c in cols))
     if len(rows) > 50:
         lines.append(f"... і ще {len(rows) - 50} рядків (обрізано)")
     try:
@@ -704,86 +734,3 @@ def tier2_answer(question):
     except psycopg.Error:
         pass
     return "\n".join(lines), src
-
-
-# ── Головна точка входу ──────────────────────────────────────────────────────
-
-REFUSE_TEXT = ("Це питання не про дані бази документів. Я відповідаю про "
-               "відпустки, відрядження, документи та чергу перевірки.")
-
-# Явно деструктивні прохання ріжемо правилами ще ДО моделі: чат нічого не
-# змінює в базі за визначенням (read-only), і чесно про це каже.
-_DESTRUCTIVE = re.compile(
-    r"вида[лл]|знищ|очист|drop\b|delete\b|truncate\b|update\b|insert\b|"
-    r"зміни\s|встанов\s|підтверд[иь]\b", re.I)
-
-
-def answer_question(question):
-    """-> dict {text, source, tier, template, elapsed_s, model_used}."""
-    started = time.perf_counter()
-    question = (question or "").strip()
-    meta = {"tier": None, "template": None, "model_used": False}
-
-    if not question:
-        text, source = "Порожнє питання.", []
-    elif len(question) > 500:
-        text, source = "Занадто довге питання (понад 500 символів).", []
-    elif _DESTRUCTIVE.search(question):
-        text = ("Відхилено: чат працює з базою лише в режимі читання і не "
-                "змінює та не видаляє дані. Зміни в базі -- через сторінку "
-                "завантаження і перевірку людиною.")
-        source = ["зупинено правилами ще до звернення до бази чи моделі"]
-        meta["tier"] = "guard"
-    else:
-        routed = rules_route(question)
-        if routed is None and _AGGREGATE.search(question.lower()):
-            # агрегатне питання без шаблону -- одразу ярус 2
-            if _get_model() is None:
-                text = ("Не знайшла шаблону для цього питання. " + MODEL_NOTE +
-                        ". Спробуйте перефразувати простіше "
-                        "(скільки/хто/на яку дату).")
-                source = ["агрегатне питання поза каталогом; модель недоступна"]
-                meta["tier"] = "rules_only_fallback"
-            else:
-                text, source = tier2_answer(question)
-                meta.update(tier="tier2_free_sql", model_used=True)
-        elif routed:
-            tid, params = routed
-            try:
-                text, source = run_template(tid, params)
-            except psycopg.Error as exc:
-                text = f"База даних недоступна: {type(exc).__name__}."
-                source = []
-            meta.update(tier="template_rules", template=tid)
-        else:
-            m_routed = model_route(question)
-            if m_routed is None and _get_model() is None:
-                text = ("Не знайшла шаблону для цього питання. " + MODEL_NOTE +
-                        ". Спробуйте одне з питань-прикладів або "
-                        "перефразуйте (стан/дата/ПІБ/№ документа).")
-                source = ["правила не впізнали питання; модель недоступна"]
-                meta["tier"] = "rules_only_fallback"
-            elif m_routed is None:
-                text = ("Не знайшла: не вдалося зіставити питання зі "
-                        "шаблоном. Спробуйте перефразувати.")
-                source = ["модель не змогла обрати шаблон"]
-                meta.update(tier="model_route_failed", model_used=True)
-            else:
-                tid, params = m_routed
-                meta["model_used"] = True
-                if tid == "відмова":
-                    text, source = REFUSE_TEXT, ["модель-класифікатор: відмова"]
-                    meta["tier"] = "model_refuse"
-                elif tid == "вільний_sql":
-                    text, source = tier2_answer(question)
-                    meta["tier"] = "tier2_free_sql"
-                else:
-                    try:
-                        text, source = run_template(tid, params)
-                    except psycopg.Error as exc:
-                        text = f"База даних недоступна: {type(exc).__name__}."
-                        source = []
-                    meta.update(tier="template_model", template=tid)
-
-    return {"text": text, "source": source,
-            "elapsed_s": round(time.perf_counter() - started, 1), **meta}

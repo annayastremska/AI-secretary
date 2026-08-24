@@ -8,9 +8,11 @@
 #   - Google Fonts вирізано (усе локально, жодних зовнішніх запитів);
 #   - вікно монтується в FastAPI апки (gr.mount_gradio_app, /chat), окремий
 #     запуск лишився для дебагу (python demos/upload_app/chat_gradio/app.py);
-#   - додано ярус 2 з demos/upload_app/chat.py: перед чесною відмовою --
-#     спроба каталогу SQL-шаблонів (query_catalog.yaml) і вільного SELECT
-#     під рейками (read-only, валідатор, LIMIT, таймаут, SQL у згортці).
+#   - яруси живуть поруч у tiers.py (перенесено з demos/upload_app/chat.py,
+#     задача 1.1): каталог SQL-шаблонів (query_catalog.yaml) із двоярусною
+#     маршрутизацією (правила → модель-класифікатор у ЗАКРИТИЙ перелік
+#     шаблонів) і вільний SELECT під рейками (read-only, валідатор, LIMIT,
+#     таймаут, SQL у згортці) — усе пробується перед чесною відмовою.
 #
 # Схема роботи (оригінальна, без змін):
 #   питання → маршрутизація (структурований виклик MamayLM або правила)
@@ -43,13 +45,11 @@ sys.path.insert(0, HERE)
 
 import db  # noqa: E402  (сім функцій стику, docs/contracts/2026-08-14_chat-db-interface.md)
 
-# Ярус 2 і каталог шаблонів -- наш chat.py (лишається модулем, стара
-# сторінка /api/chat прибрана). Звідти ж береться резидентна llama-cpp
-# модель: один екземпляр на процес, спільний для маршрутизатора і ярусу 2.
-_UP = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
-if _UP not in sys.path:
-    sys.path.insert(0, _UP)
-from demos.upload_app import chat as tier_chat  # noqa: E402
+# Каталог шаблонів і ярус 2 -- tiers.py поруч (перенесено з chat.py,
+# який видалено: одна кодова база чата). Звідти ж береться резидентна
+# llama-cpp модель: один екземпляр на процес, спільний для маршрутизатора
+# і ярусу 2.
+import tiers as tier_chat  # noqa: E402
 
 WARN_FALLBACK = "⚠️ локальна модель недоступна, маршрут обрано правилами"
 CLARIFY_MARK = "🔎 уточнення"
@@ -835,9 +835,11 @@ def _as_report(text):
 # ── Додаткові дороги нашої апки: каталог SQL-шаблонів і ярус 2 ──────────────
 #
 # Викликаються, коли сім функцій не впорались (dispatch повернув None) або
-# маршрут -- «відмова»: спершу каталог query_catalog.yaml (SQL написаний
-# людиною, звірений з базою), потім вільний SELECT під рейками з chat.py
-# (read-only сесія, валідатор, LIMIT 200, таймаут 5 с, SQL у згортці).
+# маршрут -- «відмова». Порядок -- двоярусна маршрутизація з tiers.py:
+# спершу каталог query_catalog.yaml правилами (SQL написаний людиною,
+# звірений з базою), потім модель-класифікатор у ЗАКРИТИЙ перелік шаблонів
+# того ж каталогу, потім вільний SELECT під рейками (read-only сесія,
+# валідатор, LIMIT 200, таймаут 5 с, SQL у згортці).
 # Не склалось -- None, і вище лишається чесна відмова.
 
 
@@ -848,7 +850,7 @@ def _fmt_source_block(source_lines, route_label):
 
 
 def _catalog_tier(question):
-    """Каталог шаблонів (правила з chat.py: регекси, звірений SQL) -> текст
+    """Каталог шаблонів (правила з tiers.py: регекси, звірений SQL) -> текст
     або None. Детерміновано, без моделі."""
     try:
         routed = tier_chat.rules_route(question)
@@ -862,6 +864,38 @@ def _catalog_tier(question):
     except Exception:
         return None
     return text + _fmt_source_block(source, f"каталог шаблонів ({tid})")
+
+
+# Позначка «модельна відмова»: питання не про дані бази -- ярус 2 після
+# цього не пробуємо (нема сенсу платити ще один виклик моделі за SELECT,
+# якому нема з чого вийти).
+_MODEL_REFUSED = object()
+
+
+def _model_catalog_tier(question):
+    """Друга спроба ярусу 1: модель-класифікатор у ЗАКРИТИЙ перелік шаблонів
+    каталогу (tiers.model_route). Модель лише обирає шаблон і параметри --
+    SQL і текст відповіді лишаються кодом. -> текст, _MODEL_REFUSED або None
+    (None = далі пробуємо ярус 2)."""
+    if not (model_available() and tier_chat._get_model() is not None):
+        return None
+    try:
+        routed = tier_chat.model_route(question)
+    except Exception:
+        return None
+    if not routed:
+        return None
+    tid, params = routed
+    if tid == "відмова":
+        return _MODEL_REFUSED
+    if tid == "вільний_sql":
+        return None
+    try:
+        text, source = tier_chat.run_template(tid, params)
+    except Exception:
+        return None
+    return text + _fmt_source_block(
+        source, f"каталог шаблонів, обрано моделлю-класифікатором ({tid})")
 
 
 def _tier2_tier(question):
@@ -889,16 +923,28 @@ _DBISH = re.compile(
 
 
 def _extra_tiers(question):
+    """Порядок доріг з tiers.py: каталог правилами → модель-класифікатор у
+    закритий перелік → вільний SELECT (ярус 2). Модельна «відмова» зупиняє
+    перебір: питання не про дані бази, ярус 2 не смикаємо."""
     out = _catalog_tier(question)
-    if out is None and _DBISH.search(question):
-        out = _tier2_tier(question)
-    return out
+    if out is not None or not _DBISH.search(question):
+        return out
+    out = _model_catalog_tier(question)
+    if out is _MODEL_REFUSED:
+        return None
+    if out is not None:
+        return out
+    return _tier2_tier(question)
 
 
 def answer(question, history=None):
     question = (question or "").strip()
     if not question:
         return "Поставте питання." + footer("відмова")
+    if len(question) > 500:
+        # гард із tiers-версії: дуже довгий текст -- не питання до бази
+        return ("Занадто довге питання (понад 500 символів)."
+                + footer("відмова"))
     merged, clarified = _merge_clarification(question, history)
     if is_quota_question(merged.lower()):
         # детерміновано, без моделі: причина відмови відома наперед

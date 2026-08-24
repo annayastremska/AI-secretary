@@ -329,9 +329,12 @@ def index():
 # ── Чат (друга сторінка тієї самої апки, /chat) ──────────────────────────────
 # Вікно -- Gradio-чат команди (demos/upload_app/chat_gradio/, джерело:
 # answer/chat@andriy-followup-context, адаптація під Postgres), змонтований у
-# цю саму FastAPI: один процес, один порт. Стара саморобна сторінка
-# static/chat.html і /api/chat прибрані; chat.py лишається модулем -- звідти
-# чат бере каталог шаблонів, ярус 2 і резидентну модель.
+# цю саму FastAPI: один процес, один порт, і той самий Basic-auth гейт
+# (_basic_auth вище -- HTTP-middleware обгортає ВЕСЬ ASGI-стек, тож і
+# змонтований Gradio під /chat; перевіряється тестом
+# tests/test_auth_gate.py). Стара саморобна сторінка static/chat.html і
+# /api/chat прибрані; колишній chat.py перенесено в chat_gradio/tiers.py --
+# звідти чат бере каталог шаблонів, ярус 2 і резидентну модель.
 
 from demos.upload_app.chat_gradio import app as chat_app  # noqa: E402
 
