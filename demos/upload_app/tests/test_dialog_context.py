@@ -40,6 +40,19 @@ def test_extract_date_relative():
         today - datetime.timedelta(days=1))
 
 
+def test_extract_date_nonexistent_day():
+    # знахідка верифікатора: «31 лютого» проходило регекс і їхало в SQL
+    # неіснуючою датою -> DataError на живій базі. Тепер -- None, і чат
+    # чесно перепитує дату замість генерик-помилки
+    assert chat_app.extract_date("Хто у відпустці 31 лютого?") is None
+    assert chat_app.extract_date("а 30 лютого?") is None
+    assert chat_app.extract_date("а 31.02.2026?") is None
+    assert chat_app.extract_date("станом на 2026-02-31") is None
+    # 29 лютого 2026 не існує (не високосний), а 28 -- існує
+    assert chat_app.extract_date("а 29 лютого?") is None
+    assert chat_app.extract_date("а 28 лютого?") == "2026-02-28"
+
+
 def test_extract_date_not_subdivision():
     # «2-га механізована рота» не мусить ставати датою
     assert chat_app.extract_date("а по 2-й механізованій роті?") is None

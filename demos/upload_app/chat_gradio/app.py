@@ -240,6 +240,18 @@ MONTH_FORMS = {"січня": 1, "лютого": 2, "березня": 3, "кві�
                "вересня": 9, "жовтня": 10, "листопада": 11, "грудня": 12}
 
 
+def _real_date_or_none(year, month, day):
+    """Складену дату перевіряємо конструктором date (знахідка верифікатора):
+    «31 лютого» проходило регекс і їхало в SQL неіснуючою датою 2026-02-31 --
+    жива база відповідала DataError і генерик-помилкою замість чесного
+    уточнення. Краще порожній слот: чат сам перепитає дату. Той самий
+    прийом, що в _refine_day (31 квітня -> None, не вигадуємо)."""
+    try:
+        return str(datetime.date(int(year), int(month), int(day)))
+    except ValueError:
+        return None
+
+
 def _match_month(word):
     """Номер місяця за словом: точний стем, інакше найближче за написанням."""
     for stem, mon in MONTHS.items():
@@ -261,10 +273,10 @@ def extract_date(text):
     text = text or ""
     m = re.search(r"\d{4}-\d{2}-\d{2}", text)
     if m:
-        return m.group(0)
+        return _real_date_or_none(*m.group(0).split("-"))
     m = re.search(r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b", text)   # 15.05.2026
     if m:
-        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+        return _real_date_or_none(m.group(3), m.group(2), m.group(1))
     low = text.lower()
     for word, shift in RELATIVE_DAYS.items():
         if word in low:
@@ -273,7 +285,7 @@ def extract_date(text):
     if m and 1 <= int(m.group(1)) <= 31:
         mon = _match_month(m.group(2))
         if mon:
-            return f"{STAND_YEAR}-{mon:02d}-{int(m.group(1)):02d}"
+            return _real_date_or_none(STAND_YEAR, mon, m.group(1))
     return None
 
 
@@ -1095,7 +1107,7 @@ def answer(question, history=None):
             return _as_report(cat)
 
     # Агрегати (середнє, мін/макс, суми) — шаблонів для них немає ні тут, ні
-    # в каталозі: одразу ярус 2, як робить chat.py, інакше маленька модель
+    # в каталозі: одразу ярус 2 (порядок із tiers.py), інакше маленька модель
     # тягне їх у випадкову дорогу (бачили «цитату» на «в середньому діб»).
     if route is None and tier_chat._AGGREGATE.search(merged.lower()):
         t2 = _tier2_tier(merged)
@@ -1440,7 +1452,7 @@ def build_blocks():
             btn.click(respond, [gr.State(q), chat], outs)
 
     # черга: виклик моделі не блокує інші запити (сам виклик серіалізований
-    # локом у chat.py, але шаблонні відповіді йдуть паралельно)
+    # локом у tiers.py, але шаблонні відповіді йдуть паралельно)
     demo.queue(default_concurrency_limit=4)
     return demo
 

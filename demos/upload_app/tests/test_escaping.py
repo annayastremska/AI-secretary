@@ -94,6 +94,17 @@ def test_blocked_template_returns_refusal_without_sql():
     assert any("заблоковано" in s for s in source)
 
 
+def test_blocked_refusal_is_escaped(monkeypatch):
+    """Знахідка верифікатора: refusal ішов у рендер без _esc. Репро -- фейковий
+    blocked-шаблон із розміткою в refusal (у живому каталозі її немає, але
+    правило «одна точка захисту» мусить триматись і на майбутнє)."""
+    fake = {"id": "fake_blocked", "title": "тест", "blocked": True,
+            "refusal": f"відмова {XSS}"}
+    monkeypatch.setitem(tiers._CATALOG, "fake_blocked", fake)
+    text, _ = tiers.run_template("fake_blocked", {})
+    _no_raw_script(text)
+
+
 def test_sql_params_passes_query():
     """Доробка каталогу: параметр query (normative_search, FTS) проходить
     фільтр _sql_params; зайве (state) -- відсікається."""
