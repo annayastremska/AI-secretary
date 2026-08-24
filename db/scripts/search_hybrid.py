@@ -43,8 +43,36 @@ RRF_K = 60
 CANDIDATES = 70          # з кожної гілки, як у банківському документі
 FUSED_MIN_SOURCES = 1    # 2 = показувати лише те, що знайшли ОБИДВІ гілки
 
+# Домен як фільтр ще ДО пошуку -- пропозиція Ані
+# (docs/contracts/2026-08-22_domain-as-search-filter.md, розд. 1).
+#
+# Її приклад, який вирішує справу: на питання «скільком зараз у відпустці»
+# найрелевантнішим за текстом буде фрагмент СТАТУТУ про відпустки -- там слово
+# «відпустка» сотні разів, а у відпускному квитку двічі. Без фільтра пошук
+# упевнено віддає нормативку на фактове питання, і на демо це виглядає як
+# «система не розуміє питання».
+#
+# Поділ фактовий/процедурний -- не косметика: процедурний документ за
+# визначенням не дає фактів для підрахунку, лише текст для цитати.
+PROCEDURAL = ("normative",)
+FACTUAL = ("leave", "deployment", "equipment", "staffing")
 
-def lexical(cur, query, limit=CANDIDATES, mode="or"):
+
+def domain_clause(scope):
+    """scope: 'procedural' | 'factual' | 'all'.
+
+    Фільтр стоїть УСЕРЕДИНІ запиту до сховища, не пост-фільтром поверх
+    результатів. Причина з банківського документа (§8.1): інакше кількість
+    результатів і час відповіді самі розкажуть, що щось відфільтровано.
+    """
+    if scope == "procedural":
+        return "AND d.domain = ANY(%(domains)s)", list(PROCEDURAL)
+    if scope == "factual":
+        return "AND d.domain = ANY(%(domains)s)", list(FACTUAL)
+    return "", None
+
+
+def lexical(cur, query, limit=CANDIDATES, mode="or", scope="procedural"):
     """mode='or' -- як BM25: слова об'єднані АБО, впорядковує ts_rank.
     mode='and' -- як websearch_to_tsquery за замовчуванням.
 
@@ -60,32 +88,42 @@ def lexical(cur, query, limit=CANDIDATES, mode="or"):
     """
     tsq = ("websearch_to_tsquery('ukrainian', %(q)s)" if mode == "and" else
            "replace(websearch_to_tsquery('ukrainian', %(q)s)::text, ' & ', ' | ')::tsquery")
+    dom_sql, domains = domain_clause(scope)
+    # Чинність фільтруємо лише для нормативки: для фактових документів
+    # (квиток, посвідчення) `validity` не заповнюється -- це поняття про
+    # нормативний акт, а не про бланк.
+    val_sql = "AND d.validity = 'current'" if scope == "procedural" else ""
     cur.execute(f"""
         SELECT ch.id, ch.document_id,
                ts_rank(to_tsvector('ukrainian', ch.text), {tsq}) AS score
           FROM document_chunks ch
           JOIN documents d ON d.id = ch.document_id
-         WHERE d.domain = 'normative' AND d.validity = 'current'
-           AND to_tsvector('ukrainian', ch.text) @@ {tsq}
+         WHERE to_tsvector('ukrainian', ch.text) @@ {tsq}
+           {dom_sql}
+           {val_sql}
          ORDER BY score DESC
          LIMIT %(lim)s
-    """, {"q": query, "lim": limit})
+    """, {"q": query, "lim": limit, "domains": domains})
     return cur.fetchall()
 
 
-def semantic(cur, vec, limit=CANDIDATES):
-    # Фільтр чинності -- у самому запиті, не пост-фільтром: інакше кількість
-    # результатів і латентність самі розкажуть про існування недоступного.
-    cur.execute("""
+def semantic(cur, vec, limit=CANDIDATES, scope="procedural"):
+    # Ті самі фільтри, що в лексичній гілці, і теж усередині запиту. Однакові
+    # фільтри в обох гілках -- окрема вимога: інакше через один рушій документ
+    # видно, а через другий ні.
+    dom_sql, domains = domain_clause(scope)
+    val_sql = "AND d.validity = 'current'" if scope == "procedural" else ""
+    cur.execute(f"""
         SELECT ch.id, ch.document_id,
                1 - (ch.embedding <=> %(v)s::vector) AS score
           FROM document_chunks ch
           JOIN documents d ON d.id = ch.document_id
-         WHERE d.domain = 'normative' AND d.validity = 'current'
-           AND ch.embedding IS NOT NULL
+         WHERE ch.embedding IS NOT NULL
+           {dom_sql}
+           {val_sql}
          ORDER BY ch.embedding <=> %(v)s::vector
          LIMIT %(lim)s
-    """, {"v": vec, "lim": limit})
+    """, {"v": vec, "lim": limit, "domains": domains})
     return cur.fetchall()
 
 
@@ -106,8 +144,16 @@ def show(cur, title, items, limit):
         print("   (порожньо)")
         return
     for chunk_id, meta in items[:limit]:
+        # Назва: у мого завантажувача вона в pipeline_meta.title, у виході
+        # пайплайна такого ключа немає -- тоді беремо початок самого тексту
+        # (для закону це і є його назва) і в останню чергу id.
         cur.execute("""
-            SELECT d.pipeline_meta ->> 'title', ch.text, ch.char_start
+            SELECT coalesce(
+                     d.pipeline_meta ->> 'title',
+                     nullif(regexp_replace(left(d.text_content, 70),
+                                           E'[\\n\\r]+', ' ', 'g'), ''),
+                     'documents.id=' || d.id),
+                   ch.text, ch.char_start
               FROM document_chunks ch JOIN documents d ON d.id = ch.document_id
              WHERE ch.id = %s
         """, (chunk_id,))
@@ -126,6 +172,11 @@ def main(argv=None):
                     help="лише фрагменти, знайдені обома гілками")
     ap.add_argument("--lexical-and", action="store_true",
                     help="вимагати ВСІ слова в одному фрагменті (для точного пошуку)")
+    ap.add_argument("--scope", choices=["procedural", "factual", "all"],
+                    default="procedural",
+                    help="procedural = лише нормативка (питання «як оформити»), "
+                         "factual = лише документи про людей (питання «скільком»), "
+                         "all = без фільтра, для порівняння")
     args = ap.parse_args(argv)
     query = " ".join(args.query)
 
@@ -137,13 +188,14 @@ def main(argv=None):
     vec = str(encode([QUERY_PREFIX + query])[0])
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-        lex = lexical(cur, query, mode="and" if args.lexical_and else "or")
-        sem = semantic(cur, vec)
+        lex = lexical(cur, query, mode="and" if args.lexical_and else "or",
+                      scope=args.scope)
+        sem = semantic(cur, vec, scope=args.scope)
         fused = rrf(lex, sem)
         if args.both_only:
             fused = [(k, v) for k, v in fused if v["sources"] >= 2]
 
-        print(f"Запит: {query!r}")
+        print(f"Запит: {query!r}  ·  скоуп: {args.scope}")
         print(f"лексика: {len(lex)} кандидатів · семантика: {len(sem)} · злито: {len(fused)}")
 
         if args.compare:
