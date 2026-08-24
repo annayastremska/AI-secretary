@@ -22,6 +22,19 @@
 # вказує на зміни в базі після завантаження, а не на помилку шаблона --
 # діагностичний друк нижче допомагає знайти, ЯКИЙ саме документ розійшовся.
 #
+# ЗВЕДЕННЯ ДУБЛІКАТІВ (24.08): db/scripts/dedupe_existing_facts.py Андрія
+# зливає факти-дублікати docx/pdf/фото одного документа, лишаючи слід у
+# review_log (changed_by='dedupe_existing_facts'). Очікуваний бік це
+# враховує КОРЕКЦІЄЮ по review_log, і кожна корекція друкується явно
+# («з .md N, злито зведенням M, скориговане N-M») -- хто читає звірку,
+# бачить обидва доданки, а не підігнане число. Межі гранулярності
+# (задокументовано в correct_*-функціях):
+#   - review_log не пише статус і документ ЗЛИТОГО факту -- статус судиться
+#     за ВЦІЛІЛИМ фактом (двійники несуть однаковий confirmed з .md), а
+#     docs-складова unconfirmed_count рахується симуляцією двійників по .md
+#     і звіряється хрестом із сумою review_log;
+#   - корекція бакетів count_by_reason іде по old_value на рівні сум.
+#
 # Що НЕ звіряється числом (позначка «(виконання)» у таблиці):
 #   - normative_search: незалежно відтворити український стемінг FTS по .md
 #     не можна чесно (substring != ts_query), тому перевіряється лише те, що
@@ -447,6 +460,116 @@ def exp_failed(records, ctx):
             "total": len(records)}
 
 
+# ── Корекція очікуваного на зведення дублікатів (review_log) ────────────────
+
+DEDUPE_SQL = """
+SELECT rl.old_value,
+       f.status     AS survivor_status,
+       f.value      AS survivor_value,
+       d.code       AS dim,
+       f.valid_from, f.valid_to
+FROM review_log rl
+JOIN facts f ON f.id = rl.fact_id
+JOIN dimensions d ON d.id = f.dimension_id
+WHERE rl.changed_by = %(who)s
+"""
+
+
+def fetch_dedupe_log():
+    """Слід зведення дублікатів. fact_id у review_log вказує на ВЦІЛІЛИЙ
+    факт; значення злитого -- в old_value. Порожній список = зведення не
+    запускалось, корекції стають no-op."""
+    return run_sql(DEDUPE_SQL, {"who": "dedupe_existing_facts"})
+
+
+def md_twin_unconfirmed_merge(records):
+    """Симуляція зведення для docs-складової unconfirmed_count: двійники
+    (та сама особа + домен + номер документа), чиї набори незатверджених
+    фактів змістовно ідентичні (з нормалізацією гліфа апострофа) -- після
+    зведення чернетки лишаються лише в одному записі пари.
+    Повертає (документів злито, фактів злито) -- фактова сума звіряється
+    хрестом із review_log."""
+    groups = {}
+    for r in records:
+        if not r.has_person:
+            continue
+        unc = frozenset((f["dim"], norm_apos(f["value"]), f["vf"], f["vt"])
+                        for f in r.facts if f["status"] == "unconfirmed")
+        if not unc:
+            continue
+        num = next((str(f["value"]).strip() for f in r.facts
+                    if f["dim"] == "document_number"
+                    and f["value"] is not None), None)
+        groups.setdefault((r.person, r.domain, num, unc), []).append(r)
+    docs_merged = facts_merged = 0
+    for key, rs in groups.items():
+        if len(rs) > 1:
+            docs_merged += len(rs) - 1
+            facts_merged += (len(rs) - 1) * len(key[3])
+    return docs_merged, facts_merged
+
+
+def correct_unconfirmed_count(expected, dedupe, records, ctx):
+    """n коригується сумою review_log (статус -- за вцілілим фактом, межа
+    задокументована в шапці); docs -- симуляцією двійників по .md, бо
+    review_log не пише, з якого документа злитий факт."""
+    merged_unc = sum(1 for row in dedupe
+                     if row["survivor_status"] == "unconfirmed")
+    docs_merged, facts_merged = md_twin_unconfirmed_merge(records)
+    corrected = {"n": expected["n"] - merged_unc,
+                 "docs": expected["docs"] - docs_merged}
+    cross = ("збігається" if facts_merged == merged_unc
+             else "НЕ збігається -- межа гранулярності, дивитись руками")
+    lines = [
+        f"з .md: n={expected['n']}, docs={expected['docs']}",
+        f"злито зведенням (review_log): {merged_unc} unconfirmed "
+        f"із {len(dedupe)} усього",
+        f"двійники в .md з тим самим набором чернеток: {docs_merged} док. "
+        f"({facts_merged} фактів) -- {cross} з review_log",
+        f"скориговане: n={corrected['n']}, docs={corrected['docs']}",
+    ]
+    return corrected, lines
+
+
+def _correct_reason_buckets(expected, dedupe, records, ctx, status):
+    """Злитий дублікат з ІНШИМ написанням значення (гліф апострофа з OCR)
+    забирає з бакета свого old_value один епізод; дублікат з тим самим
+    значенням бакетів не міняє -- дзеркало його вже склеїло по ключу
+    епізоду. Корекція на рівні сум по old_value (межа: кілька зведень
+    одного значення в одному епізоді порахувались би двічі)."""
+    corrected = dict(expected)
+    lines = []
+    for row in dedupe:
+        if row["dim"] not in ABSENCE_DIMS:
+            continue
+        if row["survivor_status"] != status:
+            continue
+        old_v, new_v = row["old_value"], row["survivor_value"]
+        if old_v is None or old_v == new_v:
+            continue
+        fk = {"vf": _date10(row["valid_from"]), "vt": _date10(row["valid_to"])}
+        if not overlaps(fk, ctx["date_from"], ctx["date_to"]):
+            continue
+        if old_v in corrected:
+            was = corrected[old_v]
+            corrected[old_v] = was - 1
+            note = f"бакет «{old_v}»: з .md {was}, злито зведенням 1, скориговане {was - 1}"
+            if corrected[old_v] <= 0:
+                del corrected[old_v]
+                note += " -- бакет знято"
+            lines.append(note)
+    return corrected, lines
+
+
+def correct_count_by_reason(expected, dedupe, records, ctx):
+    return _correct_reason_buckets(expected, dedupe, records, ctx, "confirmed")
+
+
+def correct_count_by_reason_unc(expected, dedupe, records, ctx):
+    return _correct_reason_buckets(expected, dedupe, records, ctx,
+                                   "unconfirmed")
+
+
 # ── Екстрактори «got» із рядків SQL ──────────────────────────────────────────
 
 def got_scalar_n(rows):
@@ -511,6 +634,7 @@ def build_checks(ctx):
             kind="compare", params={},
             expected=lambda rs: exp_unconfirmed_count(rs, ctx),
             got=got_first_row,
+            correct=lambda e, dd, rs: correct_unconfirmed_count(e, dd, rs, ctx),
             diag=lambda rs: diag_unconfirmed(rs, ctx)),
         "documents_count": dict(
             kind="compare", params={},
@@ -525,6 +649,9 @@ def build_checks(ctx):
             expected=lambda rs: exp_count_by_reason(rs, ctx, "confirmed"),
             expected_unc=lambda rs: exp_count_by_reason(rs, ctx,
                                                         "unconfirmed"),
+            correct=lambda e, dd, rs: correct_count_by_reason(e, dd, rs, ctx),
+            correct_unc=lambda e, dd, rs: correct_count_by_reason_unc(
+                e, dd, rs, ctx),
             got=got_dict("reason", "n")),
         "returning_on_date": dict(
             kind="compare", params={**dims, "on_date": ctx["as_of"]},
@@ -627,6 +754,20 @@ def main():
           f"тема: «{ctx['query']}»")
     print()
 
+    dedupe_rows = []
+    if not args.expected_only:
+        try:
+            dedupe_rows = fetch_dedupe_log()
+        except Exception as e:
+            print(f"review_log недоступний ({type(e).__name__}: {e}) -- "
+                  f"корекція на зведення дублікатів НЕ застосована")
+    if dedupe_rows:
+        print(f"зведення дублікатів у базі (review_log, "
+              f"changed_by='dedupe_existing_facts'): злито "
+              f"{len(dedupe_rows)} фактів -- очікувані числа коригуються, "
+              f"кожна корекція друкується під своїм рядком")
+        print()
+
     header = f"{'шаблон':38} {'очікуване':>28} {'з бази':>28} статус"
     print(header)
     print("-" * len(header))
@@ -653,17 +794,23 @@ def main():
             failures += 0 if ok else 1
             continue
 
-        variants = [("", "sql", check.get("expected"))]
+        variants = [("", "sql", check.get("expected"),
+                     check.get("correct"))]
         if t.get("sql_unconfirmed") and check.get("expected_unc"):
             variants.append((" (чернетки)", "sql_unconfirmed",
-                             check["expected_unc"]))
+                             check["expected_unc"],
+                             check.get("correct_unc")))
 
-        for suffix, sql_key, exp_fn in variants:
+        for suffix, sql_key, exp_fn, correct_fn in variants:
             label = tid + suffix
+            corr_lines = []
             if check["kind"] == "execute":
                 expected = "(виконання)"
             else:
                 expected = exp_fn(records)
+                if dedupe_rows and correct_fn:
+                    expected, corr_lines = correct_fn(expected, dedupe_rows,
+                                                      records)
             if args.expected_only:
                 print(f"{label:38} {fmt(expected):>28} {'—':>28} (без бази)")
                 continue
@@ -682,6 +829,8 @@ def main():
                 ok = got == expected
             print(f"{label:38} {fmt(expected):>28} {fmt(got):>28} "
                   f"{'OK' if ok else 'РОЗБІЖНІСТЬ'}")
+            for line in corr_lines:
+                print(f"    корекція: {line}")
             if not ok and check.get("diag"):
                 print("    діагностика (очікуване по файлах-джерелах):")
                 for line in check["diag"](records):
