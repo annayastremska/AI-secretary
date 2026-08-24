@@ -140,11 +140,11 @@ def parse_frontmatter(md_path: str) -> dict:
         content = f.read()
     _, fm, body = content.split("---", 2)
     meta = yaml.safe_load(fm)
-    # .replace(" "): Postgres text-поля не приймають NUL, а старі .md
+    # .replace("\x00"): Postgres text-поля не приймають NUL, а старі .md
     # (до правки пайплайна 24.08) могли принести його з pypdf. Захисний шар:
     # джерело вже чистить, але записи, згенеровані до правки, лишаються.
     meta["_recognized_text"] = (body.split("## Розпізнаний текст", 1)[-1]
-                                .strip().replace(" ", ""))
+                                .strip().replace("\x00", ""))
     return meta
 
 
