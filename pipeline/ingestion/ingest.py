@@ -195,8 +195,14 @@ def sort_blocks_by_geometry(blocks):
 def _block_text(block) -> str:
     """block -- str або {"text","bbox"}; повертає сам текст незалежно від
     представлення. Потрібно, відколи sort_blocks_by_geometry перестала
-    зрізати bbox перед поверненням."""
-    return block["text"] if isinstance(block, dict) else block
+    зрізати bbox перед поверненням.
+
+    NUL (0x00) знімається ТУТ, на спільному виході текстів: це артефакт
+    pypdf на окремих PDF, а не легальний символ документа. Заміряно
+    24.08.2026: один NUL у НД ТЗІ 1.1-003-99 поклав запис у Postgres --
+    text-поля NUL не приймають."""
+    text = block["text"] if isinstance(block, dict) else block
+    return (text or "").replace("\x00", "")
 
 
 def join_block_texts(blocks) -> str:
