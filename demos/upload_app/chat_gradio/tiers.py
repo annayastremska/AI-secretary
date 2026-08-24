@@ -428,6 +428,32 @@ def model_route(question):
         if not num:
             return None
         params["doc_number"] = num
+
+    # Генерик-заповнення за декларацією params шаблону: каталог виріс до 21
+    # шаблона (етап 2), і кожен новий вимагав би своєї гілки вище. Дефолти
+    # ті самі, що в старих гілках (дата -> сьогодні); для dims без слова
+    # стану -- absent (обидва виміри: найчесніше широке тлумачення);
+    # query для normative_search -- саме питання (текст їде ЛИШЕ параметром
+    # у websearch_to_tsquery, не в SQL).
+    need = _CATALOG[tid].get("params") or []
+    if "dims" in need and "dims" not in params:
+        st = state if state in STATE_DIMS else (extract_state(question) or "absent")
+        params["dims"] = STATE_DIMS[st]
+        params["state"] = st
+    if "on_date" in need and "on_date" not in params:
+        params["on_date"] = _date("on_date") or today
+    if "date_from" in need and "date_from" not in params:
+        params["date_from"] = _date("date_from") or _date("on_date") or today
+    if "date_to" in need and "date_to" not in params:
+        params["date_to"] = _date("date_to") or _date("on_date") or today
+    if "name_pattern" in need and "name_pattern" not in params:
+        name = (data.get("name") or "").strip() or extract_name(question)
+        if not name:
+            return None
+        params["name_pattern"] = f"%{name}%"
+        params["name"] = name
+    if "query" in need and "query" not in params:
+        params["query"] = question
     return tid, params
 
 
@@ -457,8 +483,10 @@ def _people(n):
 
 def _sql_params(template_id, params):
     t = _CATALOG[template_id]
+    # "query" -- тема нормативного пошуку (normative_search): текст їде ЛИШЕ
+    # іменованим параметром у websearch_to_tsquery, ніколи в рядок SQL
     return {k: v for k, v in params.items() if k in ("dims", "on_date",
-            "date_from", "date_to", "name_pattern", "doc_number")}, t
+            "date_from", "date_to", "name_pattern", "doc_number", "query")}, t
 
 
 def _fmt_period(r):
@@ -477,6 +505,13 @@ def run_template(template_id, params):
     OCR -- недовірений вхід, тому кожне проходить _esc перед вставкою в
     Markdown-відповідь (задача 1.5)."""
     sql_params, t = _sql_params(template_id, params)
+    # blocked: true -- шаблон-відмова БЕЗ sql (subdivision_blocked): чесний
+    # текст refusal замість вигаданого числа. Перевірка ДО читання t["sql"],
+    # бо його в такого шаблона просто немає (правило каталогу).
+    if t.get("blocked"):
+        return t["refusal"].strip(), [
+            f"шаблон каталогу: {template_id} ({t['title']})",
+            "заблоковано: SQL немає, відповідь — дослівний refusal шаблону"]
     rows = _run_template_sql(t["sql"], sql_params)
     unconfirmed = None
     if t.get("sql_unconfirmed"):
@@ -600,6 +635,25 @@ def run_template(template_id, params):
         lines.append(f"Документів у базі: {total_d}.")
         for r in rows:
             lines.append(f"- {_esc(r['domain'])}: {r['n']}")
+        lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
+
+    if not lines:
+        # Шаблон із каталогу, для якого персонального складача тексту ще
+        # немає (каталог виріс до 21 шаблона на етапі 2; складання відповіді
+        # за answer_hint -- окрема задача наступних етапів). Щоб чат не
+        # віддавав порожньо: чесні сирі рядки компактною таблицею, як у
+        # ярусі 2 -- без вигадок і без переказу.
+        if not rows:
+            lines.append("Нічого не знайшлося: запит шаблону виконано, "
+                         "рядків немає.")
+        else:
+            cols = list(rows[0].keys())
+            lines.append(" | ".join(_esc(c) for c in cols))
+            for r in rows[:50]:
+                lines.append(" | ".join(
+                    "" if r[c] is None else _esc(r[c]) for c in cols))
+            if len(rows) > 50:
+                lines.append(f"... і ще {len(rows) - 50} рядків (обрізано)")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     source = [f"шаблон каталогу: {template_id} ({t['title']})",

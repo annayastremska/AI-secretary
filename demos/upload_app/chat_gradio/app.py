@@ -370,12 +370,23 @@ def rules_route(question):
 # ── Шматки відповіді ─────────────────────────────────────────────────────────
 
 
+# Екранування недовіреного тексту (задача 1.5, знахідка Андрія §8): усе, що
+# прийшло з документа чи з бази (ПІБ, номери, назви файлів, текст розділів),
+# перед вставкою в Markdown/HTML чата проходить _esc. Один хелпер на обидва
+# модулі -- живе в tiers.py.
+_esc = tier_chat._esc
+
+
 def footer(route, source="—", cut=None):
     """Джерело не зникає (правило ТЗ #52), але й не лізе поперед відповіді:
-    перший екран — цифра й пояснення, посилання розгортається кліком."""
-    lines = [f"джерело: {source}", f"дорога: {route}"]
+    перший екран — цифра й пояснення, посилання розгортається кліком.
+
+    source і cut екрануються ТУТ: усі виклики передають сирі значення з бази
+    (номери документів, назви файлів), і одна точка захисту надійніша за
+    десять у викликах."""
+    lines = [f"джерело: {_esc(source)}", f"дорога: {route}"]
     if cut:
-        lines.insert(1, cut)
+        lines.insert(1, _esc(cut))
     return ("\n\n<details class=\"src\"><summary>джерело</summary>"
             + "<br>".join(lines) + "</details>")
 
@@ -390,7 +401,9 @@ def unconfirmed_note(date):
 
 
 def person_label(row):
-    name = row["person_name_raw"] or "(ПІБ у документі порожній)"
+    # ПІБ приходить із документа через OCR -- недовірений вхід, екрануємо
+    name = (_esc(row["person_name_raw"]) if row["person_name_raw"]
+            else "(ПІБ у документі порожній)")
     mark = "" if row["service_id"] else " — факт не підтверджено (чернетка)"
     return name + mark
 
@@ -413,34 +426,35 @@ def doc_lead(r):
     """Перше речення про документ: що з нього випливає, а не перелік полів.
     Дефект даних — це і є відповідь, тому він іде першим, не приміткою."""
     if empty_fields(r):
-        return (f"**Установити не можна** — у {r['doc_number']} не заповнені: "
+        return (f"**Установити не можна** — у {_esc(r['doc_number'])} не заповнені: "
                 f"{', '.join(empty_fields(r))}. Нічого не підставляємо.")
     if r["date_to"] < r["date_from"]:
-        return (f"**У {r['doc_number']} суперечність** — завершення "
-                f"({r['date_to']}) раніше за початок ({r['date_from']}). "
+        return (f"**У {_esc(r['doc_number'])} суперечність** — завершення "
+                f"({_esc(r['date_to'])}) раніше за початок ({_esc(r['date_from'])}). "
                 "Показано як є, не виправляємо.")
-    who = r["person_name_raw"] or "ПІБ не вказано"
-    tail = "" if r["status"] == "чинний" else f", {r['status']}"
-    return (f"**{who}** — {r['doc_type']} {r['doc_number']}, "
-            f"{r['date_from']} – {r['date_to']}{tail}.")
+    who = _esc(r["person_name_raw"]) if r["person_name_raw"] else "ПІБ не вказано"
+    tail = "" if r["status"] == "чинний" else f", {_esc(r['status'])}"
+    return (f"**{who}** — {_esc(r['doc_type'])} {_esc(r['doc_number'])}, "
+            f"{_esc(r['date_from'])} – {_esc(r['date_to'])}{tail}.")
 
 
 def describe_doc(r):
     """Картка документа списком — для випадків, коли документів кілька."""
-    period = (f"{r['date_from']} – {r['date_to']}"
+    period = (f"{_esc(r['date_from'])} – {_esc(r['date_to'])}"
               if (r["date_from"] or r["date_to"]) else "період не вказано")
-    out = [f"- **{r['doc_number']}** · {r['doc_type']} · {period} · {r['status']}"]
-    detail = " · ".join(x for x in (r["reason"], r["place"]) if x)
+    out = [f"- **{_esc(r['doc_number'])}** · {_esc(r['doc_type'])} · {period} · "
+           f"{_esc(r['status'])}"]
+    detail = " · ".join(_esc(x) for x in (r["reason"], r["place"]) if x)
     if detail:
         out.append(f"  {detail}")
     if empty_fields(r):
         out.append(f"  ⚠️ порожні поля: {', '.join(empty_fields(r))} — з "
                    "документа їх встановити не можна")
     if r["date_from"] and r["date_to"] and r["date_to"] < r["date_from"]:
-        out.append(f"  ⚠️ суперечність: завершення ({r['date_to']}) раніше за "
-                   f"початок ({r['date_from']}). Показано як є")
+        out.append(f"  ⚠️ суперечність: завершення ({_esc(r['date_to'])}) раніше за "
+                   f"початок ({_esc(r['date_from'])}). Показано як є")
     if r["status"] == "скасований":
-        why = (f"скасований документом {r['superseded_by']}"
+        why = (f"скасований документом {_esc(r['superseded_by'])}"
                if r["superseded_by"] else "скасований")
         out.append(f"  документ не діє: {why}")
     return "\n".join(out)
@@ -470,8 +484,8 @@ def answer_absent(date, subdivision, not_returned=False):
         return NO_SUBDIVISION + footer("відмова")
     rows = db.absences_on_date(date, subdivision=subdivision)
     where = f" ({subdivision})" if subdivision else ""
-    items = [f"- {person_label(r)} — {r['doc_type']} {r['doc_number']}, "
-             f"до {r['date_to']}" for r in rows]
+    items = [f"- {person_label(r)} — {_esc(r['doc_type'])} {_esc(r['doc_number'])}, "
+             f"до {_esc(r['date_to'])}" for r in rows]
     if not rows:
         body = f"0 — на {date}{where} чинних документів про відсутність немає."
     else:
@@ -493,7 +507,7 @@ def answer_returning(date, subdivision):
     if not rows:
         body = f"0 — на {date}{where} нічия відсутність не завершується."
     else:
-        items = [f"- {person_label(r)} — {r['doc_type']} {r['doc_number']}"
+        items = [f"- {person_label(r)} — {_esc(r['doc_type'])} {_esc(r['doc_number'])}"
                  for r in rows]
         body = (f"**{plural_people(len(rows))}** повертаються {date}{where}.\n"
                 + "\n".join(items)
@@ -513,8 +527,8 @@ def answer_person(name):
                      "відсутність немає.")
     elif active:
         a = active[0]
-        parts.append(f"**Поза частиною** — {a['doc_type']} {a['doc_number']}"
-                     + (f", до {a['date_to']}." if a["date_to"] else "."))
+        parts.append(f"**Поза частиною** — {_esc(a['doc_type'])} {_esc(a['doc_number'])}"
+                     + (f", до {_esc(a['date_to'])}." if a["date_to"] else "."))
     else:
         parts.append("**За документами у частині** — всі документи на цю "
                      "людину скасовані.")
@@ -522,14 +536,14 @@ def answer_person(name):
         p = people[0]
         # у нашому реєстрі можуть бути не всі поля (посади/підрозділа немає) --
         # показуємо лише те, що є, порожнє не підставляємо
-        card = " · ".join(x for x in (p["full_name"], p["rank"],
-                                      p["position_title"], p["subdivision"]) if x)
+        card = " · ".join(_esc(x) for x in (p["full_name"], p["rank"],
+                                            p["position_title"], p["subdivision"]) if x)
         parts.append(card + ".")
         if len(people) > 1:
-            parts.append(f"У реєстрі {len(people)} збіги за «{name}» — "
+            parts.append(f"У реєстрі {len(people)} збіги за «{_esc(name)}» — "
                          "уточніть ПІБ повніше.")
     else:
-        parts.append(f"У реєстрі частини людини за «{name}» немає"
+        parts.append(f"У реєстрі частини людини за «{_esc(name)}» немає"
                      + (" — документи знайдено за ПІБ у самому документі, "
                         "реєстром вони не підтверджені." if rows else "."))
     if rows:
@@ -543,7 +557,7 @@ def doc_number_warning(doc_number):
     tail = (doc_number or "").lstrip("№").strip()
     if tail and not tail.isdigit():
         return (f"⚠️ у номері документа нецифровий символ (можливий шум "
-                f"розпізнавання): №{tail} — місце, де система не впевнена")
+                f"розпізнавання): №{_esc(tail)} — місце, де система не впевнена")
     return None
 
 
@@ -551,7 +565,7 @@ def answer_doc(doc_number):
     rows = db.document_by_number(doc_number)
     warn = doc_number_warning(doc_number)
     if not rows:
-        body = (f"Документа {doc_number} у базі стенду немає. Номер не "
+        body = (f"Документа {_esc(doc_number)} у базі стенду немає. Номер не "
                 "виправляємо і схожих не підставляємо.")
         if warn:
             body += "\n" + warn
@@ -560,17 +574,17 @@ def answer_doc(doc_number):
     if len(rows) > 1:
         active = [r for r in rows if r["status"] == "чинний"]
         latest = max(active or rows, key=lambda r: r["doc_date"])
-        parts.append(f"**Два документи з номером {doc_number}** — діє пізніший, "
-                     f"від {latest['doc_date']}.")
+        parts.append(f"**Два документи з номером {_esc(doc_number)}** — діє "
+                     f"пізніший, від {_esc(latest['doc_date'])}.")
         parts += [describe_doc(r) for r in rows]
     else:
         r = rows[0]
         parts.append(doc_lead(r))
-        detail = " · ".join(x for x in (r["doc_type"], r["reason"], r["place"],
-                                        r["status"]) if x)
+        detail = " · ".join(_esc(x) for x in (r["doc_type"], r["reason"],
+                                              r["place"], r["status"]) if x)
         parts.append(detail)
         if r["status"] == "скасований" and r["superseded_by"]:
-            parts.append(f"Не діє: скасований документом {r['superseded_by']}.")
+            parts.append(f"Не діє: скасований документом {_esc(r['superseded_by'])}.")
     if warn:
         parts.append(warn)
     return "\n".join(parts) + footer("підрахунок", doc_source(rows))
@@ -589,7 +603,7 @@ def answer_summary(date):
                              unconfirmed_note(date))
     total_abs = sum(r["absent"] for r in rows)
     total = sum(r["total"] for r in rows)
-    items = [f"- {r['subdivision']} — {r['absent']} з {r['total']}"
+    items = [f"- {_esc(r['subdivision'])} — {r['absent']} з {r['total']}"
              for r in rows]
     body = (f"**{total_abs} з {total}** відсутні на {date}.\n" + "\n".join(items))
     src = "absences + people (розрахунок по чинних документах)"
@@ -611,7 +625,11 @@ def dispatch_count(params, clarified, clarify_hint, question=""):
     if intent in ("хто_відсутній", "хто_повертається", "зведення_по_підрозділах"):
         if not date:
             if not clarified:
-                q = clarify_hint or "За яку дату рахувати? Назвіть у форматі YYYY-MM-DD (дані стенду — травень 2026)."
+                # текст уточнення пише модель -- екрануємо, як і решту
+                # недовіреного (сама вона бачила питання користувача)
+                q = (_esc(clarify_hint) if clarify_hint else
+                     "За яку дату рахувати? Назвіть у форматі YYYY-MM-DD "
+                     "(дані стенду — травень 2026).")
                 return ("clarify", q)
             return ("Відповісти не можу: дата зрізу так і не названа у форматі "
                     "YYYY-MM-DD, а підставляти дату самостійно система не має "
@@ -674,10 +692,15 @@ def answer_reference(question):
     # Конкретика першою: перші два речення розділу — це, як правило, сама
     # норма (строк, хто дозволяє), решта — умови й винятки. Текст не
     # переписуємо й не переказуємо: ріжемо по крапці, обидві частини — дослівні.
+    # Текст розділу -- вміст документа, тобто недовірений вхід (знахідка
+    # Андрія §8: оригінал вставляв його в <details> без екранування, і
+    # <script> з документа виконався б у браузері). Екрануємо ДО вставки:
+    # і перше речення в Markdown, і повний текст у згортці.
     text = " ".join(best["text"].split())
     parts_sent = re.split(r"(?<=[.!?])\s+", text)
-    lead, rest = parts_sent[0], " ".join(parts_sent[1:])
-    body = f"**{lead}**\n\n_{best['section_title']}, розділ {best['section_number']}_"
+    lead, rest = _esc(parts_sent[0]), _esc(" ".join(parts_sent[1:]))
+    body = (f"**{lead}**\n\n_{_esc(best['section_title'])}, "
+            f"розділ {_esc(best['section_number'])}_")
     if rest:
         body += ("\n\n<details class=\"src\"><summary>повний текст розділу"
                  "</summary>" + rest + "</details>")
@@ -733,7 +756,12 @@ def _state_marker(params):
     Так зберігається принцип «стану не тримаємо, все читається з history»:
     окремий gr.State не потрібен, а користувач цього не бачить."""
     keep = {k: params.get(k) for k in SLOT_KEYS}
-    return f"\n<!--slots:{json.dumps(keep, ensure_ascii=False)}-->"
+    # «-->» усередині значення (могло прийти з питання через модельний слот)
+    # закрило б HTML-коментар достроково і вивалило решту в розмітку.
+    # Заміна на > ЛИШЕ всередині JSON-рядка: json.loads поверне той
+    # самий текст, а в коментарі послідовності «-->» більше немає.
+    payload = json.dumps(keep, ensure_ascii=False).replace("-->", "--\\u003e")
+    return f"\n<!--slots:{payload}-->"
 
 
 # Питання складається практично лише з числа: «а 22?», «22», «а 15-го?»,
@@ -906,7 +934,10 @@ def _as_report(text):
 
 
 def _fmt_source_block(source_lines, route_label):
-    body = "<br>".join(str(s).replace("<", "&lt;") for s in source_lines)
+    # html.escape замість самодільного replace("<", "&lt;"): & без
+    # екранування дозволяє протягнути &lt;script&gt; як текст, який
+    # наступний innerHTML-прохід перетворить назад на тег
+    body = "<br>".join(_esc(s) for s in source_lines)
     return ("\n\n<details class=\"src\"><summary>джерело</summary>"
             + body + f"<br>дорога: {route_label}</details>")
 
