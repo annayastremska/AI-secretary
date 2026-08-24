@@ -135,4 +135,4 @@ data/eval/reports/
 .venv-ml/
 airflow/logs/
 data/postgres/
-data/minio/
+data/originals/

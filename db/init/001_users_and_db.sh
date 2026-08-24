@@ -13,6 +13,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${APP_DB_NAME}" <<
   GRANT USAGE ON SCHEMA public TO ${READONLY_DB_USER};
   ALTER DEFAULT PRIVILEGES FOR ROLE ${APP_DB_USER} IN SCHEMA public
     GRANT SELECT ON TABLES TO ${READONLY_DB_USER};
+  -- pgvector: створення розширення вимагає суперюзера, тому це тут, а не в
+  -- міграції. Міграції ходять під застосунковим користувачем і лише
+  -- перевіряють, що розширення вже є.
+  CREATE EXTENSION IF NOT EXISTS vector;
 EOSQL
 
 # Окрема БД для метаданих Airflow (LocalExecutor) — не той самий кластер даних milidoc,
