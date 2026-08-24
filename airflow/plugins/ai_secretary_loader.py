@@ -177,8 +177,75 @@ def get_or_create_dimension(cur, code: str, validity_model: str = None) -> int:
     return cur.fetchone()[0]
 
 
+def document_requisites(meta: dict):
+    """(номер, дата) документа з його ж фактів.
+
+    Реквізити приходять фактами (`document_number`/`document_date`) -- так
+    навмисно, демо-запит `doc_by_number` шукає саме рядок факту. Для
+    дедуплікації вони потрібні як ПАРА: саме вона відрізняє «той самий
+    документ у docx і pdf» від «два різні документи про те саме».
+    """
+    number = date = None
+    for fact in meta.get("facts") or []:
+        if fact.get("fact_type") == "document_number":
+            number = (fact.get("value_code") or "").strip() or None
+        elif fact.get("fact_type") == "document_date":
+            date = (fact.get("value_code") or "").strip() or None
+    return number, date
+
+
+def find_equivalent_fact(cur, object_id, dimension_id, value, valid_from, valid_to,
+                          doc_number, doc_date):
+    """Чи є вже такий самий факт із документа з ТИМ САМИМ номером і датою.
+
+    Навіщо номер+дата, а не лише збіг значень: два РІЗНІ документи можуть
+    легально описувати той самий факт (наказ і виписка з нього), і зливати їх
+    не можна -- це різні підстави. Однаковий номер І дата означають, що це
+    фізично один документ, поданий двома файлами.
+
+    Обидва реквізити мусять бути НЕПОРОЖНІ. Інакше дефектні документи, у яких
+    номер і дата не розпізнались, зливалися б між собою -- а це вже втрата
+    даних, а не дедуплікація.
+    """
+    if not doc_number or not doc_date:
+        return None
+    cur.execute(
+        """
+        SELECT f.id
+          FROM facts f
+          JOIN facts fn ON fn.source_doc_id = f.source_doc_id
+          JOIN dimensions dn ON dn.id = fn.dimension_id AND dn.code = 'document_number'
+          JOIN facts fd ON fd.source_doc_id = f.source_doc_id
+          JOIN dimensions dd ON dd.id = fd.dimension_id AND dd.code = 'document_date'
+         WHERE f.object_id = %s
+           AND f.dimension_id = %s
+           AND f.value IS NOT DISTINCT FROM %s
+           AND f.valid_from IS NOT DISTINCT FROM %s
+           AND f.valid_to IS NOT DISTINCT FROM %s
+           AND f.status <> 'rejected'
+           AND fn.value = %s
+           AND fd.value = %s
+         LIMIT 1
+        """,
+        (object_id, dimension_id, value, valid_from, valid_to, doc_number, doc_date),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def add_fact_source(cur, fact_id, document_id, is_primary=False):
+    cur.execute(
+        """
+        INSERT INTO fact_sources (fact_id, document_id, is_primary)
+        VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
+        """,
+        (fact_id, document_id, is_primary),
+    )
+
+
 def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, source_doc_id, confirmed,
-                 additional_info=None, confidence=None, source_field=None) -> int:
+                 additional_info=None, confidence=None, source_field=None,
+                 doc_number=None, doc_date=None) -> int:
     """Вставляє факт. Для вимірів з validity_model='current_state' (rank,
     position -- "чинно, доки не з'явиться новіший факт того самого виміру
     для того самого об'єкта", dictionaries/fact_type_registry.yaml на боці
@@ -194,6 +261,18 @@ def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, sourc
     if valid_from and valid_to and str(valid_to) < str(valid_from):
         valid_to = None
         confirmed = False
+
+    # Той самий документ, поданий двома файлами (.docx і .pdf) -- не другий
+    # факт, а друге джерело того самого. Інакше список показує одне прізвище
+    # двічі, тоді як підрахунок (COUNT DISTINCT) дає правильне число, і
+    # комісія бачить дві різні відповіді на те саме питання.
+    existing = find_equivalent_fact(cur, object_id, dimension_id, value,
+                                    valid_from, valid_to, doc_number, doc_date)
+    if existing is not None:
+        add_fact_source(cur, existing, source_doc_id)
+        print(f"[дедуплікація] факт {existing}: документ {source_doc_id} "
+              f"долучено як ще одне джерело (№{doc_number} від {doc_date})")
+        return existing
 
     cur.execute("SELECT validity_model FROM dimensions WHERE id = %s", (dimension_id,))
     validity_model = cur.fetchone()[0]
@@ -230,7 +309,9 @@ def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, sourc
          Jsonb(additional_info) if additional_info else None,
          confidence, source_field),
     )
-    return cur.fetchone()[0]
+    fact_id = cur.fetchone()[0]
+    add_fact_source(cur, fact_id, source_doc_id, is_primary=True)
+    return fact_id
 
 
 def handle_reprocess(cur, document_id: int) -> None:
@@ -494,6 +575,9 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                 )
 
             field_provenance = meta.get("field_provenance") or {}
+            # Реквізити цього документа -- ключ дедуплікації для всіх його
+            # фактів (див. find_equivalent_fact).
+            doc_number, doc_date = document_requisites(meta)
 
             rank = subject.get("rank")
             if rank:
@@ -516,6 +600,7 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                     meta["uploaded_at"], None, document_id,
                     rank_provenance.get("resolved", True),
                     confidence=rank_provenance.get("confidence"),
+                    doc_number=doc_number, doc_date=doc_date,
                 )
                 facts_inserted.append(("rank", fact_id))
 
@@ -532,6 +617,7 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                     additional_info=fact.get("additional_info"),
                     confidence=fact.get("confidence"),
                     source_field=fact.get("source_field"),
+                    doc_number=doc_number, doc_date=doc_date,
                 )
                 facts_inserted.append((fact_type, fact_id))
 
