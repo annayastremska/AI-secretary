@@ -144,16 +144,35 @@ def parse_frontmatter(md_path: str) -> dict:
     return meta
 
 
-def get_or_create_dimension(cur, code: str) -> int:
+def get_or_create_dimension(cur, code: str, validity_model: str = None) -> int:
+    """validity_model приходить із САМОГО ФАКТУ (`facts[*].validity_model`), а не
+    з нашої копії реєстру.
+
+    Було навпаки, і це вже розійшлося: у FACT_TYPE_VALIDITY немає п'яти кодів
+    із fact_type_registry.yaml, а дефолт `ranged` підставлявся мовчки. Три з
+    них реально їхали з неправильною моделлю чинності -- `travel_document`,
+    `unrecognized` і новий `deployment_actual_return` (`permanent_event` у
+    реєстрі, `ranged` у нас). `rank` і `position` врятували міграції, які
+    створюють ці виміри заздалегідь.
+
+    Помилки при цьому не було й у логах було чисто -- саме тому копія реєстру
+    в другому місці небезпечніша за її відсутність. FACT_TYPE_VALIDITY лишений
+    нижче ЛИШЕ як запобіжник на факт без поля, і на нього не варто спиратись.
+    """
     cur.execute("SELECT id FROM dimensions WHERE code = %s", (code,))
     row = cur.fetchone()
     if row:
         return row[0]
     name = FACT_TYPE_LABELS.get(code, code)
-    validity_model = FACT_TYPE_VALIDITY.get(code, "ranged")
+    model = validity_model or FACT_TYPE_VALIDITY.get(code, "ranged")
+    if not validity_model:
+        # Видно в логах: далі так бути не мусить, вихід пайплайна віддає це
+        # поле в кожному факті.
+        print(f"[увага] вимір {code!r} створюється без validity_model із факту "
+              f"-- узято {model!r} з локальної копії реєстру")
     cur.execute(
         "INSERT INTO dimensions (code, name, value_type, validity_model) VALUES (%s, %s, 'text', %s) RETURNING id",
-        (code, name, validity_model),
+        (code, name, model),
     )
     return cur.fetchone()[0]
 
@@ -478,7 +497,11 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
 
             rank = subject.get("rank")
             if rank:
-                rank_dim_id = get_or_create_dimension(cur, "rank")
+                # Звання приходить із subject, не з facts[], тож validity_model
+                # у нього взятись нізвідки -- ставимо явно за реєстром. Вимір і
+                # так створює міграція 349d428a0094, це запобіжник на випадок
+                # чистої бази без неї.
+                rank_dim_id = get_or_create_dimension(cur, "rank", "current_state")
                 rank_provenance = field_provenance.get("rank", {})
                 # НЕ дата початку відрядження/відпустки основного факту --
                 # звання не почалось у день відрядження, це просто дата
@@ -500,7 +523,9 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                 fact_type = fact.get("fact_type")
                 if not fact_type:
                     continue
-                dim_id = get_or_create_dimension(cur, fact_type)
+                # validity_model -- із самого факту; див. get_or_create_dimension
+                dim_id = get_or_create_dimension(cur, fact_type,
+                                                 fact.get("validity_model"))
                 fact_id = insert_fact(
                     cur, person_object_id, dim_id, fact.get("value_code"),
                     fact.get("date_start"), fact.get("date_end"), document_id, fact.get("confirmed"),
