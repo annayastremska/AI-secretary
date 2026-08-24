@@ -3,13 +3,26 @@
 # Правила каталогу:
 #   - SQL написаний людиною заздалегідь; модель НІКОЛИ не редагує текст
 #     запиту, лише обирає id шаблону і подає параметри
-#   - тільки іменовані плейсхолдери psycopg (%(name)s) -- жодних f-string
+#   - тільки іменовані плейсхолдери psycopg (%(name)s) -- жодних f-string;
+#     текст користувача НІКОЛИ не потрапляє в рядок SQL, лише в параметри
 #   - фільтр підтвердженості (facts.status = 'confirmed') зашитий літералом
 #     у кожен підрахунковий SQL; для непідтверджених -- ОКРЕМИЙ sql_unconfirmed,
-#     його результат показується поруч, а не змішується
+#     його результат показується поруч, а не змішується (правило продукту:
+#     чернетка ≠ факт)
+#   - у КОЖНОГО шаблона: examples (2-3 живі питання українською -- єдине
+#     джерело для роутера і тест-сету) і answer_hint (як складати відповідь:
+#     що головне число/перелік, що показати як джерело)
+#   - дедуплікація docx/pdf: 8 документів демо-набору існують у двох форматах,
+#     тобто той самий факт лежить у базі двічі (два source_doc_id). Спискові
+#     шаблони знімають дубль через DISTINCT ON по змістовних полях (особа,
+#     вимір, значення, період); підрахунки і так стійкі
+#     (COUNT(DISTINCT f.object_id)). Мета: «хто у відпустці» дає стільки ж
+#     рядків, скільки «скільком» дає число
 #   - джерела при складанні: схема БД Андрія (db/migrations/,
 #     db/README_for_chatbot_team.md), тестові питання Колі
 #     (answer/chat/test-questions.md), демо-питання замовниці
+#     (data/eval/samples/demo-story/demo-questions.md)
+#   - звірка проти живої бази: demos/upload_app/verify_catalog.py
 #
 # Параметри, які вміє витягати маршрутизатор:
 #   state      -- leave | deployment | absent (обидва виміри)
@@ -17,12 +30,21 @@
 #   date_from / date_to -- період (місяць, діапазон)
 #   name_pattern -- ПІБ або його частина (ILIKE-шаблон, будує код)
 #   doc_number -- номер документа без «№»
+#   query      -- тема нормативного пошуку (текст у websearch_to_tsquery,
+#                 їде ЛИШЕ параметром)
 #
 # Мапа станів -> кодів вимірів (dims) живе в chat.py, не тут: у SQL завжди
 # приходить готовий список кодів через ANY(%(dims)s).
+#
+# Шаблон із blocked: true не має sql зовсім -- це чесна відмова (правило
+# «відмова краща за вигадку»): код, що виконує шаблони, мусить перевіряти
+# blocked ДО спроби взяти sql і віддати текст refusal.
 
 templates:
 
+  # Нащо: головне агрегатне питання демо («скільком зараз у відпустці»).
+  # Межі: рахує ЛИШЕ підтверджені факти; чернетки -- окреме число з
+  # sql_unconfirmed поруч. Дата зрізу завжди показується у відповіді.
   - id: count_by_state_on_date
     title: Скільки людей у стані (відпустка/відрядження/відсутні) на дату
     examples:
@@ -31,6 +53,11 @@ templates:
       - Скільки зараз у відрядженні?
       - Скільки людей відсутні сьогодні?
     params: [dims, on_date]
+    answer_hint: >
+      Головне -- одне число n (підтверджені особи). Поруч обов'язково друге
+      число з sql_unconfirmed: «ще M чекають підтвердження» (нуль теж
+      озвучити). Завжди назвати дату зрізу on_date. Джерело: підтверджені
+      факти бази станом на дату.
     sql: >
       SELECT COUNT(DISTINCT f.object_id) AS n
       FROM facts f
@@ -50,12 +77,19 @@ templates:
         AND f.valid_from <= %(on_date)s
         AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
 
+  # Нащо: те саме, але за період (місяць, діапазон дат).
+  # Межі: період = перетин інтервалів (факт хоч одним днем у вікні).
   - id: count_by_state_period
     title: Скільки людей були у стані протягом періоду
     examples:
       - Скільки людей були у відпустці у травні 2026?
       - Скільки відряджень було з 1 по 31 травня?
+      - Скільки людей їздили у відрядження цього місяця?
     params: [dims, date_from, date_to]
+    answer_hint: >
+      Головне -- число n за період date_from..date_to (підтверджені). Поруч
+      число непідтверджених. Період назвати словами у відповіді. Це кількість
+      ОСІБ, не документів -- якщо людина їздила двічі, вона рахується раз.
     sql: >
       SELECT COUNT(DISTINCT f.object_id) AS n
       FROM facts f
@@ -75,6 +109,10 @@ templates:
         AND f.valid_from <= %(date_to)s
         AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
 
+  # Нащо: перелік «хто саме» до підрахунків вище.
+  # Межі: дедуплікація docx/pdf -- DISTINCT ON (особа, вимір, значення,
+  # період), лишається менший source_doc_id; кількість рядків = числу
+  # count_by_state_*. Чернетки -- окремим списком із sql_unconfirmed.
   - id: list_by_state
     title: Список осіб у стані на дату або за період
     examples:
@@ -83,31 +121,52 @@ templates:
       - Хто був у відрядженні у травні 2026?
       - Хто відсутній сьогодні?
     params: [dims, date_from, date_to]
+    answer_hint: >
+      Головне -- перелік: ПІБ, період valid_from..valid_to, значення (вид
+      відпустки або місце відрядження). Джерело кожного рядка --
+      source_doc_id (запис у базі). Наприкінці підсумок «разом N осіб» і,
+      якщо sql_unconfirmed непорожній, «ще M у чернетках».
     sql: >
-      SELECT o.canonical_name AS name, d.code AS dim, f.value,
-             f.valid_from, f.valid_to, f.source_doc_id
-      FROM facts f
-      JOIN dimensions d ON d.id = f.dimension_id
-      JOIN objects o ON o.id = f.object_id
-      WHERE d.code = ANY(%(dims)s)
-        AND f.status = 'confirmed'
-        AND f.valid_from IS NOT NULL
-        AND f.valid_from <= %(date_to)s
-        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
-      ORDER BY o.canonical_name, f.valid_from
+      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+               o.canonical_name AS name, d.code AS dim, f.value,
+               f.valid_from, f.valid_to, f.source_doc_id
+        FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        JOIN objects o ON o.id = f.object_id
+        WHERE d.code = ANY(%(dims)s)
+          AND f.status = 'confirmed'
+          AND f.valid_from IS NOT NULL
+          AND f.valid_from <= %(date_to)s
+          AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.name, t.valid_from
     sql_unconfirmed: >
-      SELECT o.canonical_name AS name, d.code AS dim, f.value,
-             f.valid_from, f.valid_to, f.source_doc_id
-      FROM facts f
-      JOIN dimensions d ON d.id = f.dimension_id
-      JOIN objects o ON o.id = f.object_id
-      WHERE d.code = ANY(%(dims)s)
-        AND f.status = 'unconfirmed'
-        AND f.valid_from IS NOT NULL
-        AND f.valid_from <= %(date_to)s
-        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
-      ORDER BY o.canonical_name, f.valid_from
-
+      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+               o.canonical_name AS name, d.code AS dim, f.value,
+               f.valid_from, f.valid_to, f.source_doc_id
+        FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        JOIN objects o ON o.id = f.object_id
+        WHERE d.code = ANY(%(dims)s)
+          AND f.status = 'unconfirmed'
+          AND f.valid_from IS NOT NULL
+          AND f.valid_from <= %(date_to)s
+          AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.name, t.valid_from
+  # Нащо: «що відомо про людину» -- всі факти особи, включно з чернетками
+  # (статус видно в колонці status, він озвучується, не ховається).
+  # Межі: пошук ILIKE по canonical_name -- однофамільці повернуться всі,
+  # відповідь мусить показати, що осіб кілька. Дедуплікація docx/pdf по
+  # (особа, вимір, значення, період, статус).
   - id: person_status
     title: Стан конкретної особи (всі факти про неї)
     examples:
@@ -115,16 +174,34 @@ templates:
       - Де зараз Рубець?
       - Стан Омеляна Володимира
     params: [name_pattern]
+    answer_hint: >
+      Головне -- перелік фактів особи: вимір (dim_name), значення, період,
+      статус (unconfirmed озвучити як «чернетка, не підтверджено»). Якщо
+      canonical_name різні -- це РІЗНІ люди (однофамільці), розділити явно.
+      Джерело кожного факту -- source_doc_id.
     sql: >
-      SELECT o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
-             f.value, f.valid_from, f.valid_to, f.status, f.confidence,
-             f.source_doc_id
-      FROM facts f
-      JOIN objects o ON o.id = f.object_id
-      JOIN dimensions d ON d.id = f.dimension_id
-      WHERE o.canonical_name ILIKE %(name_pattern)s
-      ORDER BY o.canonical_name, f.source_doc_id, d.id
+      SELECT t.name, t.dim_name, t.dim, t.value, t.valid_from, t.valid_to,
+             t.status, t.confidence, t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (o.id, d.code, f.value, f.valid_from, f.valid_to, f.status)
+               o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
+               f.value, f.valid_from, f.valid_to, f.status, f.confidence,
+               f.source_doc_id
+        FROM facts f
+        JOIN objects o ON o.id = f.object_id
+        JOIN dimensions d ON d.id = f.dimension_id
+        WHERE o.canonical_name ILIKE %(name_pattern)s
+        ORDER BY o.id, d.code, f.value, f.valid_from, f.valid_to, f.status,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.name, t.source_doc_id, t.dim
 
+  # Нащо: пошук за номером документа («покажи документ № 109»).
+  # Межі: номер шукається серед фактів document_number БЕЗ фільтра статусу --
+  # документ із непідтвердженим номером теж має знаходитись, його статус
+  # показується чесно. Один номер може мати кілька документів (docx+pdf або
+  # переоформлення) -- дедуплікація по змісту, але різні source_doc_id
+  # згадати у відповіді.
   - id: doc_by_number
     title: Пошук за номером документа (всі факти документа)
     examples:
@@ -132,21 +209,38 @@ templates:
       - Що в документі №204?
       - Документ 473
     params: [doc_number]
+    answer_hint: >
+      Головне -- зміст документа: особа, факти з періодами, статус кожного.
+      Джерело -- сам номер документа і source_doc_id. Якщо номера немає в
+      базі -- чесно «не знайшла документ із таким номером», номер не
+      виправляти.
     sql: >
-      SELECT o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
-             f.value, f.valid_from, f.valid_to, f.status, f.confidence,
-             f.source_doc_id
-      FROM facts f
-      JOIN objects o ON o.id = f.object_id
-      JOIN dimensions d ON d.id = f.dimension_id
-      WHERE f.source_doc_id IN (
-        SELECT f2.source_doc_id
-        FROM facts f2
-        JOIN dimensions d2 ON d2.id = f2.dimension_id
-        WHERE d2.code = 'document_number'
-          AND btrim(f2.value) = %(doc_number)s)
-      ORDER BY f.source_doc_id, d.id
+      SELECT t.name, t.dim_name, t.dim, t.value, t.valid_from, t.valid_to,
+             t.status, t.confidence, t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (o.id, d.code, f.value, f.valid_from, f.valid_to, f.status)
+               o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
+               f.value, f.valid_from, f.valid_to, f.status, f.confidence,
+               f.source_doc_id
+        FROM facts f
+        JOIN objects o ON o.id = f.object_id
+        JOIN dimensions d ON d.id = f.dimension_id
+        WHERE f.source_doc_id IN (
+          SELECT f2.source_doc_id
+          FROM facts f2
+          JOIN dimensions d2 ON d2.id = f2.dimension_id
+          WHERE d2.code = 'document_number'
+            AND btrim(f2.value) = %(doc_number)s)
+        ORDER BY o.id, d.code, f.value, f.valid_from, f.valid_to, f.status,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.source_doc_id, t.dim
 
+  # Нащо: питання довіри «скільки чекає на людину» -- показує, що система
+  # не ковтає сумнівне мовчки.
+  # Межі: лише нерозв'язані записи (resolved_at IS NULL); типи черг
+  # повертаються кодами (unknown_type/unconfirmed_fact/qa_sample/new_person),
+  # розшифровку дає код відповіді.
   - id: review_queue_count
     title: Скільки документів у черзі перевірки (нерозв'язані)
     examples:
@@ -154,6 +248,11 @@ templates:
       - Скільки в черзі рев'ю?
       - Що в черзі перевірки?
     params: []
+    answer_hint: >
+      Головне -- числа за типами черги (queue_type -> n) і сума. Пояснити
+      типи людською мовою: unknown_type -- не впізнали шаблон,
+      unconfirmed_fact -- бракує даних, new_person -- нова особа в реєстрі,
+      qa_sample -- вибірковий контроль. Джерело: черга рев'ю бази.
     sql: >
       SELECT rq.queue_type, COUNT(*) AS n
       FROM review_queue rq
@@ -161,25 +260,537 @@ templates:
       GROUP BY rq.queue_type
       ORDER BY rq.queue_type
 
+  # Нащо: агрегат по чернетках -- скільки фактів у базі не підтверджено.
+  # Межі: рахує ФАКТИ (n) і окремо документи (docs); це не перелік -- перелік
+  # дає drafts_list.
   - id: unconfirmed_count
     title: Скільки непідтверджених фактів у базі
     examples:
       - Скільки непідтверджених фактів?
       - Скільки записів не підтверджено?
+      - Скільки чернеток у базі?
     params: []
+    answer_hint: >
+      Головне -- n (непідтверджені факти) і docs (скільки документів вони
+      зачіпають). Обов'язково: ці записи НЕ входять у підрахунки, доки людина
+      не підтвердить -- сказати це явно.
     sql: >
       SELECT COUNT(*) AS n, COUNT(DISTINCT f.source_doc_id) AS docs
       FROM facts f
       WHERE f.status = 'unconfirmed'
 
+  # Нащо: розмір бази для довіри («скільки всього оброблено»).
+  # Межі: рахує рядки documents (docx і pdf того самого документа -- два
+  # рядки: це різні файли, і для питання «скільки документів у базі» це
+  # правильна відповідь).
   - id: documents_count
     title: Скільки документів у базі (за доменами)
     examples:
       - Скільки документів у базі?
       - Скільки документів оброблено?
+      - Скільки всього записів у системі?
     params: []
+    answer_hint: >
+      Головне -- сума і розбивка по доменах (leave/deployment/normative...).
+      Це кількість завантажених ФАЙЛІВ: той самий документ у docx і pdf --
+      два записи, сказати це, якщо питають про «унікальні документи».
     sql: >
       SELECT COALESCE(dc.domain, '(без домену)') AS domain, COUNT(*) AS n
       FROM documents dc
       GROUP BY dc.domain
       ORDER BY dc.domain
+
+  # ── P0-набір, доданий за планом 2026-08-24_app-chat-plan.md (етап 2.1) ────
+
+  # Нащо: «скільки відпускних квитків / посвідчень про відрядження» --
+  # розбивка бази за ТИПОМ документа (не за станом людей).
+  # Межі: тип = впізнаний шаблон пайплайна (document_types); нормативні акти
+  # й невпізнані документи типу не мають -- рядок «(без типу)».
+  - id: count_by_doc_type
+    title: Скільки документів кожного типу в базі
+    examples:
+      - Скільки відпускних квитків у базі?
+      - Скільки посвідчень про відрядження оброблено?
+      - Яких документів у нас найбільше?
+    params: []
+    answer_hint: >
+      Головне -- пари «тип документа -> кількість». Типи вже людською мовою
+      (name з довідника). «(без типу)» пояснити: нормативні акти й документи,
+      шаблон яких не впізнано.
+    sql: >
+      SELECT COALESCE(dt.name, '(без типу)') AS doc_type, COUNT(*) AS n
+      FROM documents dc
+      LEFT JOIN document_types dt ON dt.id = dc.type_id
+      GROUP BY dt.name
+      ORDER BY n DESC, doc_type
+
+  # Нащо: «яких відпусток більше» -- розбивка по причині/виду (щорічна,
+  # за сімейними обставинами, лікування...).
+  # Межі: причина = дослівне значення факту (f.value) -- як написано в
+  # документі, без нормалізації видів; рахуються епізоди
+  # (особа+період), дубль docx/pdf знятий через DISTINCT по
+  # (особа, період). Лише підтверджені; чернетки -- окремо.
+  - id: count_by_reason
+    title: Розбивка по причині (виду відпустки/відрядження) за період
+    examples:
+      - Скільки щорічних відпусток, а скільки за сімейними обставинами?
+      - Які види відпусток були цього місяця?
+      - З яких причин люди відсутні?
+    params: [dims, date_from, date_to]
+    answer_hint: >
+      Головне -- перелік «причина -> кількість епізодів», відсортований за
+      спаданням. Причини цитуються дослівно з документів. Період назвати.
+      Поруч -- скільки епізодів ще в чернетках (sql_unconfirmed).
+    sql: >
+      SELECT f.value AS reason,
+             COUNT(DISTINCT (f.object_id, f.valid_from, f.valid_to)) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(date_to)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+      GROUP BY f.value
+      ORDER BY n DESC, reason
+    sql_unconfirmed: >
+      SELECT f.value AS reason,
+             COUNT(DISTINCT (f.object_id, f.valid_from, f.valid_to)) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(date_to)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+      GROUP BY f.value
+      ORDER BY n DESC, reason
+
+  # Нащо: «хто повертається завтра» -- перелік і число (число = кількість
+  # рядків, окремого count-шаблона немає навмисно, щоб вони не розійшлись).
+  # Межі: дата повернення = фактична дата повернення з того самого документа
+  # (вимір leave_actual_return / deployment_actual_return), а якщо її немає --
+  # останній день періоду (valid_to). Значення з нечитабельною датою
+  # (не YYYY-MM-DD) не підставляється -- береться valid_to.
+  # Дедуплікація docx/pdf по (особа, вимір, значення, період).
+  - id: returning_on_date
+    title: Хто повертається на дату (і скільки їх)
+    examples:
+      - Хто повертається завтра?
+      - Хто виходить із відпустки 31 серпня?
+      - У кого закінчується відрядження сьогодні?
+    params: [dims, on_date]
+    answer_hint: >
+      Головне -- перелік: ПІБ, звідки повертається (dim: відпустка чи
+      відрядження), період, дата повернення return_date. «Скільки» = кількість
+      рядків. Пояснити, звідки дата: фактична дата повернення з документа або
+      кінець періоду, якщо фактичної немає. Поруч -- чернетки з
+      sql_unconfirmed, якщо є.
+    sql: >
+      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.return_date,
+             t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+               o.canonical_name AS name, d.code AS dim, f.value,
+               f.valid_from, f.valid_to,
+               COALESCE(ar.return_date, f.valid_to) AS return_date,
+               f.source_doc_id
+        FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        JOIN objects o ON o.id = f.object_id
+        LEFT JOIN LATERAL (
+          SELECT (f2.value)::date AS return_date
+          FROM facts f2
+          JOIN dimensions d2 ON d2.id = f2.dimension_id
+          WHERE f2.source_doc_id = f.source_doc_id
+            AND d2.code IN ('leave_actual_return', 'deployment_actual_return')
+            AND f2.value ~ '^\d{4}-\d{2}-\d{2}$'
+          LIMIT 1) ar ON true
+        WHERE d.code = ANY(%(dims)s)
+          AND f.status = 'confirmed'
+          AND COALESCE(ar.return_date, f.valid_to) = %(on_date)s
+        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.name
+    sql_unconfirmed: >
+      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.return_date,
+             t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+               o.canonical_name AS name, d.code AS dim, f.value,
+               f.valid_from, f.valid_to,
+               COALESCE(ar.return_date, f.valid_to) AS return_date,
+               f.source_doc_id
+        FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        JOIN objects o ON o.id = f.object_id
+        LEFT JOIN LATERAL (
+          SELECT (f2.value)::date AS return_date
+          FROM facts f2
+          JOIN dimensions d2 ON d2.id = f2.dimension_id
+          WHERE f2.source_doc_id = f.source_doc_id
+            AND d2.code IN ('leave_actual_return', 'deployment_actual_return')
+            AND f2.value ~ '^\d{4}-\d{2}-\d{2}$'
+          LIMIT 1) ar ON true
+        WHERE d.code = ANY(%(dims)s)
+          AND f.status = 'unconfirmed'
+          AND COALESCE(ar.return_date, f.valid_to) = %(on_date)s
+        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.name
+
+  # Нащо: «скільки людей немає в частині» -- разом і з розбивкою, одним
+  # запитом (ROLLUP: рядок із dim=NULL -- це «разом», особи, що відсутні
+  # з двох причин одночасно, у «разом» не задвоюються).
+  # Межі: dims сюди завжди приходить повним списком відсутностей
+  # (leave + deployment_location); лише підтверджені, чернетки окремо.
+  - id: absent_breakdown_on_date
+    title: Скільки людей відсутні на дату, з розбивкою за причиною
+    examples:
+      - Скільки людей немає в частині сьогодні?
+      - Скільки всього відсутніх зараз і чому?
+      - Скільки людей поза частиною на 28 серпня?
+    params: [dims, on_date]
+    answer_hint: >
+      Головне -- рядок із dim=NULL: «разом відсутні N». Далі розбивка:
+      leave -> у відпустці, deployment_location -> у відрядженні. Дату зрізу
+      назвати. Поруч -- скільки ще в чернетках (sql_unconfirmed, теж рядок
+      dim=NULL).
+    sql: >
+      SELECT d.code AS dim, COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+      GROUP BY ROLLUP(d.code)
+      ORDER BY d.code NULLS FIRST
+    sql_unconfirmed: >
+      SELECT d.code AS dim, COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+      GROUP BY ROLLUP(d.code)
+      ORDER BY d.code NULLS FIRST
+
+  # Нащо: «хто виїхав із супутниками» -- нове поле co_travelers
+  # (additional_info основного факту відпустки; weak-spots 10.1).
+  # Межі: супутник -- цивільна особа текстом («дружина Рубець І.»), об'єкт
+  # реєстру на неї НЕ заводиться. Прочерки ('—'/'-') означають «нікого» і
+  # відфільтровані. Поле є лише у відпускних квитків -- відрядження
+  # супутників не друкує. Дедуплікація docx/pdf по (особа, значення, період).
+  - id: with_co_travelers
+    title: Хто виїхав у відпустку з супутниками
+    examples:
+      - Хто поїхав у відпустку з родиною?
+      - У кого в відпустці є супутники?
+      - Хто виїхав разом із дружиною чи дітьми?
+    params: [date_from, date_to]
+    answer_hint: >
+      Головне -- перелік: ПІБ, період, хто супутники (co_travelers дослівно з
+      квитка). «Скільки» = кількість рядків. Сказати, що супутники -- цивільні
+      особи, в реєстрі частини їх немає. Джерело -- source_doc_id.
+    sql: >
+      SELECT t.name, t.value, t.valid_from, t.valid_to, t.co_travelers,
+             t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (f.object_id, f.value, f.valid_from, f.valid_to)
+               o.canonical_name AS name, f.value, f.valid_from, f.valid_to,
+               f.additional_info ->> 'co_travelers' AS co_travelers,
+               f.source_doc_id
+        FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        JOIN objects o ON o.id = f.object_id
+        WHERE d.code = 'leave'
+          AND f.status = 'confirmed'
+          AND f.additional_info ->> 'co_travelers' IS NOT NULL
+          AND btrim(f.additional_info ->> 'co_travelers') NOT IN ('', '—', '-')
+          AND f.valid_from IS NOT NULL
+          AND f.valid_from <= %(date_to)s
+          AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+        ORDER BY f.object_id, f.value, f.valid_from, f.valid_to,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.valid_from, t.name
+
+  # Нащо: «кому видано ВПД» -- вимір travel_document (номер військового
+  # перевізного документа з відпускного квитка).
+  # Межі: сам факт ВПД без дат -- період береться з основного факту того ж
+  # документа (LATERAL); ВПД без основного факту з датами теж показується
+  # (період порожній), бо приховати його було б гірше. Лише підтверджені.
+  # Дедуплікація docx/pdf по (особа, номер ВПД).
+  - id: with_travel_document
+    title: Кому видано ВПД (військовий перевізний документ)
+    examples:
+      - Кому видали ВПД?
+      - Хто їде з перевізними документами?
+      - Скільки ВПД видано цього місяця?
+    params: [date_from, date_to]
+    answer_hint: >
+      Головне -- перелік: ПІБ, номер ВПД (travel_document), період поїздки і
+      стан (state_dim: відпустка/відрядження). «Скільки» = кількість рядків.
+      Джерело -- source_doc_id. Рядок без періоду означає: ВПД видано, а дати
+      поїздки в документі не читаються -- сказати чесно.
+    sql: >
+      SELECT t.name, t.travel_document, t.state_dim, t.valid_from, t.valid_to,
+             t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (f.object_id, f.value)
+               o.canonical_name AS name, f.value AS travel_document,
+               pf.dim AS state_dim, pf.valid_from, pf.valid_to,
+               f.source_doc_id
+        FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        JOIN objects o ON o.id = f.object_id
+        LEFT JOIN LATERAL (
+          SELECT d2.code AS dim, f2.valid_from, f2.valid_to
+          FROM facts f2
+          JOIN dimensions d2 ON d2.id = f2.dimension_id
+          WHERE f2.source_doc_id = f.source_doc_id
+            AND d2.code IN ('leave', 'deployment_location')
+          LIMIT 1) pf ON true
+        WHERE d.code = 'travel_document'
+          AND f.status = 'confirmed'
+          AND (pf.valid_from IS NULL
+               OR (pf.valid_from <= %(date_to)s
+                   AND (pf.valid_to IS NULL OR pf.valid_to >= %(date_from)s)))
+        ORDER BY f.object_id, f.value, f.source_doc_id
+      ) t
+      ORDER BY t.name
+
+  # Нащо: чернетки як ПЕРЕЛІК -- «хто відсутній за непідтвердженим фактом».
+  # Межі: показує ЛИШЕ чернетки; у підрахунки count_by_state_* ці записи не
+  # входять -- правило продукту «чернетка ≠ факт». queue_type підказує,
+  # ЧОМУ запис не підтверджений (бракує критичного поля тощо).
+  # Дедуплікація docx/pdf по (особа, вимір, значення, період).
+  - id: drafts_list
+    title: Чернетки — хто відсутній за непідтвердженим фактом
+    examples:
+      - Хто відсутній за непідтвердженими документами?
+      - Покажи чернетки про відпустки
+      - Які записи про відсутність ще не підтверджені?
+    params: [dims]
+    answer_hint: >
+      Головне -- перелік чернеток: ПІБ, стан, період, причина черги
+      (queue_type). ОБОВ'ЯЗКОВО сказати: це непідтверджені записи, у
+      підрахунки вони не входять, доки людина не підтвердить. Джерело --
+      source_doc_id.
+    sql: >
+      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.confidence,
+             t.queue_type, t.source_doc_id
+      FROM (
+        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+               o.canonical_name AS name, d.code AS dim, f.value,
+               f.valid_from, f.valid_to, f.confidence, f.source_doc_id,
+               rq.queue_type
+        FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        JOIN objects o ON o.id = f.object_id
+        LEFT JOIN review_queue rq
+               ON rq.document_id = f.source_doc_id AND rq.resolved_at IS NULL
+        WHERE d.code = ANY(%(dims)s)
+          AND f.status = 'unconfirmed'
+        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+                 f.source_doc_id
+      ) t
+      ORDER BY t.name, t.valid_from
+
+  # Нащо: «де система побачила помилку в датах» -- документи, у яких пайплайн
+  # знайшов суперечність (кінець раніше початку тощо) і СВІДОМО лишив її
+  # видимою (pipeline_meta.date_range_error), а не виправив мовчки.
+  # Межі: факт із суперечливими датами в базі лежить як непідтверджений із
+  # valid_to=NULL (гард завантажувача) -- сама суперечність читається звідси.
+  - id: date_conflict_docs
+    title: Документи з суперечністю дат
+    examples:
+      - У яких документах суперечливі дати?
+      - Де система побачила помилку в датах?
+      - Чи є документи з неможливими періодами?
+    params: []
+    answer_hint: >
+      Головне -- перелік документів: номер (document_number) і дата, домен,
+      текст суперечності date_range_error дослівно. Пояснити: система не
+      виправляє дати сама -- запис чекає людину як чернетка. Джерело -- id
+      запису в базі.
+    sql: >
+      SELECT dc.id, dc.domain, dc.source_kind,
+             dc.pipeline_meta ->> 'date_range_error' AS date_range_error,
+             num.value AS document_number, dat.value AS document_date
+      FROM documents dc
+      LEFT JOIN LATERAL (
+        SELECT f.value FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        WHERE f.source_doc_id = dc.id AND d.code = 'document_number'
+        LIMIT 1) num ON true
+      LEFT JOIN LATERAL (
+        SELECT f.value FROM facts f
+        JOIN dimensions d ON d.id = f.dimension_id
+        WHERE f.source_doc_id = dc.id AND d.code = 'document_date'
+        LIMIT 1) dat ON true
+      WHERE dc.pipeline_meta -> 'date_range_error' IS NOT NULL
+        AND jsonb_typeof(dc.pipeline_meta -> 'date_range_error') <> 'null'
+        AND btrim(dc.pipeline_meta ->> 'date_range_error') <> ''
+      ORDER BY dc.id
+
+  # Нащо: «чому ти так вважаєш» -- провенанс фактів особи: метод витягу,
+  # довіра, документ-джерело. Це відповідь системи про саму себе.
+  # Межі: НЕ дедуплікується навмисно -- якщо факт підтверджений двома файлами
+  # (docx і pdf), обидва джерела і є відповіддю. provenance -- запис
+  # field_provenance для source_field факту; для основного факту (без
+  # source_field) віддається весь field_provenance документа, код відповіді
+  # бере потрібне.
+  - id: fact_provenance
+    title: Провенанс фактів особи (метод, довіра, джерело)
+    examples:
+      - Звідки ти знаєш, що Гавриш у відрядженні?
+      - Чому ти вважаєш, що Малишко у відпустці?
+      - На підставі чого ця відповідь про Юрчук?
+    params: [name_pattern]
+    answer_hint: >
+      Головне -- по кожному факту: значення, статус, довіра (confidence),
+      метод (identification_method: anchors -- впізнано якорями бланка, model
+      -- моделлю; method із provenance: matched/derived), і джерело -- номер
+      та дата документа + source_doc_id. Якщо джерел два (docx і pdf) --
+      назвати обидва.
+    sql: >
+      SELECT o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
+             f.value, f.valid_from, f.valid_to, f.status, f.confidence,
+             f.source_field, f.source_doc_id, dc.source_kind,
+             dc.pipeline_meta -> 'identification' ->> 'source' AS identification_method,
+             dc.pipeline_meta -> 'identification' ->> 'score' AS identification_score,
+             COALESCE(dc.pipeline_meta -> 'field_provenance' -> (f.source_field),
+                      dc.pipeline_meta -> 'field_provenance') AS provenance,
+             num.value AS document_number, dat.value AS document_date
+      FROM facts f
+      JOIN objects o ON o.id = f.object_id
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN documents dc ON dc.id = f.source_doc_id
+      LEFT JOIN LATERAL (
+        SELECT f2.value FROM facts f2
+        JOIN dimensions d2 ON d2.id = f2.dimension_id
+        WHERE f2.source_doc_id = f.source_doc_id
+          AND d2.code = 'document_number'
+        LIMIT 1) num ON true
+      LEFT JOIN LATERAL (
+        SELECT f2.value FROM facts f2
+        JOIN dimensions d2 ON d2.id = f2.dimension_id
+        WHERE f2.source_doc_id = f.source_doc_id
+          AND d2.code = 'document_date'
+        LIMIT 1) dat ON true
+      WHERE o.canonical_name ILIKE %(name_pattern)s
+      ORDER BY o.canonical_name, f.source_doc_id, d.id
+
+  # Нащо: «які нормативні документи в базі» -- перелік актів.
+  # Межі: назва акта = перший рядок розпізнаного тексту (окремого поля назви
+  # в схемі немає); validity за замовчуванням 'unknown' -- система ніколи не
+  # позначає документ чинним самостійно, і відповідь мусить це озвучити.
+  - id: normative_list
+    title: Перелік нормативних актів у базі
+    examples:
+      - Які нормативні документи є в базі?
+      - Покажи перелік наказів та інструкцій
+      - На які акти ти спираєшся?
+    params: []
+    answer_hint: >
+      Головне -- перелік: назва (title_line -- перший рядок тексту акта) і
+      стан чинності validity. Якщо validity не 'current' -- сказати «чинність
+      не підтверджено» (система сама чинність не встановлює). Джерело -- сама
+      назва акта і id запису.
+    sql: >
+      SELECT dc.id, dc.validity, dc.uploaded_at::date AS uploaded_on,
+             split_part(btrim(dc.text_content), E'\n', 1) AS title_line
+      FROM documents dc
+      WHERE dc.domain = 'normative'
+      ORDER BY dc.id
+
+  # Нащо: «яка процедура оформлення відпустки» -- пошук акта за темою через
+  # український FTS (ts_rank по text_content, конфігурація 'ukrainian' з
+  # міграцій). P0-мінімум без гібридного пошуку Андрія.
+  # Межі: цитата на рівні ДОКУМЕНТА, не пункту (нарізки немає -- рішення Ані
+  # 24.08); validity не фільтрується, а ПОКАЗУЄТЬСЯ: у демо-корпусі чинність
+  # актів не встановлювалась (unknown), і ховати весь корпус було б гірше,
+  # ніж чесно попередити «чинність не підтверджено». Текст питання їде ЛИШЕ
+  # параметром у websearch_to_tsquery.
+  - id: normative_search
+    title: Нормативний акт за темою (FTS)
+    examples:
+      - Яка процедура оформлення відпустки?
+      - Що каже інструкція про перевізні документи?
+      - Чим регулюється направлення у відрядження?
+    params: [query]
+    answer_hint: >
+      Головне -- назва найрелевантнішого акта (title_line) як джерело +
+      короткий фрагмент (snippet, це початок документа, НЕ точна цитата
+      пункту -- сказати це). Якщо validity не 'current' -- попередити, що
+      чинність не підтверджено. Порожній результат = чесне «не знайшла акта
+      на цю тему», без вигадок.
+    sql: >
+      SELECT dc.id, dc.validity,
+             split_part(btrim(dc.text_content), E'\n', 1) AS title_line,
+             ts_rank(to_tsvector('ukrainian', dc.text_content),
+                     websearch_to_tsquery('ukrainian', %(query)s)) AS score,
+             left(dc.text_content, 800) AS snippet
+      FROM documents dc
+      WHERE dc.domain = 'normative'
+        AND dc.text_content IS NOT NULL
+        AND to_tsvector('ukrainian', dc.text_content)
+            @@ websearch_to_tsquery('ukrainian', %(query)s)
+      ORDER BY score DESC
+      LIMIT 3
+
+  # Нащо: «скільком документам не змогли обробити» -- чесна цифра про власні
+  # межі (0 -- теж відповідь, яку варто вміти показати).
+  # Межі: failed = конвеєр не дійшов до кінця (documents.status);
+  # unknown_type_docs = оброблено, але шаблон не впізнано (черга рев'ю,
+  # нерозв'язані) -- це РІЗНІ речі, показувати обидві.
+  - id: failed_docs_count
+    title: Скільки документів не вдалося обробити
+    examples:
+      - Скільки документів не вдалося обробити?
+      - Чи були документи, які система не змогла прочитати?
+      - Скільки файлів упало при обробці?
+    params: []
+    answer_hint: >
+      Головне -- failed (не оброблені конвеєром) і unknown_type_docs (шаблон
+      не впізнано, чекають людину) на тлі total. Нуль озвучити явно: «всі N
+      документів оброблено». Не змішувати два числа -- це різні причини.
+    sql: >
+      SELECT
+        (SELECT COUNT(*) FROM documents WHERE status = 'failed') AS failed,
+        (SELECT COUNT(DISTINCT rq.document_id) FROM review_queue rq
+          WHERE rq.queue_type = 'unknown_type'
+            AND rq.resolved_at IS NULL) AS unknown_type_docs,
+        (SELECT COUNT(*) FROM documents) AS total
+
+  # Нащо: чесна відмова на питання про підрозділи -- ЗАБЛОКОВАНО до штатки
+  # Андрія: у схемі немає зв'язку особа->підрозділ
+  # (db/README_for_chatbot_team.md п.8), і вигадувати його не можна.
+  # Межі: шаблон БЕЗ sql (blocked: true) -- код відповіді віддає refusal
+  # дослівно, нічого не рахуючи. Роутер мусить мати цей маршрут, щоб питання
+  # про роту/взвод не їхало у фолбек і не отримувало вигадку.
+  - id: subdivision_blocked
+    title: Питання про підрозділи (заблоковано — немає штатки)
+    blocked: true
+    examples:
+      - Скільки людей у 2 роті зараз у відпустці?
+      - Хто відсутній у першому взводі?
+      - Покажи відсутніх по підрозділах
+    params: []
+    answer_hint: >
+      Відповідь -- дослівно refusal: база не зберігає зв'язок
+      особа-підрозділ, тому чесна відповідь -- «не маю даних про підрозділи»,
+      а не число. Запропонувати перепитати без підрозділу («скільки всього у
+      відпустці»).
+    refusal: >
+      Не маю даних про підрозділи: база поки не зберігає, хто до якого
+      підрозділу належить, тому порахувати по ротах чи взводах чесно не можу.
+      Можу відповісти по частині загалом — спитайте, наприклад, «скільки
+      людей зараз у відпустці».
