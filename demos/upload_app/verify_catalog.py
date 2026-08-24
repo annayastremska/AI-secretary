@@ -29,11 +29,17 @@
 # («з .md N, злито зведенням M, скориговане N-M») -- хто читає звірку,
 # бачить обидва доданки, а не підігнане число. Межі гранулярності
 # (задокументовано в correct_*-функціях):
-#   - review_log не пише статус і документ ЗЛИТОГО факту -- статус судиться
-#     за ВЦІЛІЛИМ фактом (двійники несуть однаковий confirmed з .md), а
-#     docs-складова unconfirmed_count рахується симуляцією двійників по .md
-#     і звіряється хрестом із сумою review_log;
-#   - корекція бакетів count_by_reason іде по old_value на рівні сум.
+#   - review_log не пише НІ статус, НІ документ, НІ значення злитого факту:
+#     old_value там -- рядок 'дубль фактів [id]' (id злитого рядка), більше
+#     нічого. Тому статус судиться за ВЦІЛІЛИМ фактом (rl.fact_id, двійники
+#     несуть однаковий confirmed з .md), docs-складова unconfirmed_count
+#     рахується симуляцією двійників по .md і звіряється хрестом із сумою
+#     review_log;
+#   - бакети count_by_reason: епізод рахується один раз зі значенням
+#     ВЦІЛІЛОГО факту (його value читається з бази через rl.fact_id);
+#     злите значення відновлюється з .md-двійників епізоду (та сама особа +
+#     вимір + період) -- якщо значення двійників розходяться (гліф
+#     апострофа з OCR), бакет невцілілого значення втрачає епізод.
 #
 # Що НЕ звіряється числом (позначка «(виконання)» у таблиці):
 #   - normative_search: незалежно відтворити український стемінг FTS по .md
@@ -463,22 +469,26 @@ def exp_failed(records, ctx):
 # ── Корекція очікуваного на зведення дублікатів (review_log) ────────────────
 
 DEDUPE_SQL = """
-SELECT rl.old_value,
-       f.status     AS survivor_status,
+SELECT f.status     AS survivor_status,
        f.value      AS survivor_value,
        d.code       AS dim,
+       o.canonical_name AS survivor_person,
        f.valid_from, f.valid_to
 FROM review_log rl
 JOIN facts f ON f.id = rl.fact_id
 JOIN dimensions d ON d.id = f.dimension_id
+JOIN objects o ON o.id = f.object_id
 WHERE rl.changed_by = %(who)s
 """
 
 
 def fetch_dedupe_log():
-    """Слід зведення дублікатів. fact_id у review_log вказує на ВЦІЛІЛИЙ
-    факт; значення злитого -- в old_value. Порожній список = зведення не
-    запускалось, корекції стають no-op."""
+    """Слід зведення дублікатів. rl.fact_id вказує на ВЦІЛІЛИЙ факт -- його
+    статус/значення/особа/дати читаються з бази. Значення ЗЛИТОГО факту слід
+    НЕ зберігає: rl.old_value -- лише рядок 'дубль фактів [id]' (id злитого
+    рядка), тому його тут і не вибираємо -- злите значення відновлюється з
+    .md-двійників (див. _correct_reason_buckets). Порожній список = зведення
+    не запускалось, корекції стають no-op."""
     return run_sql(DEDUPE_SQL, {"who": "dedupe_existing_facts"})
 
 
@@ -532,32 +542,49 @@ def correct_unconfirmed_count(expected, dedupe, records, ctx):
 
 
 def _correct_reason_buckets(expected, dedupe, records, ctx, status):
-    """Злитий дублікат з ІНШИМ написанням значення (гліф апострофа з OCR)
-    забирає з бакета свого old_value один епізод; дублікат з тим самим
-    значенням бакетів не міняє -- дзеркало його вже склеїло по ключу
-    епізоду. Корекція на рівні сум по old_value (межа: кілька зведень
-    одного значення в одному епізоді порахувались би двічі)."""
+    """Правило зведення для бакетів: епізод рахується ОДИН раз зі значенням
+    ВЦІЛІЛОГО факту (rl.fact_id -> facts.value, читається з бази). Значення
+    ЗЛИТОГО факту в review_log НЕМАЄ (old_value = 'дубль фактів [id]'), тому
+    воно відновлюється з .md-двійників епізоду: та сама особа + вимір +
+    період. Якщо значення двійників РОЗХОДЯТЬСЯ (заміряний випадок DEMO-06:
+    docx фігурний ’ проти png прямого ') -- бакет невцілілого значення
+    втрачає цей епізод, корекція друкується явно. Однакові значення нічого
+    не міняють: епізодний ключ дзеркала (особа, vf, vt) їх уже склеїв."""
+    # Значення епізодів у .md: (особа, вимір, vf, vt) -> множина значень
+    episode_values = {}
+    for r, f in iter_facts(records, ABSENCE_DIMS, status):
+        episode_values.setdefault(
+            (r.person, f["dim"], f["vf"], f["vt"]), set()).add(f["value"])
     corrected = dict(expected)
     lines = []
+    seen = set()
     for row in dedupe:
         if row["dim"] not in ABSENCE_DIMS:
             continue
         if row["survivor_status"] != status:
             continue
-        old_v, new_v = row["old_value"], row["survivor_value"]
-        if old_v is None or old_v == new_v:
-            continue
         fk = {"vf": _date10(row["valid_from"]), "vt": _date10(row["valid_to"])}
         if not overlaps(fk, ctx["date_from"], ctx["date_to"]):
             continue
-        if old_v in corrected:
-            was = corrected[old_v]
-            corrected[old_v] = was - 1
-            note = f"бакет «{old_v}»: з .md {was}, злито зведенням 1, скориговане {was - 1}"
-            if corrected[old_v] <= 0:
-                del corrected[old_v]
-                note += " -- бакет знято"
-            lines.append(note)
+        ep = (row["survivor_person"], row["dim"], fk["vf"], fk["vt"])
+        if ep in seen:
+            # Кілька злитих файлів одного епізоду (docx+pdf+фото) -- усі
+            # невцілілі значення епізоду знімаються один раз.
+            continue
+        seen.add(ep)
+        survivor = row["survivor_value"]
+        for y in sorted(episode_values.get(ep, set()) - {survivor}, key=str):
+            key = "(без значення)" if y is None else y
+            if key in corrected:
+                was = corrected[key]
+                corrected[key] = was - 1
+                note = (f"двійники розходяться значенням: «{survivor}» "
+                        f"(вижив, з бази) проти «{key}» (злито) -- "
+                        f"бакет «{key}»: {was} -> {was - 1}")
+                if corrected[key] <= 0:
+                    del corrected[key]
+                    note += " (знято)"
+                lines.append(note)
     return corrected, lines
 
 
