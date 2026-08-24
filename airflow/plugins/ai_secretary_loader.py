@@ -144,13 +144,23 @@ def parse_frontmatter(md_path: str) -> dict:
     return meta
 
 
-def get_or_create_dimension(cur, code: str) -> int:
+def get_or_create_dimension(cur, code: str, validity_model: str = None) -> int:
+    """validity_model -- ПЕРЕДАНЕ значення переважає локальну копію реєстру.
+
+    Правка Ані 24.08.2026 (зона db/ -- Андрію на рев'ю): AI-secretary тепер
+    віддає validity_model У КОЖНОМУ факті (facts[*].validity_model), тому
+    локальний словник FACT_TYPE_VALIDITY більше не мусить встигати за її
+    реєстром. Він лишається лише запобіжником на факт без поля (старі .md).
+    Причина правки заміряна: у копії немає трьох нових типів
+    (travel_document, unrecognized, deployment_actual_return), і без цього
+    вони заводили вимір як 'ranged' замість 'permanent_event' -- мовчки."""
     cur.execute("SELECT id FROM dimensions WHERE code = %s", (code,))
     row = cur.fetchone()
     if row:
         return row[0]
     name = FACT_TYPE_LABELS.get(code, code)
-    validity_model = FACT_TYPE_VALIDITY.get(code, "ranged")
+    if not validity_model:
+        validity_model = FACT_TYPE_VALIDITY.get(code, "ranged")
     cur.execute(
         "INSERT INTO dimensions (code, name, value_type, validity_model) VALUES (%s, %s, 'text', %s) RETURNING id",
         (code, name, validity_model),
@@ -500,7 +510,8 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                 fact_type = fact.get("fact_type")
                 if not fact_type:
                     continue
-                dim_id = get_or_create_dimension(cur, fact_type)
+                dim_id = get_or_create_dimension(
+                    cur, fact_type, validity_model=fact.get("validity_model"))
                 fact_id = insert_fact(
                     cur, person_object_id, dim_id, fact.get("value_code"),
                     fact.get("date_start"), fact.get("date_end"), document_id, fact.get("confirmed"),
