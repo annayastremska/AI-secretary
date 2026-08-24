@@ -460,7 +460,17 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
             # фантомний objects-рядок з canonical_name=''. Тепер документ
             # лишається без жодної особи/факту -- лише документ + review_queue.
             person_incomplete = subject.get("person_complete") is False
-            if meta.get("status") == "unresolved" or person_incomplete:
+            # Документ БЕЗ особи взагалі (правка Ані 24.08, зона db/ -- Андрію
+            # на рев'ю). Нормативний акт: status=confirmed, facts=[],
+            # create_subject_object=false, суб'єкта немає. Попередній гард
+            # ловив лише unresolved/person_incomplete, тому на нормативних
+            # get_or_create_person отримувала три None і падала на
+            # NOT NULL людей (last_name) -- усі 41 акт не завантажились.
+            # Такий документ -- законний запис лише в documents (текст для
+            # дороги Б), без особи й без фактів.
+            no_person = not ((subject.get("person_alias") or "").strip()
+                             or (subject.get("surname") or "").strip())
+            if meta.get("status") == "unresolved" or person_incomplete or no_person:
                 if queue_type:
                     cur.execute(
                         "INSERT INTO review_queue (document_id, queue_type) VALUES (%s, %s)",
