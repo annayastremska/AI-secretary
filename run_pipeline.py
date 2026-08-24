@@ -134,6 +134,19 @@ def main(argv=None):
     for meta in results:
         counts[meta["status"]] = counts.get(meta["status"], 0) + 1
     print("\nПідсумок:", ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+
+    # ЗВІТ ПРОГОНУ (24.08.2026): прогін лишає по собі артефакт із цифрами, а
+    # не лише рядки в терміналі. Причина -- відгуки «наче працює, але не
+    # вимірюється»: вимірювання було, але жило в терміналі розробника.
+    # Помилка звіту не має валити прогін, який уже завершився успішно.
+    from pipeline.run_report import build_report, print_report, write_report
+    try:
+        report = build_report(results)
+        print_report(report)
+        path = write_report(report, cfg["paths"]["output_dir"])
+        print(f"звіт: {path}")
+    except Exception as exc:  # noqa: BLE001 -- документи вже оброблені
+        print(f"[увага] звіт прогону не записався: {type(exc).__name__}: {exc}")
     return 0
 
 
