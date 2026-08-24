@@ -180,7 +180,7 @@ python run_pipeline.py --dry-run           # нічого не зберігат�
 
 Твердження «`grep -r postgres/psycopg` по всьому проєкту не дав жодного
 результату» звідси прибрано 22.08.2026 (рев'ю, A-18): grep дає шість файлів
-(`airflow/plugins/ai_secretary_loader.py`, `chat-mamaylm/db.py`,
+(`airflow/plugins/ai_secretary_loader.py`,
 `demos/upload_app/`, дві міграції). Межа проходить по `pipeline/`, а не по
 репозиторію, і саме так її й треба формулювати.
 
