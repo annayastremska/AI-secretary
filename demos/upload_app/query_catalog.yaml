@@ -17,7 +17,12 @@
 #     шаблони знімають дубль через DISTINCT ON по змістовних полях (особа,
 #     вимір, значення, період); підрахунки і так стійкі
 #     (COUNT(DISTINCT f.object_id)). Мета: «хто у відпустці» дає стільки ж
-#     рядків, скільки «скільком» дає число
+#     рядків, скільки «скільком» дає число.
+#     У КЛЮЧІ дедуплікації значення нормалізується translate(''->'’'):
+#     заміряний випадок DEMO-06 (24.08) -- docx дає фігурний апостроф ’,
+#     фото через OCR дає прямий ', і без нормалізації той самий епізод
+#     відпустки давав два рядки. ПОКАЗАНЕ значення не нормалізується --
+#     віддається як у документі
 #   - джерела при складанні: схема БД Андрія (db/migrations/,
 #     db/README_for_chatbot_team.md), тестові питання Колі
 #     (answer/chat/test-questions.md), демо-питання замовниці
@@ -129,7 +134,7 @@ templates:
     sql: >
       SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+        SELECT DISTINCT ON (f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, d.code AS dim, f.value,
                f.valid_from, f.valid_to, f.source_doc_id
         FROM facts f
@@ -140,14 +145,14 @@ templates:
           AND f.valid_from IS NOT NULL
           AND f.valid_from <= %(date_to)s
           AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
-        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+        ORDER BY f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to,
                  f.source_doc_id
       ) t
       ORDER BY t.name, t.valid_from
     sql_unconfirmed: >
       SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+        SELECT DISTINCT ON (f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, d.code AS dim, f.value,
                f.valid_from, f.valid_to, f.source_doc_id
         FROM facts f
@@ -158,7 +163,7 @@ templates:
           AND f.valid_from IS NOT NULL
           AND f.valid_from <= %(date_to)s
           AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
-        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+        ORDER BY f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to,
                  f.source_doc_id
       ) t
       ORDER BY t.name, t.valid_from
@@ -183,7 +188,7 @@ templates:
       SELECT t.name, t.dim_name, t.dim, t.value, t.valid_from, t.valid_to,
              t.status, t.confidence, t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (o.id, d.code, f.value, f.valid_from, f.valid_to, f.status)
+        SELECT DISTINCT ON (o.id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to, f.status)
                o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
                f.value, f.valid_from, f.valid_to, f.status, f.confidence,
                f.source_doc_id
@@ -191,7 +196,7 @@ templates:
         JOIN objects o ON o.id = f.object_id
         JOIN dimensions d ON d.id = f.dimension_id
         WHERE o.canonical_name ILIKE %(name_pattern)s
-        ORDER BY o.id, d.code, f.value, f.valid_from, f.valid_to, f.status,
+        ORDER BY o.id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to, f.status,
                  f.source_doc_id
       ) t
       ORDER BY t.name, t.source_doc_id, t.dim
@@ -218,7 +223,7 @@ templates:
       SELECT t.name, t.dim_name, t.dim, t.value, t.valid_from, t.valid_to,
              t.status, t.confidence, t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (o.id, d.code, f.value, f.valid_from, f.valid_to, f.status)
+        SELECT DISTINCT ON (o.id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to, f.status)
                o.canonical_name AS name, d.name AS dim_name, d.code AS dim,
                f.value, f.valid_from, f.valid_to, f.status, f.confidence,
                f.source_doc_id
@@ -231,7 +236,7 @@ templates:
           JOIN dimensions d2 ON d2.id = f2.dimension_id
           WHERE d2.code = 'document_number'
             AND btrim(f2.value) = %(doc_number)s)
-        ORDER BY o.id, d.code, f.value, f.valid_from, f.valid_to, f.status,
+        ORDER BY o.id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to, f.status,
                  f.source_doc_id
       ) t
       ORDER BY t.source_doc_id, t.dim
@@ -330,6 +335,11 @@ templates:
   # документі, без нормалізації видів; рахуються епізоди
   # (особа+період), дубль docx/pdf знятий через DISTINCT по
   # (особа, період). Лише підтверджені; чернетки -- окремо.
+  # Бакети НЕ нормалізуються навмисно, включно з гліфом апострофа:
+  # заміряний випадок DEMO-06 (24.08) -- OCR дає «у зв'язку» з прямим ',
+  # docx «у зв’язку» з фігурним ’, і це ДВА бакети. Розбіжність написань --
+  # знахідка про дані, її має бути видно; склеювання -- рішення рівня
+  # пайплайна/словника, не SQL. Факт без значення -- бакет «(без значення)».
   - id: count_by_reason
     title: Розбивка по причині (виду відпустки/відрядження) за період
     examples:
@@ -342,7 +352,7 @@ templates:
       спаданням. Причини цитуються дослівно з документів. Період назвати.
       Поруч -- скільки епізодів ще в чернетках (sql_unconfirmed).
     sql: >
-      SELECT f.value AS reason,
+      SELECT COALESCE(f.value, '(без значення)') AS reason,
              COUNT(DISTINCT (f.object_id, f.valid_from, f.valid_to)) AS n
       FROM facts f
       JOIN dimensions d ON d.id = f.dimension_id
@@ -351,10 +361,10 @@ templates:
         AND f.valid_from IS NOT NULL
         AND f.valid_from <= %(date_to)s
         AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
-      GROUP BY f.value
+      GROUP BY COALESCE(f.value, '(без значення)')
       ORDER BY n DESC, reason
     sql_unconfirmed: >
-      SELECT f.value AS reason,
+      SELECT COALESCE(f.value, '(без значення)') AS reason,
              COUNT(DISTINCT (f.object_id, f.valid_from, f.valid_to)) AS n
       FROM facts f
       JOIN dimensions d ON d.id = f.dimension_id
@@ -363,7 +373,7 @@ templates:
         AND f.valid_from IS NOT NULL
         AND f.valid_from <= %(date_to)s
         AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
-      GROUP BY f.value
+      GROUP BY COALESCE(f.value, '(без значення)')
       ORDER BY n DESC, reason
 
   # Нащо: «хто повертається завтра» -- перелік і число (число = кількість
@@ -390,7 +400,7 @@ templates:
       SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.return_date,
              t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+        SELECT DISTINCT ON (f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, d.code AS dim, f.value,
                f.valid_from, f.valid_to,
                COALESCE(ar.return_date, f.valid_to) AS return_date,
@@ -409,7 +419,7 @@ templates:
         WHERE d.code = ANY(%(dims)s)
           AND f.status = 'confirmed'
           AND COALESCE(ar.return_date, f.valid_to) = %(on_date)s
-        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+        ORDER BY f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to,
                  f.source_doc_id
       ) t
       ORDER BY t.name
@@ -417,7 +427,7 @@ templates:
       SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.return_date,
              t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+        SELECT DISTINCT ON (f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, d.code AS dim, f.value,
                f.valid_from, f.valid_to,
                COALESCE(ar.return_date, f.valid_to) AS return_date,
@@ -436,7 +446,7 @@ templates:
         WHERE d.code = ANY(%(dims)s)
           AND f.status = 'unconfirmed'
           AND COALESCE(ar.return_date, f.valid_to) = %(on_date)s
-        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+        ORDER BY f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to,
                  f.source_doc_id
       ) t
       ORDER BY t.name
@@ -502,7 +512,7 @@ templates:
       SELECT t.name, t.value, t.valid_from, t.valid_to, t.co_travelers,
              t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (f.object_id, f.value, f.valid_from, f.valid_to)
+        SELECT DISTINCT ON (f.object_id, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, f.value, f.valid_from, f.valid_to,
                f.additional_info ->> 'co_travelers' AS co_travelers,
                f.source_doc_id
@@ -516,7 +526,7 @@ templates:
           AND f.valid_from IS NOT NULL
           AND f.valid_from <= %(date_to)s
           AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
-        ORDER BY f.object_id, f.value, f.valid_from, f.valid_to,
+        ORDER BY f.object_id, translate(f.value, '''', '’'), f.valid_from, f.valid_to,
                  f.source_doc_id
       ) t
       ORDER BY t.valid_from, t.name
@@ -587,7 +597,7 @@ templates:
       SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.confidence,
              t.queue_type, t.source_doc_id
       FROM (
-        SELECT DISTINCT ON (f.object_id, d.code, f.value, f.valid_from, f.valid_to)
+        SELECT DISTINCT ON (f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, d.code AS dim, f.value,
                f.valid_from, f.valid_to, f.confidence, f.source_doc_id,
                rq.queue_type
@@ -598,7 +608,7 @@ templates:
                ON rq.document_id = f.source_doc_id AND rq.resolved_at IS NULL
         WHERE d.code = ANY(%(dims)s)
           AND f.status = 'unconfirmed'
-        ORDER BY f.object_id, d.code, f.value, f.valid_from, f.valid_to,
+        ORDER BY f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to,
                  f.source_doc_id
       ) t
       ORDER BY t.name, t.valid_from
@@ -735,13 +745,13 @@ templates:
     sql: >
       SELECT dc.id, dc.validity,
              split_part(btrim(dc.text_content), E'\n', 1) AS title_line,
-             ts_rank(to_tsvector('ukrainian', dc.text_content),
+             ts_rank(to_tsvector('ukrainian', left(dc.text_content, 20000)),
                      websearch_to_tsquery('ukrainian', %(query)s)) AS score,
              left(dc.text_content, 800) AS snippet
       FROM documents dc
       WHERE dc.domain = 'normative'
         AND dc.text_content IS NOT NULL
-        AND to_tsvector('ukrainian', dc.text_content)
+        AND to_tsvector('ukrainian', coalesce(dc.text_content, ''))
             @@ websearch_to_tsquery('ukrainian', %(query)s)
       ORDER BY score DESC
       LIMIT 3

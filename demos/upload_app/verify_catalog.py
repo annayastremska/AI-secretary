@@ -16,6 +16,12 @@
 #   --expected-only  -- порахувати лише очікувані числа без бази (локальна
 #                       перевірка самої логіки підрахунку).
 #
+# КОЛИ звіряти: одразу після завантаження бази. Жива база далі живе своїм
+# життям -- людина в рев'ю підтверджує/відхиляє факти (facts.status
+# змінюється), і числа законно розходяться з .md-станом. Розбіжність тоді
+# вказує на зміни в базі після завантаження, а не на помилку шаблона --
+# діагностичний друк нижче допомагає знайти, ЯКИЙ саме документ розійшовся.
+#
 # Що НЕ звіряється числом (позначка «(виконання)» у таблиці):
 #   - normative_search: незалежно відтворити український стемінг FTS по .md
 #     не можна чесно (substring != ts_query), тому перевіряється лише те, що
@@ -201,6 +207,15 @@ def load_records(output_dir):
 
 # ── Дрібні хелпери підрахунку ────────────────────────────────────────────────
 
+def norm_apos(v):
+    """Дзеркало translate(f.value, chr(39), chr(8217)) у ключах дедуплікації
+    шаблонів: OCR дає прямий апостроф ' там, де docx дає фігурний ’
+    (заміряний випадок DEMO-06, 24.08) -- без нормалізації КЛЮЧА той самий
+    епізод рахувався двічі. Значення в бакетах count_by_reason навмисно
+    НЕ нормалізуються -- там розбіжність написань має бути видною."""
+    return v.replace("'", "’") if isinstance(v, str) else v
+
+
 def overlaps(f, date_from, date_to):
     return (f["vf"] is not None and f["vf"] <= date_to
             and (f["vt"] is None or f["vt"] >= date_from))
@@ -271,7 +286,7 @@ def exp_count_period(records, ctx, status):
 
 
 def exp_list_state(records, ctx, status):
-    return len({(r.person, f["dim"], f["value"], f["vf"], f["vt"])
+    return len({(r.person, f["dim"], norm_apos(f["value"]), f["vf"], f["vt"])
                 for r, f in iter_facts(records, ABSENCE_DIMS, status)
                 if overlaps(f, ctx["date_from"], ctx["date_to"])})
 
@@ -283,7 +298,7 @@ def _match_person(records, pattern_core):
 
 def exp_person_status(records, ctx):
     matched = _match_person(records, ctx["surname"])
-    return len({(r.person, f["dim"], f["value"], f["vf"], f["vt"],
+    return len({(r.person, f["dim"], norm_apos(f["value"]), f["vf"], f["vt"],
                  f["status"]) for r in matched for f in r.facts})
 
 
@@ -295,7 +310,7 @@ def exp_doc_by_number(records, ctx):
                       and str(f["value"] or "").strip() == num
                       for f in r.facts)
         if has_num:
-            keys |= {(r.person, f["dim"], f["value"], f["vf"], f["vt"],
+            keys |= {(r.person, f["dim"], norm_apos(f["value"]), f["vf"], f["vt"],
                       f["status"]) for f in r.facts}
     return len(keys)
 
@@ -321,6 +336,19 @@ def exp_unconfirmed_count(records, ctx):
     return {"n": n, "docs": docs}
 
 
+def diag_unconfirmed(records, ctx):
+    """Розклад дзеркального unconfirmed по файлах-джерелах -- щоб при
+    розбіжності одразу бачити, ЯКОГО документа факти в базі змінили статус
+    (порівняти з: SELECT source_doc_id, COUNT(*) FROM facts
+    WHERE status='unconfirmed' GROUP BY 1 ORDER BY 2 DESC)."""
+    per_doc = {}
+    for r, f in iter_facts(records, status="unconfirmed"):
+        key = r.meta.get("source_file") or r.file_hash
+        per_doc[key] = per_doc.get(key, 0) + 1
+    return [f"{src}: {n}" for src, n in
+            sorted(per_doc.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
 def exp_documents_count(records, ctx):
     counts = {}
     for r in records:
@@ -343,11 +371,12 @@ def exp_count_by_reason(records, ctx, status):
         if overlaps(f, ctx["date_from"], ctx["date_to"]):
             episodes.setdefault(f["value"], set()).add(
                 (r.person, f["vf"], f["vt"]))
-    return {k: len(v) for k, v in episodes.items()}
+    return {("(без значення)" if k is None else k): len(v)
+            for k, v in episodes.items()}
 
 
 def exp_returning(records, ctx, status):
-    return len({(r.person, f["dim"], f["value"], f["vf"], f["vt"])
+    return len({(r.person, f["dim"], norm_apos(f["value"]), f["vf"], f["vt"])
                 for r, f in iter_facts(records, ABSENCE_DIMS, status)
                 if record_return_date(r, f) == ctx["as_of"]})
 
@@ -372,7 +401,7 @@ def exp_co_travelers(records, ctx):
         co = str(co).strip() if co is not None else ""
         if co and co not in ("—", "-") and overlaps(f, ctx["date_from"],
                                                     ctx["date_to"]):
-            keys.add((r.person, f["value"], f["vf"], f["vt"]))
+            keys.add((r.person, norm_apos(f["value"]), f["vf"], f["vt"]))
     return len(keys)
 
 
@@ -389,7 +418,7 @@ def exp_travel_document(records, ctx):
 
 
 def exp_drafts(records, ctx):
-    return len({(r.person, f["dim"], f["value"], f["vf"], f["vt"])
+    return len({(r.person, f["dim"], norm_apos(f["value"]), f["vf"], f["vt"])
                 for r, f in iter_facts(records, ABSENCE_DIMS, "unconfirmed")})
 
 
@@ -481,7 +510,8 @@ def build_checks(ctx):
         "unconfirmed_count": dict(
             kind="compare", params={},
             expected=lambda rs: exp_unconfirmed_count(rs, ctx),
-            got=got_first_row),
+            got=got_first_row,
+            diag=lambda rs: diag_unconfirmed(rs, ctx)),
         "documents_count": dict(
             kind="compare", params={},
             expected=lambda rs: exp_documents_count(rs, ctx),
@@ -652,6 +682,10 @@ def main():
                 ok = got == expected
             print(f"{label:38} {fmt(expected):>28} {fmt(got):>28} "
                   f"{'OK' if ok else 'РОЗБІЖНІСТЬ'}")
+            if not ok and check.get("diag"):
+                print("    діагностика (очікуване по файлах-джерелах):")
+                for line in check["diag"](records):
+                    print(f"      {line}")
             failures += 0 if ok else 1
 
     missing = covered.symmetric_difference({t["id"] for t in templates})
