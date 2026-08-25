@@ -68,6 +68,13 @@ def _dsn():
             f"dbname={env.get('APP_DB_NAME', 'milidoc')} "
             f"user={env.get('READONLY_DB_USER', 'milidoc_readonly')} "
             f"password={env.get('READONLY_DB_PASSWORD', '')} "
+            # connect_timeout: без нього psycopg перебирає ::1 і 127.0.0.1
+            # без обмеження, і при впалій базі чат МОВЧИТЬ ~4 хвилини
+            # замість «база недоступна» (заміряно 25.08 на сторінці
+            # статистики: 200 с до відповіді). Наше ж правило вимагає
+            # РІЗНИХ текстів для «не знайшла» і «база недоступна» -- а
+            # текст, якого немає 4 хвилини, не є ні тим, ні тим.
+            f"connect_timeout=3 "
             f"options='-c default_transaction_read_only=on "
             f"-c statement_timeout=5000'")
 

@@ -107,6 +107,9 @@ def _dsn():
     db = env.get("APP_DB_NAME", "milidoc")
     return (f"host=localhost port={port} dbname={db} user={user} "
             f"password={pwd} "
+            # Те саме, що в db.py: без connect_timeout впала база означає
+            # чотирихвилинне молчання замість чесного «недоступна».
+            f"connect_timeout=3 "
             f"options='-c default_transaction_read_only=on "
             f"-c statement_timeout=5000'")
 
