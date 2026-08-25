@@ -89,7 +89,32 @@ AGGREGATION = "max"
 # відповідає рідко (точні/майже точні збіги з прикладами, smalltalk), але
 # ніколи тихо-неправильно; решта їде далі: модель-класифікатор -> фолбек.
 # Це деградація швидкості, не правдивості (ризик 1 плану).
-THRESHOLD = float(os.environ.get("CHAT_VECTOR_THRESHOLD", "0.92"))
+_THRESHOLD_DEFAULT = 0.92
+
+
+def _threshold_from_env():
+    """Кривий env НЕ має кладти чат.
+
+    Аудит 25.08 знайшов єдиний шлях, на якому цей ярус переставав «лише
+    пришвидшувати»: `CHAT_VECTOR_THRESHOLD=abc` давав ValueError на ІМПОРТІ
+    модуля, а app.py імпортує його поза try -- і апка не стартувала взагалі
+    (прогнано: exit 1). Ярус-прискорювач, який валить продукт через
+    друкарську помилку в змінній оточення, суперечить власному критерію
+    приймання, тому значення, що не читається, дає дефолт і попередження.
+    """
+    raw = os.environ.get("CHAT_VECTOR_THRESHOLD")
+    if raw is None:
+        return _THRESHOLD_DEFAULT
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        logging.warning(
+            "CHAT_VECTOR_THRESHOLD=%r не число -- беру дефолт %.2f",
+            raw, _THRESHOLD_DEFAULT)
+        return _THRESHOLD_DEFAULT
+
+
+THRESHOLD = _threshold_from_env()
 
 _ROUTER = None
 _FAILED = False

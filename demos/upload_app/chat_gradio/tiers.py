@@ -189,6 +189,20 @@ STOP_CAPS = {"Хто", "Скільки", "Який", "Яка", "Яке", "Які
 _AGGREGATE = re.compile(
     r"середн|найдовш|найкоротш|сумарн|медіан|максимальн|мінімальн")
 
+# Маркери підрозділу. Корені, не повні слова: питання приходить у будь-якому
+# відмінку («у 2 роті», «по підрозділах», «першого взводу»). `рот` узято з
+# межею й голосною після, щоб не ловити «оборот», «поворот», «фронт».
+_SUBDIVISION = re.compile(
+    r"\bрот[аиіуоюеєою]?\b|\bрк\b|взвод|чот[аиіуоюи]|батальйон|\bбатр\b|"
+    r"підрозділ|відділенн|батаре|дивізіон|бригад|\bполк|застав|екіпаж")
+
+# ...і лише разом із підрахунком або переліком ЛЮДЕЙ. Без цієї другої
+# половини гейт з'їв би нормативні питання, у яких слово «підрозділ» --
+# частина процедури, а не фільтр («яка процедура у підрозділі»).
+_COUNT_OR_LIST = re.compile(
+    r"скільк|кількіст|\bхто\b|список|перелічи|перелік|покажи|відсутн|"
+    r"наявн|склад")
+
 # Явно деструктивні прохання ріжемо правилами ще ДО моделі: чат нічого не
 # змінює в базі за визначенням (read-only), і чесно про це каже.
 _DESTRUCTIVE = re.compile(
@@ -314,6 +328,27 @@ def rules_route(question):
     if _AGGREGATE.search(low):
         return None
 
+    # ГЕЙТ ПІДРОЗДІЛІВ -- перед підрахунками, і саме тут.
+    #
+    # Дефект, знайдений верифікатором етапу 3 (25.08) приладом заміру
+    # роутера: «Скільки людей у 2 роті зараз у відпустці?» правила вели у
+    # `count_by_state_on_date`, тобто чат впевнено віддавав число ПО ВСІЙ
+    # ЧАСТИНІ на питання про підрозділ. Векторний ярус маршрутизував це
+    # питання правильно (`subdivision_blocked@0.943`), але до нього справа
+    # не доходила: правила стоять першими і питання вже «впізнали».
+    # Це псування правдивості, не швидкості: неправильне число з виглядом
+    # правильного гірше за відмову (CLAUDE.md).
+    #
+    # Чому гейт стоїть тут, а не на самому початку функції: маркер
+    # підрозділу сам по собі не робить питання питанням про підрозділ --
+    # «яка процедура оформлення відпустки у підрозділі» це нормативний
+    # пошук, і глушити його відмовою було б новою помилкою. Блокуємо лише
+    # там, де підрозділ поєднаний із ПІДРАХУНКОМ або ПЕРЕЛІКОМ людей, бо
+    # саме таку відповідь база дати не може: зв'язку особа-підрозділ у ній
+    # немає (штатка -- зона Андрія, її ще нема).
+    if _SUBDIVISION.search(low) and _COUNT_OR_LIST.search(low):
+        return "subdivision_blocked", {}
+
     if state:
         dims = STATE_DIMS[state]
         if re.search(r"^хто\b|хто\s", low) or "список" in low or "покажи" in low:
@@ -400,6 +435,15 @@ def model_route(question):
             return None
 
     today = datetime.date.today()
+    # Дати, витягнуті ПРАВИЛАМИ, як проміжний шар фолбека між моделлю і
+    # «сьогодні». Знахідка аудиту 25.08: без цього шару одне й те саме
+    # питання давало різний період залежно від того, який ярус його
+    # впізнав. «Хто був у відпустці у травні 2026?» через векторний ярус
+    # -> 01.05-31.05 (там дати беруться правилами), через модельний ярус,
+    # коли модель віддала null, -> сьогодні-сьогодні. Модель лишається
+    # головною (її значення перше в ланцюжку), але там, де вона змовчала,
+    # правила знають більше за «сьогодні».
+    r_on, r_from, r_to = extract_dates(question)
     if tid in ("count_by_state_on_date", "count_by_state_period",
                "list_by_state"):
         # Модель обрала шаблон стану, а в питанні немає ЖОДНОГО слова про
@@ -413,10 +457,10 @@ def model_route(question):
         params["dims"] = STATE_DIMS[state]
         params["state"] = state
     if tid == "count_by_state_on_date":
-        params["on_date"] = _date("on_date") or today
+        params["on_date"] = _date("on_date") or r_on or today
     if tid in ("count_by_state_period", "list_by_state"):
-        params["date_from"] = _date("date_from") or _date("on_date") or today
-        params["date_to"] = _date("date_to") or _date("on_date") or today
+        params["date_from"] = _date("date_from") or _date("on_date") or r_from or r_on or today
+        params["date_to"] = _date("date_to") or _date("on_date") or r_to or r_on or today
     if tid == "person_status":
         name = (data.get("name") or "").strip()
         if not name:
@@ -441,11 +485,11 @@ def model_route(question):
         params["dims"] = STATE_DIMS[st]
         params["state"] = st
     if "on_date" in need and "on_date" not in params:
-        params["on_date"] = _date("on_date") or today
+        params["on_date"] = _date("on_date") or r_on or today
     if "date_from" in need and "date_from" not in params:
-        params["date_from"] = _date("date_from") or _date("on_date") or today
+        params["date_from"] = _date("date_from") or _date("on_date") or r_from or r_on or today
     if "date_to" in need and "date_to" not in params:
-        params["date_to"] = _date("date_to") or _date("on_date") or today
+        params["date_to"] = _date("date_to") or _date("on_date") or r_to or r_on or today
     if "name_pattern" in need and "name_pattern" not in params:
         name = (data.get("name") or "").strip() or extract_name(question)
         if not name:

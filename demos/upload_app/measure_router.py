@@ -46,7 +46,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from demos.upload_app.chat_gradio.vector_route import (  # noqa: E402
-    ENCODER_SPECS, catalog_routes, _make_encoder)
+    AGGREGATION, ENCODER_NAME, ENCODER_SPECS, THRESHOLD, catalog_routes,
+    _make_encoder)
 
 TESTSET_PATH = os.path.join(APP_DIR, "router_testset.yaml")
 TOP_K = 5          # дефолт semantic-router 0.1.16
@@ -138,6 +139,9 @@ def crosscheck(encoder_name, encoder, utter_texts, route_of, questions,
 
 
 def measure(encoder_name, questions):
+    """-> кількість ВПЕВНЕНО-НЕПРАВИЛЬНИХ на ДІЮЧІЙ конфігурації
+    (AGGREGATION i THRESHOLD із vector_route), або None, якщо цей
+    encoder не є діючим. Потрібно для гейта --gate у main()."""
     spec = ENCODER_SPECS[encoder_name]
     print(f"\n=== {encoder_name} (pooling={spec['pooling']}, "
           f"префікси: query='{spec['query_prefix']}' "
@@ -171,6 +175,7 @@ def measure(encoder_name, questions):
                           for q in questions]))
     S = Q @ U.T
 
+    live_conf_wrong = None
     for agg in ("mean", "max"):
         print(f"  --- aggregation={agg}"
               f"{' (дефолт semantic-router)' if agg == 'mean' else ''} ---")
@@ -226,11 +231,33 @@ def measure(encoder_name, questions):
                          f"«{r['q']}» -> {r['got']}@{r['score']:.3f}"
                          for r in conf_wrong)))
 
+        # Цифра ДІЮЧОЇ конфігурації окремо: сітка порогів вище -- для
+        # вибору, а гейт мусить дивитись рівно на те, що стоїть у проді.
+        if agg == AGGREGATION and encoder_name == ENCODER_NAME:
+            live = [r for r in results if r["score"] >= THRESHOLD and not r["ok"]]
+            live_conf_wrong = len(live)
+            print(f"    ДІЮЧА конфігурація ({encoder_name}, agg={agg}, "
+                  f"поріг {THRESHOLD}): впевнено-неправильних "
+                  f"{live_conf_wrong}")
+            for r in live:
+                print(f"      «{r['q']}» -> {r['got']}@{r['score']:.3f} "
+                      f"(чекали {r['expected']})")
+    return live_conf_wrong
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--encoders", default=",".join(ENCODER_SPECS),
                     help="кома-розділений перелік імен з ENCODER_SPECS")
+    # Гейт, якого просив аудит 25.08 (знахідка 2): поріг 0.92 стоїть на
+    # запасі 0.0021 від максимального балу неправильної відповіді, тому
+    # зміна examples каталогу може ТИХО перетягнути неправильний маршрут
+    # через поріг. Пере-замір руками ніхто не згадає, отже потрібна
+    # команда, яка падає кодом виходу. Запускати після кожної правки
+    # каталогу (записано в README апки).
+    ap.add_argument("--gate", action="store_true",
+                    help="код виходу 1, якщо на ДІЮЧІЙ конфігурації є хоч "
+                         "один впевнено-неправильний маршрут")
     ap.add_argument("--production-view", action="store_true",
                     help="міряти лише питання, які НЕ ловлять правила "
                          "(rules_route) -- справжнє навантаження векторного "
@@ -252,16 +279,36 @@ def main():
             print(f"  УВАГА, правила неправильно: «{qq}» -> {got} "
                   f"(чекали {exp})")
         questions = [q for q in questions if covered[q["q"]] is None]
+    if args.gate:
+        # Гейт міряє ту саму конфігурацію, що працює у проді -- отже і той
+        # самий encoder; інші кандидати для гейта не значать нічого.
+        args.encoders = ENCODER_NAME
+    gate_value = None
     for name in args.encoders.split(","):
         name = name.strip()
         try:
-            measure(name, questions)
+            result = measure(name, questions)
+            if name == ENCODER_NAME:
+                gate_value = result
         except SystemExit:
             raise
         except Exception as exc:
             # encoder не завівся (немає ваг / несумісний код моделі) --
             # це РЕЗУЛЬТАТ заміру, а не падіння скрипта: фіксуємо і йдемо далі
             print(f"  НЕ ЗАМІРЯНО: {type(exc).__name__}: {exc}")
+
+    if args.gate:
+        if gate_value is None:
+            print("\nГЕЙТ НЕ ВІДПРАЦЮВАВ: діючий encoder не заміряно")
+            raise SystemExit(2)
+        if gate_value:
+            print(f"\nГЕЙТ ПРОВАЛЕНО: впевнено-неправильних {gate_value} "
+                  f"(мусить бути 0). Причина зазвичай одна -- змінили "
+                  f"examples каталогу. Або правити приклади, або підіймати "
+                  f"поріг СВІДОМО і з новою цифрою в доці.")
+            raise SystemExit(1)
+        print("\nГЕЙТ ПРОЙДЕНО: впевнено-неправильних 0 на діючій "
+              "конфігурації.")
 
 
 if __name__ == "__main__":
