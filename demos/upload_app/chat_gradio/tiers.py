@@ -990,14 +990,41 @@ def validate_sql(sql):
         return None, "запит без таблиці"
     # Фільтр підтвердженості перевіряє КОД, не довіра до моделі: підрахунок
     # по facts без фільтра confirmed не виконується взагалі.
-    if re.search(r"\bfacts\b", sql, re.I) and "confirmed" not in sql.lower():
-        return None, ("запит читає facts без фільтра підтвердженості "
-                      "(status = 'confirmed') -- такий підрахунок змішав би "
-                      "чернетки з фактами")
-    m = re.search(r"\blimit\s+(\d+)", sql, re.I)
+    #
+    # ПЕРЕПИСАНО 25.08 після адверсарного проходу. Було: `"confirmed" not in
+    # sql.lower()` -- перевірка на ПІДРЯДОК, і вона пропускала:
+    #   SELECT count(*) AS confirmed FROM facts        -- псевдонім колонки
+    #   ... WHERE f.status = 'unconfirmed'             -- рівно навпаки
+    #   ... WHERE f.status <> 'confirmed'              -- рівно навпаки
+    #   ... WHERE f.value LIKE '%confirmed%'           -- зовсім не про статус
+    # Тобто рейка виглядала як рейка, але тримала лише випадкові запити, а не
+    # ті, що справді змішують чернетки з фактами.
+    #
+    # Тепер шукаємо саме ПОРІВНЯННЯ статусу з 'confirmed' -- і окремо
+    # відхиляємо порівняння з 'unconfirmed'/'rejected' або заперечення, бо це
+    # запит НЕ про підтверджені дані.
+    if re.search(r"\bfacts\b", sql, re.I):
+        ok = re.search(r"status\s*(?:=|\bin\b\s*\()\s*'?confirmed'?", sql, re.I)
+        wrong = re.search(r"status\s*(?:<>|!=|\bnot\b)|"
+                          r"status\s*=\s*'(?:un|re)\w+'", sql, re.I)
+        if not ok or wrong:
+            return None, ("запит читає facts без явного фільтра "
+                          "підтвердженості (status = 'confirmed') або з "
+                          "фільтром навпаки -- такий підрахунок змішав би "
+                          "чернетки з фактами")
+    # LIMIT: перевіряємо ЗОВНІШНІЙ, а не будь-який.
+    #
+    # Було: перший-ліпший `limit N` у тексті вважався своїм, тому
+    # `SELECT ... FROM (SELECT ... LIMIT 5) t` проходив «зі своїм лімітом», а
+    # зовнішній запит лишався без обмеження. Тепер ліміт шукається в хвості
+    # запиту (після останньої закритої дужки), а якщо його там немає --
+    # додається наш.
+    tail = sql[sql.rfind(")") + 1:] if ")" in sql else sql
+    m = re.search(r"\blimit\s+(\d+)", tail, re.I)
     if m:
         if int(m.group(1)) > 200:
-            sql = re.sub(r"\blimit\s+\d+", "LIMIT 200", sql, flags=re.I)
+            sql = sql[:sql.rfind(")") + 1] + re.sub(
+                r"\blimit\s+\d+", "LIMIT 200", tail, flags=re.I)
     else:
         sql += " LIMIT 200"
     return sql, None
