@@ -12,6 +12,7 @@ llama_cpp імпортується ЛІНИВО (усередині методі
 Grammar НЕ гарантує правдивості значення -- лише його форму.
 """
 import json
+import logging
 import os
 import threading
 
@@ -63,7 +64,31 @@ class LlamaClient:
                               verbose=self.verbose)
                 if self.n_threads:
                     kwargs["n_threads"] = self.n_threads
-                self._llm = Llama(**kwargs)
+                try:
+                    self._llm = Llama(**kwargs)
+                except Exception:
+                    # ВІДКАТ НА ПРОЦЕСОР, а не падіння.
+                    #
+                    # На vGPU «карта є» і «карта рахує» -- різні твердження, і
+                    # ми це вже проходили двічі: 24.08 ліцензія відпала, а
+                    # карта в списку лишилась; 25.08 установка CUDA-toolkit
+                    # знесла GRID-драйвер, і NVML перестав відповідати, хоч
+                    # обчислення ще йшли. У обох випадках правильна поведінка
+                    # одна: працювати ПОВІЛЬНО, а не не працювати.
+                    #
+                    # Тому: якщо завантаження з шарами на GPU не вдалось --
+                    # пробуємо ще раз на чистому процесорі. Виняток
+                    # проглочується лише коли ми справді просили GPU (інакше
+                    # це була б маскіровка помилки самої моделі).
+                    if not self.n_gpu_layers:
+                        raise
+                    logging.warning(
+                        "модель не завантажилась із n_gpu_layers=%s -- "
+                        "пробую на процесорі (повільніше, але працює)",
+                        self.n_gpu_layers)
+                    kwargs["n_gpu_layers"] = 0
+                    self._llm = Llama(**kwargs)
+                    self.n_gpu_layers = 0
             return self._llm
 
     def _grammar_from_choices(self, choices):
