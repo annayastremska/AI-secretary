@@ -17,7 +17,12 @@ import datetime
 
 import pytest
 
-from demos.upload_app.chat_gradio import prompts, tiers
+from demos.upload_app.chat_gradio import app as chat_app
+
+# Той самий модуль, що вживає апка (див. коментар у test_free_sql_gate.py):
+# файл tiers.py живе в sys.modules двічі, і патчити треба робочу копію.
+tiers = chat_app.tier_chat
+prompts = tiers.prompts
 
 
 def _route_system_before_the_move():
@@ -92,9 +97,8 @@ def test_missing_prompt_file_degrades_instead_of_lying(monkeypatch):
 
 
 def test_free_sql_prompt_is_byte_identical_too():
-    """Другий промпт -- той самий якір. Ярус вимкнений, але це не причина
-    переїхати з ним неакуратно: увімкнуть колись -- і поведінка мусить бути
-    та сама, що заміряна."""
+    """Другий промпт -- той самий якір: ярус працює, і його поведінка мусить
+    лишитись тією, що заміряна."""
     before = ("Ти складаєш ОДИН SQL SELECT до PostgreSQL за питанням "
               "користувача. Поверни JSON {\"sql\": \"...\"}. "
               "Нічого не пояснюй.\n" + tiers.DB_SCHEMA_HINT)
