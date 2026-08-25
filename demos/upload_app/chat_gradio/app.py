@@ -1070,7 +1070,15 @@ def _model_catalog_tier(question):
 
 def _tier2_tier(question):
     """Ярус 2: вільний SELECT під рейками (read-only, валідатор, LIMIT 200,
-    таймаут 5 с, SQL у згортці) -> текст або None."""
+    таймаут 5 с, SQL у згортці) -> текст або None.
+
+    На демо ярус ВИМКНЕНИЙ (`tier_chat.FREE_SQL_ENABLED`, дефолт 0): валідатор
+    перевіряє безпеку запиту, а не те, що запит відповідає на поставлене
+    питання. Вимкнений -- питання доходить до чесної відмови, і це свідомий
+    вибір, а не забута гілка. Обґрунтування -- біля самого прапорця в
+    tiers.py."""
+    if not tier_chat.FREE_SQL_ENABLED:
+        return None
     if not (model_available() and tier_chat._get_model() is not None):
         return None
     progress.stage("tier2")
