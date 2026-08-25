@@ -29,6 +29,7 @@ value, назви вимірів тощо) — це текст із ДОКУМЕ
 """
 import datetime
 import html
+import logging
 import os
 import re
 import threading
@@ -36,6 +37,16 @@ import threading
 import psycopg
 import yaml
 from psycopg.rows import dict_row
+
+try:
+    # Модулі чата в цьому пакеті імпортують один одного ПЛОСКО
+    # (`import db`, `import tiers as tier_chat` в app.py: тека додана в
+    # sys.path). Відносний імпорт тут ламає саме той шлях -- перевірено
+    # тестами, які впали всі сім одразу. Тому обидва варіанти, а не
+    # «правильний»: спершу як частина пакета, потім плоско.
+    from . import prompts
+except ImportError:                                  # pragma: no cover
+    import prompts
 
 CHAT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(CHAT_DIR)          # demos/upload_app
@@ -408,30 +419,40 @@ ROUTE_SCHEMA = {
 }
 
 
+def _catalog_lines():
+    """Перелік шаблонів для промпта -- будується з КАТАЛОГУ, а не з файла
+    промпта. Каталог лишається єдиним джерелом шаблонів: інакше новий шаблон
+    треба було б додавати у двох місцях, і копії розійшлись би мовчки."""
+    return "\n".join(
+        f"- {tid}: {t['title']}. Приклади: "
+        + "; ".join(t.get("examples", [])[:2])
+        for tid, t in _CATALOG.items())
+
+
 def _route_system():
-    lines = ["Ти -- маршрутизатор питань до бази обліку документів "
-             "військової частини. НЕ відповідай на питання. Обери один "
-             "шаблон зі списку і витягни параметри.", "Шаблони:"]
-    for tid, t in _CATALOG.items():
-        ex = "; ".join(t.get("examples", [])[:2])
-        lines.append(f"- {tid}: {t['title']}. Приклади: {ex}")
-    lines.append("- вільний_sql: питання про дані бази, яке не лягає на "
-                 "жоден шаблон")
-    lines.append("- відмова: питання не про дані бази (погода, поради, "
-                 "прохання щось змінити чи видалити)")
-    lines.append(
-        "Параметри: state -- leave (відпустка) / deployment (відрядження) / "
-        "absent (відсутні взагалі) / null. Дати -- YYYY-MM-DD або null; "
-        "«зараз»/«сьогодні» -> сьогоднішня дата "
-        f"({datetime.date.today().isoformat()}). name -- прізвище або ПІБ. "
-        "doc_number -- номер документа без «№». Нічого не вигадуй: якщо "
-        "параметра в питанні немає -- null.")
-    return "\n".join(lines)
+    """Промпт маршрутизатора -> текст або None, якщо файл промпта недоступний.
+
+    Текст живе у `prompts/route.md` (задача 4.5), а не в цьому коді. None
+    замість вбудованої копії -- свідомо: копія була б другим джерелом правди.
+    Немає файла -> модельний ярус чесно віддає питання далі, чат живе на
+    правилах і векторах. Деградація, не вигадка."""
+    try:
+        return prompts.render(
+            "route.md",
+            templates=_catalog_lines(),
+            today=datetime.date.today().isoformat())
+    except OSError as exc:
+        logging.error("промпт маршрутизатора недоступний (%s) -- модельний "
+                      "ярус вимкнено до перезапуску", exc)
+        return None
 
 
 def model_route(question):
     """-> (template_id|'вільний_sql'|'відмова', params) або None."""
-    data = _model_json(_route_system(), question, ROUTE_SCHEMA)
+    system = _route_system()
+    if system is None:          # немає файла промпта -- ярус не працює
+        return None
+    data = _model_json(system, question, ROUTE_SCHEMA)
     if not data or data.get("template") not in ROUTE_IDS:
         return None
     tid = data["template"]
@@ -865,10 +886,14 @@ def tier2_answer(question):
               "скласти безпечний запит не вдалося. Спробуйте перефразувати "
               "(наприклад, назвіть стан -- відпустка/відрядження, дату або "
               "номер документа).")
-    data = _model_json(
-        "Ти складаєш ОДИН SQL SELECT до PostgreSQL за питанням користувача. "
-        "Поверни JSON {\"sql\": \"...\"}. Нічого не пояснюй.\n" + DB_SCHEMA_HINT,
-        question, SQL_SCHEMA)
+    # Промпт -- у prompts/free_sql.md (задача 4.5). Схема бази підставляється
+    # з одного місця в коді, щоб не розходилась із міграціями Андрія.
+    try:
+        system = prompts.render("free_sql.md", schema=DB_SCHEMA_HINT)
+    except OSError as exc:
+        logging.error("промпт вільного SQL недоступний (%s)", exc)
+        return refuse, ["нешаблонний запит: промпт недоступний"]
+    data = _model_json(system, question, SQL_SCHEMA)
     if not data:
         return refuse, ["нешаблонний запит: модель не відповіла"]
     sql, reason = validate_sql(data.get("sql", ""))
