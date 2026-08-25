@@ -80,7 +80,7 @@ def test_routes_built_from_catalog(stub_router):
     # розмовний маршрут (3.5) і заблокований шаблон теж мають маршрути:
     # питання про підрозділи мусить влучати у чесну відмову, не у фолбек
     assert "smalltalk" in route_names
-    assert "subdivision_blocked" in route_names
+    assert "subdivision_unknown" in route_names
 
 
 def test_prefixes_of_the_active_encoder_are_applied(stub_router):

@@ -45,7 +45,7 @@
 #   - normative_search: незалежно відтворити український стемінг FTS по .md
 #     не можна чесно (substring != ts_query), тому перевіряється лише те, що
 #     SQL виконується і віддає <= LIMIT рядків;
-#   - subdivision_blocked: SQL немає за задумом -- перевіряється, що шаблон
+#   - subdivision_unknown: SQL немає за задумом -- перевіряється, що шаблон
 #     позначений blocked і має текст refusal.
 
 import argparse
@@ -722,9 +722,21 @@ def build_checks(ctx):
             kind="compare", params={},
             expected=lambda rs: exp_failed(rs, ctx),
             got=got_first_row),
-        "subdivision_blocked": dict(kind="blocked", params={}),
+        "subdivision_unknown": dict(kind="blocked", params={}),
+        # Штатка в базі з 25.08 -> питання про підрозділи стали
+        # відповідними. Обидва нові шаблони перевіряються ВИКОНАННЯМ
+        # (kind="run"): точну цифру по роті звірити нічим -- .md-файли
+        # пайплайна підрозділів не містять, це дані штатки.
+        "count_by_state_in_subdivision": dict(
+            kind="run",
+            params={"dims": ["leave"], "on_date": "2026-08-28",
+                    "subdivision": "%2%рота%"}),
+        "subdivision_breakdown": dict(
+            kind="run",
+            params={"dims": ["leave", "deployment_location"],
+                    "on_date": "2026-08-28"}),
         # розмовний маршрут (етап 3.5): SQL немає за задумом, як у
-        # subdivision_blocked -- перевіряється blocked + refusal
+        # subdivision_unknown -- перевіряється blocked + refusal
         "smalltalk": dict(kind="blocked", params={}),
     }
 

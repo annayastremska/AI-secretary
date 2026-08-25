@@ -98,7 +98,7 @@ def test_fact_templates_speak_about_drafts(rendered, template_id):
 def test_blocked_template_answers_with_its_own_refusal(rendered):
     """Заблокований шаблон -- інший контракт: дослівна відмова каталогу, без
     цифр і без дати зрізу (нема чого датувати)."""
-    text, source = tiers.run_template("subdivision_blocked", {})
+    text, source = tiers.run_template("subdivision_unknown", {})
     assert "підрозділ" in text.lower()
     assert any("заблоковано" in s for s in source)
 

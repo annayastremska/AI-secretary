@@ -87,8 +87,8 @@ def test_tiers_esc_basics():
 
 def test_blocked_template_returns_refusal_without_sql():
     """Доробка каталогу: blocked: true перевіряється ДО читання sql --
-    у subdivision_blocked його немає взагалі, відповідь -- дослівний refusal."""
-    text, source = tiers.run_template("subdivision_blocked", {})
+    у subdivision_unknown його немає взагалі, відповідь -- дослівний refusal."""
+    text, source = tiers.run_template("subdivision_unknown", {})
     assert "підрозділ" in text.lower()
     assert "не маю даних" in text.lower() or "не можу" in text.lower()
     assert any("заблоковано" in s for s in source)

@@ -1,84 +1,123 @@
 # -*- coding: utf-8 -*-
-"""Питання про підрозділ не сміє отримати число по ВСІЙ частині.
+"""Питання про підрозділ: тепер ВІДПОВІДЬ, а не відмова — але не всяка.
 
-Дефект, знайдений 25.08 верифікатором-адверсарем етапу 3 (і, що важливо,
-власним приладом заміру роутера -- він друкує «УВАГА, правила неправильно»):
+Історія цього файлу — про те, як правда змінюється разом із даними.
 
-    «Скільки людей у 2 роті зараз у відпустці?» -> count_by_state_on_date
-    «Хто відсутній у нашій роті?»               -> list_by_state
+**Було до 25.08:** зв'язку особа→підрозділ у базі не існувало, тому єдиною
+чесною відповіддю була відмова. Цей тест її й сторожив: гейт відбирав такі
+питання в підрахунків, бо число «по всій частині» на питання про роту —
+неправда з виглядом правди.
 
-Тобто ярус ПРАВИЛ упевнено відповідав числом по всій частині на питання про
-підрозділ. Векторний ярус маршрутизував це правильно
-(`subdivision_blocked@0.943`), але справа до нього не доходила: правила стоять
-першими і питання вже «впізнали».
+**Стало 25.08:** Андрій залив штатку — 300 осіб зі `service_id` і вимір
+`subdivision` (по 90 у трьох ротах, 15 у взводі забезпечення, 15 в управлінні
+батальйону). У ту саму хвилину наша відмова перестала бути чесною: система
+заперечувала б власні дані.
 
-Це псування ПРАВДИВОСТІ, не швидкості: зв'язку особа-підрозділ у базі немає
-(штатка -- зона Андрія), тому будь-яке число тут -- відповідь не на те
-питання. «Відмова краща за вигадку» (CLAUDE.md).
+Тому тест перевернутий, і в ньому три випадки замість одного:
+  1. підрозділ названий і він У ШТАТЦІ → рахуємо по ньому;
+  2. названий, але такого немає → **чесна відмова**, не нуль (нуль читався б
+     як «там нікого», а насправді немає підрозділу);
+  3. не названий («по підрозділах») → розклад по всіх.
 
 Запуск:
     python -m pytest demos/upload_app/tests/test_subdivision_gate.py -q
 """
 import pytest
 
-from demos.upload_app.chat_gradio import tiers
+from demos.upload_app.chat_gradio import app as chat_app
+
+tiers = chat_app.tier_chat
+
+#: Штатка на сервері. У тестах бази немає, тому перелік підставляється --
+#: інакше `extract_subdivision` не має з чим порівнювати.
+ROSTER = ["1-ша механізована рота", "2-га механізована рота",
+          "3-тя механізована рота", "Взвод забезпечення",
+          "Управління батальйону"]
 
 
-#: Саме ті формулювання, на яких дефект був заміряний, плюс відмінки й
-#: жанри, якими питання приходить насправді.
-BLOCKED = [
+@pytest.fixture(autouse=True)
+def roster(monkeypatch):
+    monkeypatch.setattr(tiers, "subdivisions", lambda: ROSTER)
+
+
+KNOWN = [
     "Скільки людей у 2 роті зараз у відпустці?",
-    "Скільки людей із 3 взводу зараз у відпустці?",
-    "Хто відсутній у нашій роті?",
-    "Хто відсутній у першому взводі?",
-    "Покажи відсутніх по підрозділах",
-    "Скільки у відпустці в 1 батальйоні?",
-    "Перелічи всіх із другої роти, хто у відрядженні",
-    "Який склад роти сьогодні?",
+    "Скільком у другій роті у відпустці?",
+    "Скільком у 1-й механізованій роті у відрядженні?",
+    "Скільком у взводі забезпечення у відпустці сьогодні?",
+    "Хто відсутній у 3 роті?",
 ]
 
 
-@pytest.mark.parametrize("q", BLOCKED)
-def test_subdivision_question_is_refused_not_counted(q):
-    route = tiers.rules_route(q)
-    assert route is not None, "питання мусить впізнатись, а не піти у фолбек"
+@pytest.mark.parametrize("question", KNOWN)
+def test_known_subdivision_is_counted(question):
+    """ГОЛОВНЕ: підрозділ зі штатки більше не отримує відмову."""
+    route = tiers.rules_route(question)
+    assert route, question
     tid, params = route
-    assert tid == "subdivision_blocked", (q, tid)
-    # Заблокований шаблон не має параметрів: параметр означав би, що ми
-    # збираємось щось порахувати.
-    assert params == {}
+    assert tid == "count_by_state_in_subdivision", (question, tid)
+    # параметри мусять бути ПОВНІ: без dims/on_date шаблон не виконається, і
+    # питання тихо поїде на стару дорогу просити дату (так і було в першій
+    # спробі -- перевірено на сервері)
+    for key in ("dims", "on_date", "subdivision"):
+        assert key in params, (question, key, params)
 
 
-#: ЗАПОБІЖНИК ПРОТИ ПЕРЕГИНУ. Гейт легко зробити занадто жадібним, і тоді
-#: він з'їсть питання, які база відповісти МОЖЕ -- це була б нова помилка
-#: того самого класу, лише в інший бік.
-NOT_BLOCKED = [
-    # слово «підрозділ» як частина ПРОЦЕДУРИ, а не фільтр: це нормативний
-    # пошук, і глушити його відмовою не можна
-    "Яка процедура оформлення відпустки у підрозділі?",
-    # звичайні питання по всій частині -- жодного маркера підрозділу
-    "Скільки людей зараз у відпустці?",
-    "Хто зараз у відрядженні?",
-    # корені, які НЕ є підрозділом: «оборот», «поворот», «фронт»
-    "Скільки документів у обороті?",
+UNKNOWN = [
+    "Скільки людей у 7 роті у відпустці?",
+    "Скільком у 9-й роті у відрядженні?",
 ]
 
 
-@pytest.mark.parametrize("q", NOT_BLOCKED)
-def test_gate_does_not_eat_answerable_questions(q):
-    route = tiers.rules_route(q)
-    tid = route[0] if route else None
-    assert tid != "subdivision_blocked", (q, tid)
+@pytest.mark.parametrize("question", UNKNOWN)
+def test_unknown_subdivision_is_refused_not_zeroed(question):
+    """Підрозділ, якого в штатці немає, мусить давати ВІДМОВУ. Нуль тут був би
+    неправдою: немає самого підрозділу, а не людей у ньому."""
+    route = tiers.rules_route(question)
+    assert route and route[0] == "subdivision_unknown", (question, route)
 
 
-def test_blocked_template_answers_without_touching_the_database():
-    """Контракт заблокованого шаблона: дослівна відмова, без sql і без
-    моделі. Перевіряємо не текст, а те, що шаблон справді blocked і має
-    refusal -- інакше гейт вів би у шаблон, який спробує піти в базу."""
-    t = tiers._CATALOG["subdivision_blocked"]
+@pytest.mark.parametrize("question", [
+    "Покажи відсутніх по підрозділах",
+    "Скільком у відпустці по ротах?",
+])
+def test_breakdown_when_subdivision_not_named(question):
+    route = tiers.rules_route(question)
+    assert route and route[0] == "subdivision_breakdown", (question, route)
+
+
+#: ЗАПОБІЖНИК ПРОТИ ПЕРЕГИНУ. Гейт не має чіпати питання, де підрозділ не
+#: згадується, і не має ковтати нормативні питання зі словом «підрозділ».
+NOT_SUBDIVISION = [
+    ("Скільком зараз у відпустці?", "count_by_state_on_date"),
+    ("Хто зараз у відрядженні?", "list_by_state"),
+    ("Яка процедура оформлення відпустки у підрозділі?", "normative_search"),
+]
+
+
+@pytest.mark.parametrize("question,expected", NOT_SUBDIVISION)
+def test_gate_does_not_eat_other_questions(question, expected):
+    route = tiers.rules_route(question)
+    assert route and route[0] == expected, (question, route)
+
+
+def test_unknown_subdivision_refusal_names_the_real_ones():
+    """Відмова мусить сказати, які підрозділи Є -- інакше людина не знає, як
+    перепитати."""
+    t = tiers._CATALOG["subdivision_unknown"]
     assert t.get("blocked") is True
-    assert (t.get("refusal") or "").strip()
-    assert not t.get("sql")
+    refusal = (t.get("refusal") or "").lower()
+    assert "рота" in refusal or "роти" in refusal
+    assert "взвод" in refusal
+
+
+def test_subdivision_templates_have_sql_and_draft_query():
+    """Шаблони підрахунку мусять мати і основний запит, і окремий на чернетки:
+    правило «чернетка не факт» діє і в розрізі підрозділу."""
+    for tid in ("count_by_state_in_subdivision",):
+        t = tiers._CATALOG[tid]
+        assert t.get("sql") and t.get("sql_unconfirmed"), tid
+    assert tiers._CATALOG["subdivision_breakdown"].get("sql")
 
 
 if __name__ == "__main__":

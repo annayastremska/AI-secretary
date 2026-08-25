@@ -1194,6 +1194,12 @@ _STATE_TEMPLATES = {
     # питання виконують і звірені (verify_catalog).
     "normative_list",
     "normative_search",
+    # Підрозділи -- сюди ж від 25.08: штатка в базі, тому питання відповідне, а
+    # стара дорога про підрозділи не знає нічого (у `people` такої колонки
+    # немає -- зв'язок лежить окремим виміром `subdivision`).
+    "count_by_state_in_subdivision",
+    "subdivision_breakdown",
+    "subdivision_unknown",
 }
 
 
