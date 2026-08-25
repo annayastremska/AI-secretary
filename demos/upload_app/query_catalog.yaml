@@ -787,24 +787,100 @@ templates:
   # Межі: шаблон БЕЗ sql (blocked: true) -- код відповіді віддає refusal
   # дослівно, нічого не рахуючи. Роутер мусить мати цей маршрут, щоб питання
   # про роту/взвод не їхало у фолбек і не отримувало вигадку.
-  - id: subdivision_blocked
-    title: Питання про підрозділи (заблоковано — немає штатки)
-    blocked: true
+  # Нащо: штатка в базі з 25.08 (залив Андрій -- 300 осіб зі service_id і
+  # виміром subdivision), тому питання про підрозділи стали ВІДПОВІДНИМИ.
+  # Доти на них стояла чесна відмова `subdivision_blocked` -- вона більше не
+  # чесна, бо база тепер це знає, і лишати її означало б заперечувати власні
+  # дані.
+  # Межі: підрозділ у штатці -- РЯДОК («2-га механізована рота»), тому
+  # порівняння за підрядком (ILIKE), а не за кодом: людина каже «2 рота»,
+  # «друга рота», «2-га механізована».
+  - id: count_by_state_in_subdivision
+    title: Скільки людей у стані в конкретному підрозділі на дату
     examples:
       - Скільки людей у 2 роті зараз у відпустці?
-      - Хто відсутній у першому взводі?
+      - Скільком у 1-й механізованій роті у відрядженні?
+      - Скільки у взводі забезпечення у відпустці сьогодні?
+    params: [dims, on_date, subdivision]
+    answer_hint: >
+      Одне число n (підтверджені особи ЦЬОГО підрозділу) + друге з
+      sql_unconfirmed. Обов'язково назвати сам підрозділ так, як він у базі
+      (значення поля), дату зрізу і те, що знаменник -- склад підрозділу, а не
+      частини.
+    sql: >
+      SELECT COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+        AND f.object_id IN (
+          SELECT sf.object_id FROM facts sf
+          JOIN dimensions sd ON sd.id = sf.dimension_id
+          WHERE sd.code = 'subdivision'
+            AND sf.value ILIKE %(subdivision)s)
+    sql_unconfirmed: >
+      SELECT COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+        AND f.object_id IN (
+          SELECT sf.object_id FROM facts sf
+          JOIN dimensions sd ON sd.id = sf.dimension_id
+          WHERE sd.code = 'subdivision'
+            AND sf.value ILIKE %(subdivision)s)
+
+  # Нащо: «скільки всього по підрозділах» -- одна відповідь замість п'яти
+  # питань. Це і є та таблиця, яку секретар зводить руками.
+  - id: subdivision_breakdown
+    title: Розклад відсутніх по підрозділах на дату
+    examples:
       - Покажи відсутніх по підрозділах
+      - Скільком у відпустці по ротах?
+      - Розклад по підрозділах на сьогодні
+    params: [dims, on_date]
+    answer_hint: >
+      Рядок на підрозділ: назва і число підтверджених. Назвати дату зрізу.
+      Підрозділи без відсутніх у результат не потрапляють -- сказати це, щоб
+      відсутність рядка не читалась як нуль-невідомо.
+    sql: >
+      SELECT sf.value AS subdivision, COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN facts sf ON sf.object_id = f.object_id
+      JOIN dimensions sd ON sd.id = sf.dimension_id AND sd.code = 'subdivision'
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+      GROUP BY sf.value
+      ORDER BY n DESC, sf.value
+
+  # Нащо: підрозділ, якого в штатці немає («4 рота»), мусить давати ЧЕСНУ
+  # відмову, а не нуль. Нуль читався б як «там нікого немає», хоч насправді
+  # такого підрозділу не існує.
+  - id: subdivision_unknown
+    title: Підрозділ, якого немає в штатці
+    blocked: true
+    examples:
+      - Скільки людей у 7 роті у відпустці?
+      - Хто відсутній у танковому батальйоні?
     params: []
     answer_hint: >
-      Відповідь -- дослівно refusal: база не зберігає зв'язок
-      особа-підрозділ, тому чесна відповідь -- «не маю даних про підрозділи»,
-      а не число. Запропонувати перепитати без підрозділу («скільки всього у
-      відпустці»).
+      Дослівний refusal. Причина інша, ніж «немає даних»: сам підрозділ у
+      штатці відсутній, тому нуль був би неправдою.
     refusal: >
-      Не маю даних про підрозділи: база поки не зберігає, хто до якого
-      підрозділу належить, тому порахувати по ротах чи взводах чесно не можу.
-      Можу відповісти по частині загалом — спитайте, наприклад, «скільки
-      людей зараз у відпустці».
+      Такого підрозділу в штатці немає, тому порахувати по ньому не можу —
+      нуль тут означав би «нікого немає», а насправді немає самого підрозділу.
+      У базі є: 1-ша, 2-га і 3-тя механізовані роти, взвод забезпечення,
+      управління батальйону.
 
   # Нащо: розмовний маршрут (етап 3.5 плану) -- привітання, подяка, офтоп.
   # Без нього «дякую» їде у модель на ~43 с або отримує «не знайшла», і

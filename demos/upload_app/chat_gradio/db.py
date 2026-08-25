@@ -354,9 +354,18 @@ def data_coverage():
     global _COVERAGE
     if _COVERAGE is None:
         try:
-            row = _query("SELECT min(valid_from) AS d_from, "
-                         "max(valid_to) AS d_to FROM facts "
-                         "WHERE valid_from IS NOT NULL")[0]
+            # ЛИШЕ виміри відсутностей. Раніше бралися всі факти з періодом --
+            # і коли 25.08 залили штатку, покриття «поїхало» на 2022-03-12
+            # (там дати служби, призначень, контрактів). Підказка почала знову
+            # відправляти людину в порожній період, тільки з іншого боку.
+            # Покриття мусить бути про ТЕ, про що людина питає: відпустки й
+            # відрядження.
+            row = _query("SELECT min(f.valid_from) AS d_from, "
+                         "max(f.valid_to) AS d_to FROM facts f "
+                         "JOIN dimensions d ON d.id = f.dimension_id "
+                         "WHERE f.valid_from IS NOT NULL "
+                         "AND d.code = ANY(%(dims)s)",
+                         {"dims": ABSENCE_DIMS})[0]
             _COVERAGE = (row["d_from"], row["d_to"])
         except Exception:
             _COVERAGE = (None, None)
@@ -367,13 +376,28 @@ def coverage_note(date=None):
     """Рядок про покриття -- або порожній, якщо покриття невідоме.
 
     Якщо дату передано і вона ПОЗА покриттям, це сказано прямо: саме той
-    випадок, коли нуль означає «даних немає», а не «нікого немає»."""
+    випадок, коли нуль означає «даних немає», а не «нікого немає».
+
+    ТИПИ. `date` приходить із чата РЯДКОМ ('2026-05-05'), а з бази -- обʼєктом
+    `datetime.date`. Порівняння рядка з датою в Python кидає TypeError, і на
+    сервері це давало НЕОБРОБЛЕНЕ падіння на питаннях «хто не повернувся 5
+    травня?» -- тобто моя ж правка про чесний нуль ламала відповідь. Знайдено
+    другим адверсарним проходом 25.08. Тому все зводиться до рядків ISO: у них
+    лексикографічне порівняння збігається з хронологічним.
+    """
     d_from, d_to = data_coverage()
     if not d_from or not d_to:
         return ""
-    if date and (date < d_from or date > d_to):
-        return (f"За цю дату в базі даних НЕМАЄ: документи покривають "
-                f"{d_from} — {d_to}. Нуль тут означає «немає даних», а не "
-                f"«нікого не було».")
-    return f"Покриття даних у базі: {d_from} — {d_to}."
+
+    def _iso_str(value):
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+    lo, hi = _iso_str(d_from), _iso_str(d_to)
+    if date:
+        asked = _iso_str(date)
+        if asked < lo or asked > hi:
+            return (f"За цю дату в базі даних НЕМАЄ: документи покривають "
+                    f"{lo} — {hi}. Нуль тут означає «немає даних», а не "
+                    f"«нікого не було».")
+    return f"Покриття даних у базі: {lo} — {hi}."
 
