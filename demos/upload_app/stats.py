@@ -56,6 +56,21 @@ SQL_REVIEW_OPEN = ("SELECT rq.queue_type, COUNT(*) AS n FROM review_queue rq "
                    "WHERE rq.resolved_at IS NULL "
                    "GROUP BY rq.queue_type ORDER BY rq.queue_type")
 
+#: Скільком осіб у реєстрі ще НЕ знайдено відповідника у штатці.
+#:
+#: Навіщо окремо. Аня 26.08: «134 «нова особа» на 300 осіб -- це багато,
+#: зʼясуй». Зʼясувалось: 133 із цих завдань створені 24.08, коли ми заливали
+#: документи, а штатки в базі ще не було. Це ЖУРНАЛ моменту, коли система
+#: вперше побачила прізвище, а не перелік невідомих людей.
+#:
+#: Після заливки штатки (25.08) майже всі ті особи зійшлися з нею -- без
+#: `service_id` лишилось РІВНО ТРИ. Тому на сторінці треба показувати три, а
+#: не 134: інакше цифра лякає і не означає нічого.
+#:
+#: Закрити старі завдання (`resolved_at`) -- запис у базу, тобто зона Андрія.
+SQL_PEOPLE_UNMATCHED = ("SELECT COUNT(*) AS n FROM people "
+                        "WHERE service_id IS NULL")
+
 # Підписи станів і черг українською. Код лишається кодом (він у базі), але на
 # сторінці людина мусить читати слова, а не `unknown_type`.
 DOC_STATUS_LABELS = {
@@ -176,6 +191,7 @@ def db_counters(query=None):
         facts_by_status = ask(SQL_FACTS_BY_STATUS, "status")
         people = ask(SQL_PEOPLE)
         review = ask(SQL_REVIEW_OPEN, "queue_type")
+        unmatched = ask(SQL_PEOPLE_UNMATCHED)
     except Exception as exc:                       # noqa: BLE001
         # Найчастіша причина -- база просто не піднята (ConnectionTimeout) або
         # немає read-only пароля в .env. Обидві -- «недоступна», не «нуль».
@@ -202,6 +218,10 @@ def db_counters(query=None):
         "review_queue": {
             "open_total": sum(review.values()),
             "by_type": review,
+            # Скільком осіб ще немає відповідника у штатці. Саме це число
+            # означає «справді невідомі», а `open_total` -- журнал завдань,
+            # більшість яких створена до появи штатки.
+            "people_unmatched": unmatched,
         },
     }, None
 
