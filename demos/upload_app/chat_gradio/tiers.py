@@ -139,6 +139,16 @@ def _get_model():
         if _MODEL_FAILED or not os.path.exists(MODEL_PATH):
             return None
         try:
+            # Той самий запобіжник, що в пайплайні: на GPU-сервері
+            # llama_cpp без CUDA-рантайму з venv не імпортується взагалі
+            # (див. pipeline/llm/cuda_preload.py). Без цього чат на
+            # сервері МОВЧКИ жив би на правилах: _get_model ловить
+            # Exception і запам'ятовує падіння.
+            try:
+                from pipeline.llm.cuda_preload import preload
+                preload()
+            except Exception:
+                pass
             from llama_cpp import Llama
             # n_gpu_layers з оточення: локально 0 (немає CUDA), на
             # GPU-сервері CHAT_N_GPU_LAYERS=-1 -> усі шари 4B у VRAM.

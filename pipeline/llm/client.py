@@ -50,6 +50,13 @@ class LlamaClient:
     def llm(self):
         with self._lock:
             if self._llm is None:
+                # CUDA-рантайм із venv -- ДО імпорту llama_cpp. На
+                # GPU-сервері без цього імпорт падає цілком
+                # (libcudart.so.12 не знаходиться), тобто моделі немає
+                # взагалі, а не «є, але на процесорі». Розбір -- у
+                # pipeline/llm/cuda_preload.py.
+                from pipeline.llm.cuda_preload import preload
+                preload()
                 from llama_cpp import Llama
                 kwargs = dict(model_path=self.model_path, n_ctx=self.n_ctx,
                               n_gpu_layers=self.n_gpu_layers, chat_format=self.chat_format,
