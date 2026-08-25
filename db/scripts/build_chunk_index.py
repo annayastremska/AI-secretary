@@ -99,14 +99,20 @@ def load_encoder():
     tok = AutoTokenizer.from_pretrained(MODEL_NAME)
     model = AutoModel.from_pretrained(MODEL_NAME)
     model.eval()
-    torch.set_num_threads(max(1, (os.cpu_count() or 4) - 1))
+    # GPU, якщо є. Без цього ембеддинг ЗАПИТУ рахувався на CPU і давав ~4с на
+    # пошук при 0.9с на реранкер -- тобто вузьким місцем був не реранкер, як
+    # я очікував, а власний енкодер.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+    if device == "cpu":
+        torch.set_num_threads(max(1, (os.cpu_count() or 4) - 1))
 
     def encode(texts):
         # mean pooling з урахуванням маски -- саме так тренована e5.
         # CLS-пулінг тут дав би інші вектори, і збіг із запитом просів би
         # без жодної помилки.
         enc = tok(texts, padding=True, truncation=True, max_length=512,
-                  return_tensors="pt")
+                  return_tensors="pt").to(device)
         with torch.no_grad():
             out = model(**enc).last_hidden_state
         mask = enc["attention_mask"].unsqueeze(-1).float()

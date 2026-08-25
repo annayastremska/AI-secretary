@@ -95,10 +95,10 @@ def lexical(cur, query, limit=CANDIDATES, mode="or", scope="procedural"):
     val_sql = "AND d.validity = 'current'" if scope == "procedural" else ""
     cur.execute(f"""
         SELECT ch.id, ch.document_id,
-               ts_rank(to_tsvector('ukrainian', ch.text), {tsq}) AS score
+               ts_rank(ch.tsv, {tsq}) AS score
           FROM document_chunks ch
           JOIN documents d ON d.id = ch.document_id
-         WHERE to_tsvector('ukrainian', ch.text) @@ {tsq}
+         WHERE ch.tsv @@ {tsq}
            {dom_sql}
            {val_sql}
          ORDER BY score DESC
