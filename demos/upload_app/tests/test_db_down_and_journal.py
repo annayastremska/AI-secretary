@@ -97,5 +97,36 @@ def test_id_is_different_per_request(monkeypatch):
     assert len(ids) == 5, ids
 
 
+def test_refusals_also_carry_the_id(monkeypatch):
+    """Знайдено verify_stack на сервері: відмови приходили БЕЗ номера, бо це
+    готові константи -- їхній footer зібрався при імпорті модуля, коли номера
+    ще не існувало. А скаржаться люди саме на відмови («чат відмовив, а
+    чому?»), тобто номер потрібен там найбільше."""
+    monkeypatch.setattr(chat_app, "_answer_inner",
+                        lambda q, h=None: chat_app.ANSWER_REFUSE)
+    out = chat_app.answer("яка завтра погода?")
+    assert "звернення: " in out
+
+
+def test_id_is_added_inside_the_source_block_not_after_state_marker(monkeypatch):
+    """Номер дописується в блок «джерело», а не в кінець тексту: у кінці
+    стоїть службовий маркер стану діалогу, і текст після нього зламав би його
+    читання наступним ходом."""
+    marker = ">>STATE"
+    monkeypatch.setattr(
+        chat_app, "_answer_inner",
+        lambda q, h=None: "Цифра." + chat_app.footer("тест") + marker)
+    out = chat_app.answer("питання")
+    assert out.endswith(marker), out[-80:]
+    assert "звернення: " in out.split("</details>")[0]
+
+
+def test_id_not_duplicated_when_footer_already_has_it(monkeypatch):
+    monkeypatch.setattr(chat_app, "_answer_inner",
+                        lambda q, h=None: "Цифра." + chat_app.footer("тест"))
+    out = chat_app.answer("питання")
+    assert out.count("звернення: ") == 1
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -1370,6 +1370,28 @@ def _request_id():
     return uuid.uuid4().hex[:6]
 
 
+def _with_request_id(text, cid):
+    """Дописати номер звернення у відповідь, якщо його там ще немає.
+
+    Навіщо, якщо footer() і так його ставить. Частина відповідей -- ГОТОВІ
+    КОНСТАНТИ (ANSWER_REFUSE, відмова про підрозділи, «немає норми»): їхній
+    footer зібрався при ІМПОРТІ модуля, коли номера ще не існувало. Заміряно
+    verify_stack на сервері 25.08: саме відмови приходили без номера -- тобто
+    рівно ті відповіді, на які людина і скаржиться («чат відмовив, а чому?»).
+
+    Дописуємо в кінець блоку «джерело», а не окремим рядком у кінці тексту:
+    у кінці стоїть службовий маркер стану діалогу, і текст після нього зламав
+    би його читання наступним ходом.
+    """
+    if not text or "звернення: " in text:
+        return text
+    tail = "</details>"
+    if tail in text:
+        cut = text.rindex(tail)
+        return text[:cut] + f"<br>звернення: {cid}" + text[cut:]
+    return text + f"\n\nзвернення: {cid}"
+
+
 def answer(question, history=None):
     """Обгортка над `_answer_inner`: номер звернення, журнал і ОДНА чесна
     відмова замість технічного винятку, коли база недоступна.
@@ -1390,9 +1412,10 @@ def answer(question, history=None):
         _journal.warning("[%s] база недоступна за %.1f с: %s | питання: %.80s",
                          cid, time.monotonic() - started,
                          type(exc).__name__, question or "")
-        return ANSWER_DB_DOWN
+        return _with_request_id(ANSWER_DB_DOWN, cid)
     finally:
         _CURRENT_ID.reset(token)
+    out = _with_request_id(out, cid)
     _journal.info("[%s] %.1f с | відповідь %d символів | питання: %.80s",
                   cid, time.monotonic() - started, len(out or ""),
                   question or "")
