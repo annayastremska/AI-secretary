@@ -163,8 +163,10 @@ function render(data) {
            " документах з відомою відповіддю", "tile--ok"),
       tile(qm.normative_ok + "/" + qm.normative_total, "нормативних розпізнано",
            "як норм-акт, без фактів про особу"),
-      tile(qm.tests_passed, "тестів проходить",
-           "поведінка коду, включно з випадками, яких у корпусі немає"));
+      tile(qm.tests_passed + " / " + qm.tests_total, "тестів пайплайна",
+           "проходить " + qm.tests_passed + ", падає " + qm.tests_failed +
+           ", очікуваних провалів (xfail) " + qm.tests_xfailed +
+           ". Тести самої апки — окремий набір, у це число не входять"));
     $("quality-note").textContent =
       "Заміряно " + (qm.measured_at || "?").replace("T", " ") +
       " приладом eval/evaluate на корпусах, де правильна відповідь відома " +

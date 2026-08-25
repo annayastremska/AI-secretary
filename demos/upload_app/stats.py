@@ -307,7 +307,19 @@ def quality_metrics(path=None):
         "per_corpus": per_corpus,
         "normative_ok": normative.get("confirmed_normative"),
         "normative_total": normative.get("documents"),
+        # Тести пайплайна й приладу: з БАЗОВОЇ ЛІНІЇ, тобто рівно ті
+        # цифри, проти яких щодня йде перевірка «не ламає». Знаменник
+        # обовʼязковий: «296 проходить» без «із 297» -- це число без
+        # сенсу (Аня 26.08 спитала саме це).
+        # xfail -- очікуваний провал: тест, який навмисно фіксує ще не
+        # зроблене. Він НЕ падіння, але й не успіх, тому окремо.
         "tests_passed": tests.get("passed"),
+        "tests_failed": tests.get("failed"),
+        "tests_xfailed": tests.get("xfailed"),
+        "tests_total": (sum(v for v in (tests.get("passed"),
+                                        tests.get("failed"),
+                                        tests.get("xfailed"))
+                            if v) or None),
         "measured_at": (datetime.datetime.fromtimestamp(os.path.getmtime(path))
                         .replace(microsecond=0).isoformat()
                         if os.path.exists(path) else None),
