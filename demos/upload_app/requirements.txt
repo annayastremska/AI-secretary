@@ -15,8 +15,34 @@ gradio
 # chat_gradio/vector_route.py). torch/transformers уже стоять у оточенні
 # пайплайна -- extra [local] нових важких залежностей не тягне.
 # Версія ЗАКРІПЛЕНА: заміри encoder-ів і поріг 0.92
-# (docs/research/2026-08-25_encoder-measurement.md) зняті саме на 0.1.2, а
+# (docs/research/2026-08-25_encoder-measurement.md) зняті саме на ній, а
 # правило агрегації балів у цієї бібліотеки міняли між версіями. Нова версія
 # перед демо = невідомий роутер, тобто наші цифри перестають бути про той
 # код, що працює.
-semantic-router[local]==0.1.2
+#
+# 0.1.16, а не 0.1.2: `semantic_router.__version__` брехливий -- у коді
+# бібліотеки лежить застарілий літерал "0.1.2", тоді як справжня версія
+# (`importlib.metadata.version`) 0.1.16. Спершу я закріпила по атрибуту й
+# фактично прописала ДОВНГРЕЙД. Версію тепер беремо лише з метаданих пакета.
+semantic-router[local]==0.1.16
+
+# ─── ПАСТКА, через яку на GPU-сервері зникає прискорення (заміряно 25.08) ───
+#
+# Extra [local] у semantic-router тягне СВІЙ llama-cpp-python -- звичайне
+# колесо з PyPI, зібране БЕЗ CUDA. На машині, де вже стояла CUDA-збірка, pip
+# її тихо замінює: `llama_supports_gpu_offload()` стає False, і виклик моделі
+# їде 43 с замість 0.21 с. Нічого не падає, у логах чисто -- просто в 200
+# разів повільніше. Саме так ми й втратили прискорення, не помітивши.
+#
+# Тому на GPU-машині ПІСЛЯ цього файла обов'язковий крок:
+#
+#   pip install --force-reinstall --no-cache-dir llama-cpp-python==0.3.16 \
+#       --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+#
+# Перевірка, що спрацювало (одна команда, не «на око»):
+#
+#   python -c "import sys;sys.path.insert(0,'.');\
+#   from pipeline.llm.cuda_preload import preload;preload();\
+#   from llama_cpp import llama_cpp as c;print(c.llama_supports_gpu_offload())"
+#
+# Мусить бути True. На ноуті без CUDA -- False, і це нормально.
