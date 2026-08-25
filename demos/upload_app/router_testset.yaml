@@ -1,0 +1,540 @@
+# Тест-сет маршрутизації «питання -> очікуваний шаблон каталогу»
+# (етап 3 плану docs/tasks/2026-08-24_app-chat-plan.md, задача перед 3.2:
+# тест-сет складається ДО вибору encoder-а, щоб вибір був заміром, не смаком).
+#
+# Формат рядка: q (питання), expected (id шаблону query_catalog.yaml),
+# group -- звідки питання:
+#   example    -- дослівний приклад із каталогу. Це sanity: приклад мусить
+#                 влучати у СВІЙ шаблон. При замірі міряється leave-one-out
+#                 (сам приклад виймається з індексу -- він не має відповідати
+#                 сам собі)
+#   paraphrase -- перефразування, якого в каталозі немає
+#   typo       -- одруківки («відпуска», «повертаеться»)
+#   colloquial -- розмовні/суржикові форми («скіки», «шо по...»)
+#   trap       -- питання-пастка на сусідній шаблон (скільки/хто для того
+#                 самого стану; підрозділи; провенанс проти стану особи)
+#   smalltalk  -- привітання/подяка/офтоп -> розмовний маршрут
+#
+# Правило складання: у кожного не-example питання рівно ОДИН захисний
+# expected; питань, де два шаблони однаково правильні (сіра зона
+# count_by_state_on_date проти absent_breakdown_on_date), у не-example групи
+# навмисно не брали -- пастки складені там, де правильна відповідь
+# однозначна.
+#
+# Споживач: demos/upload_app/measure_router.py (замір encoder-ів) і
+# подальші прогони приймання. Від бібліотеки роутера файл не залежить.
+
+questions:
+
+  - q: "Скільки людей зараз у відпустці?"
+    expected: count_by_state_on_date
+    group: example
+
+  - q: "Скільки людей у відпустці на 6 травня 2026?"
+    expected: count_by_state_on_date
+    group: example
+
+  - q: "Скільки зараз у відрядженні?"
+    expected: count_by_state_on_date
+    group: example
+
+  - q: "Скільки людей відсутні сьогодні?"
+    expected: count_by_state_on_date
+    group: example
+
+  - q: "Скільки людей були у відпустці у травні 2026?"
+    expected: count_by_state_period
+    group: example
+
+  - q: "Скільки відряджень було з 1 по 31 травня?"
+    expected: count_by_state_period
+    group: example
+
+  - q: "Скільки людей їздили у відрядження цього місяця?"
+    expected: count_by_state_period
+    group: example
+
+  - q: "Хто зараз у відпустці?"
+    expected: list_by_state
+    group: example
+
+  - q: "Хто був у відпустці 6 травня 2026?"
+    expected: list_by_state
+    group: example
+
+  - q: "Хто був у відрядженні у травні 2026?"
+    expected: list_by_state
+    group: example
+
+  - q: "Хто відсутній сьогодні?"
+    expected: list_by_state
+    group: example
+
+  - q: "Що відомо про Усика?"
+    expected: person_status
+    group: example
+
+  - q: "Де зараз Рубець?"
+    expected: person_status
+    group: example
+
+  - q: "Стан Омеляна Володимира"
+    expected: person_status
+    group: example
+
+  - q: "Покажи документ № 109"
+    expected: doc_by_number
+    group: example
+
+  - q: "Що в документі №204?"
+    expected: doc_by_number
+    group: example
+
+  - q: "Документ 473"
+    expected: doc_by_number
+    group: example
+
+  - q: "Скільки документів чекають перевірки?"
+    expected: review_queue_count
+    group: example
+
+  - q: "Скільки в черзі рев'ю?"
+    expected: review_queue_count
+    group: example
+
+  - q: "Що в черзі перевірки?"
+    expected: review_queue_count
+    group: example
+
+  - q: "Скільки непідтверджених фактів?"
+    expected: unconfirmed_count
+    group: example
+
+  - q: "Скільки записів не підтверджено?"
+    expected: unconfirmed_count
+    group: example
+
+  - q: "Скільки чернеток у базі?"
+    expected: unconfirmed_count
+    group: example
+
+  - q: "Скільки документів у базі?"
+    expected: documents_count
+    group: example
+
+  - q: "Скільки документів оброблено?"
+    expected: documents_count
+    group: example
+
+  - q: "Скільки всього записів у системі?"
+    expected: documents_count
+    group: example
+
+  - q: "Скільки відпускних квитків у базі?"
+    expected: count_by_doc_type
+    group: example
+
+  - q: "Скільки посвідчень про відрядження оброблено?"
+    expected: count_by_doc_type
+    group: example
+
+  - q: "Яких документів у нас найбільше?"
+    expected: count_by_doc_type
+    group: example
+
+  - q: "Скільки щорічних відпусток, а скільки за сімейними обставинами?"
+    expected: count_by_reason
+    group: example
+
+  - q: "Які види відпусток були цього місяця?"
+    expected: count_by_reason
+    group: example
+
+  - q: "З яких причин люди відсутні?"
+    expected: count_by_reason
+    group: example
+
+  - q: "Хто повертається завтра?"
+    expected: returning_on_date
+    group: example
+
+  - q: "Хто виходить із відпустки 31 серпня?"
+    expected: returning_on_date
+    group: example
+
+  - q: "У кого закінчується відрядження сьогодні?"
+    expected: returning_on_date
+    group: example
+
+  - q: "Скільки людей немає в частині сьогодні?"
+    expected: absent_breakdown_on_date
+    group: example
+
+  - q: "Скільки всього відсутніх зараз і чому?"
+    expected: absent_breakdown_on_date
+    group: example
+
+  - q: "Скільки людей поза частиною на 28 серпня?"
+    expected: absent_breakdown_on_date
+    group: example
+
+  - q: "Хто поїхав у відпустку з родиною?"
+    expected: with_co_travelers
+    group: example
+
+  - q: "У кого в відпустці є супутники?"
+    expected: with_co_travelers
+    group: example
+
+  - q: "Хто виїхав разом із дружиною чи дітьми?"
+    expected: with_co_travelers
+    group: example
+
+  - q: "Кому видали ВПД?"
+    expected: with_travel_document
+    group: example
+
+  - q: "Хто їде з перевізними документами?"
+    expected: with_travel_document
+    group: example
+
+  - q: "Скільки ВПД видано цього місяця?"
+    expected: with_travel_document
+    group: example
+
+  - q: "Хто відсутній за непідтвердженими документами?"
+    expected: drafts_list
+    group: example
+
+  - q: "Покажи чернетки про відпустки"
+    expected: drafts_list
+    group: example
+
+  - q: "Які записи про відсутність ще не підтверджені?"
+    expected: drafts_list
+    group: example
+
+  - q: "У яких документах суперечливі дати?"
+    expected: date_conflict_docs
+    group: example
+
+  - q: "Де система побачила помилку в датах?"
+    expected: date_conflict_docs
+    group: example
+
+  - q: "Чи є документи з неможливими періодами?"
+    expected: date_conflict_docs
+    group: example
+
+  - q: "Звідки ти знаєш, що Гавриш у відрядженні?"
+    expected: fact_provenance
+    group: example
+
+  - q: "Чому ти вважаєш, що Малишко у відпустці?"
+    expected: fact_provenance
+    group: example
+
+  - q: "На підставі чого ця відповідь про Юрчук?"
+    expected: fact_provenance
+    group: example
+
+  - q: "Які нормативні документи є в базі?"
+    expected: normative_list
+    group: example
+
+  - q: "Покажи перелік наказів та інструкцій"
+    expected: normative_list
+    group: example
+
+  - q: "На які акти ти спираєшся?"
+    expected: normative_list
+    group: example
+
+  - q: "Яка процедура оформлення відпустки?"
+    expected: normative_search
+    group: example
+
+  - q: "Що каже інструкція про перевізні документи?"
+    expected: normative_search
+    group: example
+
+  - q: "Чим регулюється направлення у відрядження?"
+    expected: normative_search
+    group: example
+
+  - q: "Скільки документів не вдалося обробити?"
+    expected: failed_docs_count
+    group: example
+
+  - q: "Чи були документи, які система не змогла прочитати?"
+    expected: failed_docs_count
+    group: example
+
+  - q: "Скільки файлів упало при обробці?"
+    expected: failed_docs_count
+    group: example
+
+  - q: "Скільки людей у 2 роті зараз у відпустці?"
+    expected: subdivision_blocked
+    group: example
+
+  - q: "Хто відсутній у першому взводі?"
+    expected: subdivision_blocked
+    group: example
+
+  - q: "Покажи відсутніх по підрозділах"
+    expected: subdivision_blocked
+    group: example
+
+  - q: "Привіт!"
+    expected: smalltalk
+    group: example
+
+  - q: "Добрий день"
+    expected: smalltalk
+    group: example
+
+  - q: "Дякую за допомогу"
+    expected: smalltalk
+    group: example
+
+  - q: "Як справи?"
+    expected: smalltalk
+    group: example
+
+  - q: "Хто ти і що ти вмієш?"
+    expected: smalltalk
+    group: example
+
+  - q: "Яка сьогодні погода?"
+    expected: smalltalk
+    group: example
+
+  - q: "Розкажи щось цікаве"
+    expected: smalltalk
+    group: example
+
+  - q: "До побачення, гарного дня"
+    expected: smalltalk
+    group: example
+  # ── paraphrase: перефразування, яких немає в каталозі ──────────────────────
+
+  - q: "Скільки народу просто зараз у відпустках?"
+    expected: count_by_state_on_date
+    group: paraphrase
+
+  - q: "Скільки осіб було у відрядженні в липні 2026?"
+    expected: count_by_state_period
+    group: paraphrase
+
+  - q: "Перелічи всіх, хто зараз у відрядженні"
+    expected: list_by_state
+    group: paraphrase
+
+  - q: "Дай список відпускників на сьогодні"
+    expected: list_by_state
+    group: paraphrase
+
+  - q: "Що там по Усику?"
+    expected: person_status
+    group: paraphrase
+
+  - q: "Розкажи все, що знаєш про Малишка"
+    expected: person_status
+    group: paraphrase
+
+  - q: "Відкрий мені документ номер 204"
+    expected: doc_by_number
+    group: paraphrase
+
+  - q: "Скільки записів висить у черзі на перевірку?"
+    expected: review_queue_count
+    group: paraphrase
+
+  - q: "Скільки паперів система не подужала обробити?"
+    expected: failed_docs_count
+    group: paraphrase
+
+  - q: "Хто поїхав відпочивати не сам, а з сім'єю?"
+    expected: with_co_travelers
+    group: paraphrase
+
+  - q: "Кому виписали перевізні документи на дорогу?"
+    expected: with_travel_document
+    group: paraphrase
+
+  - q: "Які накази та інструкції зберігаються в системі?"
+    expected: normative_list
+    group: paraphrase
+
+  - q: "Де прописано порядок надання відпустки військовослужбовцю?"
+    expected: normative_search
+    group: paraphrase
+
+  - q: "Хто має вийти з відпустки завтра?"
+    expected: returning_on_date
+    group: paraphrase
+
+  # ── typo: одруківки ─────────────────────────────────────────────────────────
+
+  - q: "Скільки людей зараз у відпуске?"
+    expected: count_by_state_on_date
+    group: typo
+
+  - q: "Хто був у відряджені у травні 2026?"
+    expected: list_by_state
+    group: typo
+
+  - q: "Скільки докуменів у базі?"
+    expected: documents_count
+    group: typo
+
+  - q: "Хто повертаеться завтра?"
+    expected: returning_on_date
+    group: typo
+
+  - q: "Скільки непідтвержених фактів?"
+    expected: unconfirmed_count
+    group: typo
+
+  - q: "Покажи чорнетки про відпустки"
+    expected: drafts_list
+    group: typo
+
+  # ── colloquial: розмовні й суржикові форми ──────────────────────────────────
+
+  - q: "скіки людей нема в частині"
+    expected: absent_breakdown_on_date
+    group: colloquial
+
+  - q: "хто щас у відпустці"
+    expected: list_by_state
+    group: colloquial
+
+  - q: "скіки у нас зараз відряджених"
+    expected: count_by_state_on_date
+    group: colloquial
+
+  - q: "шо там по черзі перевірки?"
+    expected: review_queue_count
+    group: colloquial
+
+  - q: "кого нема на місці сьогодні"
+    expected: list_by_state
+    group: colloquial
+
+  - q: "шо за документ 109, покажи"
+    expected: doc_by_number
+    group: colloquial
+
+  - q: "скіки всього бумаг у системі"
+    expected: documents_count
+    group: colloquial
+
+  - q: "хто відпочиває з жінкою і дітьми"
+    expected: with_co_travelers
+    group: colloquial
+
+  - q: "звідки ти взяв, шо Усик у відпустці?"
+    expected: fact_provenance
+    group: colloquial
+
+  # ── trap: пастки на сусідні шаблони ─────────────────────────────────────────
+
+  # «хто» проти «скільки» для того самого стану
+  - q: "Назви поіменно тих, хто зараз у відпустці"
+    expected: list_by_state
+    group: trap
+
+  - q: "Мені не список, а число: скільки у відпустці на сьогодні?"
+    expected: count_by_state_on_date
+    group: trap
+
+  # повернення проти списку стану
+  - q: "Скільки людей повертається з відпустки завтра?"
+    expected: returning_on_date
+    group: trap
+
+  # підрозділи проти звичайного підрахунку/списку
+  - q: "Скільки людей із 3 взводу зараз у відпустці?"
+    expected: subdivision_blocked
+    group: trap
+
+  - q: "Хто відсутній у нашій роті?"
+    expected: subdivision_blocked
+    group: trap
+
+  # чернетки-перелік проти чернеток-числа
+  - q: "Хто саме відсутній за непідтвердженими записами?"
+    expected: drafts_list
+    group: trap
+
+  - q: "Скільки всього чернеток накопичилось?"
+    expected: unconfirmed_count
+    group: trap
+
+  # тип документа проти стану людей
+  - q: "Скільки посвідчень про відрядження лежить у базі?"
+    expected: count_by_doc_type
+    group: trap
+
+  - q: "Скільки відряджень було у травні 2026?"
+    expected: count_by_state_period
+    group: trap
+
+  # причини проти простого підрахунку
+  - q: "Яких причин відпусток найбільше?"
+    expected: count_by_reason
+    group: trap
+
+  # провенанс проти стану особи (те саме прізвище, що в прикладі
+  # fact_provenance -- перевіряє, що роутер дивиться на суть питання)
+  - q: "Де зараз Юрчук?"
+    expected: person_status
+    group: trap
+
+  - q: "Чому ти вирішив, що Рубець у відпустці?"
+    expected: fact_provenance
+    group: trap
+
+  # ── smalltalk: розмовний маршрут (нові, поза прикладами каталогу) ───────────
+
+  - q: "Доброго ранку!"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "дякую"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "Дуже дякую, ти мені допоміг!"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "як ти?"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "Яка завтра погода в Києві?"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "привіт, є хтось живий?"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "добрий вечір"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "ти бот чи людина?"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "гарного дня!"
+    expected: smalltalk
+    group: smalltalk
+
+  - q: "Розкажи анекдот"
+    expected: smalltalk
+    group: smalltalk

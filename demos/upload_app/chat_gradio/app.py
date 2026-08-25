@@ -53,6 +53,11 @@ import db  # noqa: E402  (сім функцій стику, docs/contracts/2026-
 # і ярусу 2.
 import tiers as tier_chat  # noqa: E402
 
+# Векторний ярус (етап 3 плану): питання -> найближчий шаблон каталогу за
+# прикладами, мілісекунди на CPU, без виклику моделі. Живе окремим модулем
+# поруч; без ваг encoder-а чат працює без нього (деградація, не падіння).
+import vector_route as tier_vector  # noqa: E402
+
 WARN_FALLBACK = "⚠️ локальна модель недоступна, маршрут обрано правилами"
 CLARIFY_MARK = "🔎 уточнення"
 
@@ -109,6 +114,13 @@ def warm_up():
                 "Поверни JSON {\"ok\": true}.", "ок",
                 {"type": "object", "properties": {"ok": {"type": "boolean"}},
                  "required": ["ok"], "additionalProperties": False})
+    except Exception:
+        pass
+    try:
+        # векторний ярус: збудувати маршрути з каталогу один раз при старті
+        # (завантаження encoder-а -- секунди; перший користувач не чекає).
+        # Немає ваг -> warm() поверне False і запише попередження в лог.
+        tier_vector.warm()
     except Exception:
         pass
 
@@ -938,11 +950,13 @@ def _as_report(text):
 # ── Додаткові дороги нашої апки: каталог SQL-шаблонів і ярус 2 ──────────────
 #
 # Викликаються, коли сім функцій не впорались (dispatch повернув None) або
-# маршрут -- «відмова». Порядок -- двоярусна маршрутизація з tiers.py:
+# маршрут -- «відмова». Порядок -- маршрутизація з tiers.py + vector_route.py:
 # спершу каталог query_catalog.yaml правилами (SQL написаний людиною,
-# звірений з базою), потім модель-класифікатор у ЗАКРИТИЙ перелік шаблонів
-# того ж каталогу, потім вільний SELECT під рейками (read-only сесія,
-# валідатор, LIMIT 200, таймаут 5 с, SQL у згортці).
+# звірений з базою), потім ВЕКТОРНИЙ ярус (найближчий шаблон за прикладами
+# каталогу, мілісекунди, без моделі -- етап 3 плану), потім
+# модель-класифікатор у ЗАКРИТИЙ перелік шаблонів того ж каталогу, потім
+# вільний SELECT під рейками (read-only сесія, валідатор, LIMIT 200,
+# таймаут 5 с, SQL у згортці).
 # Не склалось -- None, і вище лишається чесна відмова.
 
 
@@ -970,6 +984,47 @@ def _catalog_tier(question):
     except Exception:
         return None
     return text + _fmt_source_block(source, f"каталог шаблонів ({tid})")
+
+
+def _vector_tier(question):
+    """Векторний ярус (chat_gradio/vector_route.py, задача 3.3): питання ->
+    найближчий шаблон каталогу за прикладами, мілісекунди, без моделі.
+    Вектори дають лише id шаблону -- параметри витягуються правилами
+    (tiers.params_for_template). None -> питання їде далі (модель -> ярус
+    2): нижче порога, ярус вимкнено (немає ваг) або обов'язковий параметр
+    не витягся."""
+    # агрегати (середнє, мін/макс...) каталог не вміє -- те саме правило,
+    # що в rules_route: пропустити в ярус 2, а не тягнути в схожий шаблон
+    if tier_chat._AGGREGATE.search(question.lower()):
+        return None
+    try:
+        tid, score = tier_vector.vector_route(question)
+    except Exception:
+        return None
+    if tid is None or tid not in tier_chat._CATALOG:
+        return None
+    t = tier_chat._CATALOG[tid]
+    if tid == "smalltalk":
+        # розмовний маршрут (задача 3.5): фіксована відповідь кодом --
+        # без SQL, без бази і без моделі («дякую» не їде в 27B на 43 с)
+        return (_esc(t["refusal"].strip())
+                + _fmt_source_block(
+                    [f"шаблон каталогу: smalltalk ({t['title']})",
+                     "SQL немає: розмовна фраза, відповідь фіксована кодом"],
+                    f"розмовний маршрут (вектори, бал {score:.2f})"))
+    try:
+        params = tier_chat.params_for_template(tid, question)
+    except Exception:
+        return None
+    if params is None:
+        return None
+    try:
+        text, source = tier_chat.run_template(tid, params)
+    except Exception:
+        return None
+    return text + _fmt_source_block(
+        source, f"каталог шаблонів, обрано векторним ярусом "
+                f"({tid}, бал {score:.2f})")
 
 
 # Позначка «модельна відмова»: питання не про дані бази -- ярус 2 після
@@ -1029,12 +1084,20 @@ _DBISH = re.compile(
 
 
 def _extra_tiers(question):
-    """Порядок доріг з tiers.py: каталог правилами → модель-класифікатор у
-    закритий перелік → вільний SELECT (ярус 2). Модельна «відмова» зупиняє
-    перебір: питання не про дані бази, ярус 2 не смикаємо."""
+    """Порядок доріг (етап 3 плану): каталог правилами → ВЕКТОРИ (найближчий
+    шаблон за прикладами, мс) → модель-класифікатор у закритий перелік →
+    вільний SELECT (ярус 2). Векторний ярус стоїть ДО гейта _DBISH: він
+    безкоштовний, а розмовні фрази («дякую») інакше не дійшли б до свого
+    маршруту. Модельна «відмова» зупиняє перебір: питання не про дані бази,
+    ярус 2 не смикаємо."""
     out = _catalog_tier(question)
-    if out is not None or not _DBISH.search(question):
+    if out is not None:
         return out
+    out = _vector_tier(question)
+    if out is not None:
+        return out
+    if not _DBISH.search(question):
+        return None
     out = _model_catalog_tier(question)
     if out is _MODEL_REFUSED:
         return None

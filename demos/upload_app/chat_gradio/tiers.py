@@ -457,6 +457,48 @@ def model_route(question):
     return tid, params
 
 
+def params_for_template(template_id, question):
+    """Параметри шаблону для маршруту БЕЗ моделі (векторний ярус, задача
+    3.3 плану): вектори дають лише id шаблону, параметри витягуються тими
+    самими правилами, що в rules_route, з тими самими дефолтами, що в
+    генерик-заповненні model_route (дата -> сьогодні; dims без слова стану
+    -> absent, найчесніше широке тлумачення; query -> текст питання,
+    їде ЛИШЕ параметром). -> params або None: обов'язковий параметр (ПІБ,
+    номер документа) з питання не витягся -- маршрут чесно віддається
+    далі (модель -> фолбек), а не виконується з вигаданим параметром."""
+    t = _CATALOG[template_id]
+    if t.get("blocked"):
+        return {}
+    need = t.get("params") or []
+    on_date, date_from, date_to = extract_dates(question)
+    today = datetime.date.today()
+    params = {}
+    if "dims" in need:
+        st = extract_state(question) or "absent"
+        params["dims"] = STATE_DIMS[st]
+        params["state"] = st
+    if "on_date" in need:
+        params["on_date"] = on_date or today
+    if "date_from" in need:
+        params["date_from"] = date_from or on_date or today
+    if "date_to" in need:
+        params["date_to"] = date_to or on_date or today
+    if "name_pattern" in need:
+        name = extract_name(question)
+        if not name:
+            return None
+        params["name_pattern"] = f"%{name}%"
+        params["name"] = name
+    if "doc_number" in need:
+        num = extract_doc_number(question)
+        if not num:
+            return None
+        params["doc_number"] = num
+    if "query" in need:
+        params["query"] = question
+    return params
+
+
 # ── Склад відповіді (формує КОД): цифра/список -> дата зрізу -> знаменник ->
 #    непідтверджені окремо -> джерело ─────────────────────────────────────────
 

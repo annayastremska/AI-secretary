@@ -723,6 +723,9 @@ def build_checks(ctx):
             expected=lambda rs: exp_failed(rs, ctx),
             got=got_first_row),
         "subdivision_blocked": dict(kind="blocked", params={}),
+        # розмовний маршрут (етап 3.5): SQL немає за задумом, як у
+        # subdivision_blocked -- перевіряється blocked + refusal
+        "smalltalk": dict(kind="blocked", params={}),
     }
 
 

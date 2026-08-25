@@ -9,3 +9,9 @@ python-multipart
 psycopg[binary]
 PyYAML
 gradio
+# Векторний ярус роутера (етап 3 плану): маршрути з examples каталогу,
+# encoder локальний (HuggingFaceEncoder; ПАСТКА: дефолтний encoder
+# бібліотеки -- платний OpenAI, у нас він перевизначений у
+# chat_gradio/vector_route.py). torch/transformers уже стоять у оточенні
+# пайплайна -- extra [local] нових важких залежностей не тягне.
+semantic-router[local]
