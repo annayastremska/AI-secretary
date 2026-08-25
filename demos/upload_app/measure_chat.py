@@ -188,17 +188,37 @@ def main():
                          "текст": (text or "")[:120]})
 
     # ── зведення ─────────────────────────────────────────────────────────────
+    # Головне розбиття -- НЕ за назвою дороги, а за тим, чи викликали модель:
+    # саме так сформульовані критерії Ш1 і Ш2. Дороги «підрахунок» і
+    # «довідник» ходять до моделі не завжди, і за підписом це не видно.
+    print("\n=== час проти критеріїв приймання ===")
+    for used, limit, label in ((False, LIMIT_NO_MODEL_S, "БЕЗ моделі (Ш1)"),
+                               (True, LIMIT_WITH_MODEL_S, "З моделлю (Ш2)")):
+        times = [r["секунд"] for r in rows if r.get("з_моделлю") is used]
+        if not times:
+            print(f"  {label}: питань немає")
+            continue
+        over = [t for t in times if t > limit]
+        print(f"  {label:16} {len(times):3} питань | медіана "
+              f"{statistics.median(times):6.2f} с | максимум {max(times):6.2f} с"
+              f" | ліміт {limit:g} с | поза лімітом: {len(over)}")
+        if over:
+            worst = sorted((r for r in rows if r.get("з_моделлю") is used),
+                           key=lambda r: -r["секунд"])[:5]
+            for r in worst:
+                print(f"      {r['секунд']:6.2f} с | {r['ярус'][:32]:32} | "
+                      f"«{r['питання'][:40]}»")
+
     by_tier = {}
     for r in rows:
-        by_tier.setdefault(r["ярус"], []).append(r["секунд"])
-    print("\n=== час за ярусами ===")
-    for tier, times in sorted(by_tier.items(), key=lambda kv: -len(kv[1])):
-        limit = (LIMIT_WITH_MODEL_S if tier in ("модель", "вільний SQL")
-                 else LIMIT_NO_MODEL_S)
-        over = [t for t in times if t > limit]
-        print(f"  {tier:12} {len(times):3} питань | медіана "
-              f"{statistics.median(times):6.2f} с | максимум {max(times):6.2f} с"
-              f" | поза лімітом {limit:g} с: {len(over)}")
+        by_tier.setdefault(r["ярус"], []).append(r)
+    print("\n=== час за дорогами (довідково) ===")
+    for tier, items in sorted(by_tier.items(), key=lambda kv: -len(kv[1])):
+        times = [i["секунд"] for i in items]
+        n_model = sum(1 for i in items if i.get("з_моделлю"))
+        print(f"  {tier[:34]:34} {len(times):3} | медіана "
+              f"{statistics.median(times):6.2f} с | макс {max(times):6.2f} с | "
+              f"з моделлю {n_model}")
 
     violations = [r for r in rows if r["порушення"]]
     print(f"\n=== правила продукту ===\n  порушень: {len(violations)} "
