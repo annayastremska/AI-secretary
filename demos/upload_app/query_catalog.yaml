@@ -770,14 +770,17 @@ templates:
       SELECT dc.id, dc.validity,
              split_part(btrim(dc.text_content), E'\n', 1) AS title_line,
              MAX(ts_rank(c.tsv,
-                 websearch_to_tsquery('ukrainian', %(query)s))) AS score,
+                 websearch_to_tsquery('ukrainian',
+                 regexp_replace(btrim(%(query)s), '\s+', ' or ', 'g')))) AS score,
              left(btrim((array_agg(c.text ORDER BY ts_rank(c.tsv,
-                 websearch_to_tsquery('ukrainian', %(query)s)) DESC))[1]),
+                 websearch_to_tsquery('ukrainian',
+                 regexp_replace(btrim(%(query)s), '\s+', ' or ', 'g'))) DESC))[1]),
                  700) AS snippet
       FROM document_chunks c
       JOIN documents dc ON dc.id = c.document_id
       WHERE dc.domain = 'normative'
-        AND c.tsv @@ websearch_to_tsquery('ukrainian', %(query)s)
+        AND c.tsv @@ websearch_to_tsquery('ukrainian',
+                 regexp_replace(btrim(%(query)s), '\s+', ' or ', 'g'))
       GROUP BY dc.id, dc.validity, dc.text_content
       ORDER BY score DESC
       LIMIT 3
