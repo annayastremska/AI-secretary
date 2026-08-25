@@ -803,12 +803,27 @@ def _people(n):
     return _plural(n, "особа", "особи", "осіб")
 
 
+#: Параметри, які МОЖНА передати в SQL шаблону -- явний перелік, не «усе, що
+#: прийшло». Причина: у params їдуть і службові значення (`state`), яких у
+#: жодному запиті немає, і psycopg на зайвий іменований параметр не скаржиться,
+#: а на ВІДСУТНІЙ -- падає. Тому додавати сюди новий параметр треба разом із
+#: шаблоном, який його вживає.
+#:
+#: `query` -- тема нормативного пошуку: текст їде ЛИШЕ іменованим параметром у
+#: websearch_to_tsquery, ніколи в рядок SQL.
+#: `subdivision` -- додано 25.08 разом із шаблонами підрозділів. Забути його
+#: тут означало «query parameter missing: subdivision», і саме це сталося:
+#: шаблон падав, виняток глушився вище, і питання тихо їхало на стару дорогу
+#: просити дату. Тобто пропущений рядок тут виглядав як «чат не розуміє
+#: питання».
+_SQL_PARAM_NAMES = ("dims", "on_date", "date_from", "date_to", "name_pattern",
+                    "doc_number", "query", "subdivision")
+
+
 def _sql_params(template_id, params):
     t = _CATALOG[template_id]
-    # "query" -- тема нормативного пошуку (normative_search): текст їде ЛИШЕ
-    # іменованим параметром у websearch_to_tsquery, ніколи в рядок SQL
-    return {k: v for k, v in params.items() if k in ("dims", "on_date",
-            "date_from", "date_to", "name_pattern", "doc_number", "query")}, t
+    return {k: v for k, v in params.items()
+            if k in _SQL_PARAM_NAMES}, t
 
 
 def _fmt_period(r):
