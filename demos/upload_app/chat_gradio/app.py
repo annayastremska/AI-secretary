@@ -32,13 +32,19 @@
 #   - Документи в нашій базі -- травень 2026: якщо рік не названо,
 #     підставляється 2026 (правило стенду доречне й для нашої бази).
 
+import contextvars
 import datetime
 import difflib
+import logging
 import os
 import sys
 import json
 import re
 import threading
+import time
+import uuid
+
+import psycopg
 
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
 
@@ -407,6 +413,11 @@ def rules_route(question):
 _esc = tier_chat._esc
 
 
+#: Номер поточного звернення -- у ContextVar, а не параметром через двадцять
+#: функцій: footer() кличеться з десятка місць, і протягувати id крізь усі
+#: означало б переписати їх усі заради одного рядка.
+_CURRENT_ID = contextvars.ContextVar("chat_request_id", default=None)
+
 def footer(route, source="—", cut=None):
     """Джерело не зникає (правило ТЗ #52), але й не лізе поперед відповіді:
     перший екран — цифра й пояснення, посилання розгортається кліком.
@@ -417,6 +428,13 @@ def footer(route, source="—", cut=None):
     lines = [f"джерело: {_esc(source)}", f"дорога: {route}"]
     if cut:
         lines.insert(1, _esc(cut))
+    # Номер звернення (етап 5): по ньому в журналі знаходиться саме цей хід.
+    # Живе тут, а не окремим рядком у кінці відповіді, навмисно: у кінці вже
+    # стоїть службовий маркер стану діалогу, і дописувати після нього означало
+    # б ламати його читання наступним ходом.
+    cid = _CURRENT_ID.get()
+    if cid:
+        lines.append(f"звернення: {cid}")
     return ("\n\n<details class=\"src\"><summary>джерело</summary>"
             + "<br>".join(lines) + "</details>")
 
@@ -1123,7 +1141,7 @@ def _extra_tiers(question):
     return _tier2_tier(question)
 
 
-def answer(question, history=None):
+def _answer_inner(question, history=None):
     question = (question or "").strip()
     if not question:
         return "Поставте питання." + footer("відмова")
@@ -1323,6 +1341,61 @@ def answer(question, history=None):
     if route == "підрахунок" and params is not None:
         # у кінці, щоб не зачіпати startswith-перевірки вище
         out += _state_marker(params)
+    return out
+
+
+# ── Журнал звернень і номер звернення (етап 5) ───────────────────────────────
+#
+# Навіщо номер. На демо й у пілоті людина каже «чат відповів дивно», і без
+# номера це нерозв'язна задача: у логах десятки питань, а яке саме -- невідомо.
+# Номер видно у блоці «джерело» кожної відповіді, і по ньому в журналі
+# знаходиться рівно той хід: питання, дорога, час, чим закінчилось.
+#
+# Навіщо журнал саме такий. Він пише РЯДОК НА ХІД, а не дамп: питання (обрізане),
+# дорога, тривалість, довжина відповіді. Персональних даних із бази в журнал не
+# їде -- лише те, що людина сама написала, і те, як система це обробила.
+_journal = logging.getLogger("chat.journal")
+
+ANSWER_DB_DOWN = (
+    "База зараз недоступна, тому відповісти не можу. Це не «нічого не "
+    "знайшлося» — це збій доступу до даних: цифри в базі на місці, але чат до "
+    "них не дістає. Спробуйте ще раз за хвилину; якщо повториться — скажіть "
+    "адміністратору."
+    + footer("збій доступу до бази"))
+
+
+def _request_id():
+    """Короткий номер: шість символів достатньо, щоб знайти хід у журналі за
+    день роботи, і достатньо коротко, щоб людина продиктувала його голосом."""
+    return uuid.uuid4().hex[:6]
+
+
+def answer(question, history=None):
+    """Обгортка над `_answer_inner`: номер звернення, журнал і ОДНА чесна
+    відмова замість технічного винятку, коли база недоступна.
+
+    Чому саме недоступність бази ловиться окремо, а решта винятків -- ні.
+    «Не знайшла» і «база недоступна» -- різні твердження (критерій приймання
+    П3), і плутати їх не можна: у першому випадку даних немає, у другому вони
+    є, але ми до них не дістали. Перевірено 25.08: без цієї обгортки впала
+    база давала користувачу технічну помилку, а не відповідь. Решта винятків
+    навмисно летять далі: це наші баги, і глушити їх «щось пішло не так»
+    означає ховати їх від себе."""
+    cid = _request_id()
+    token = _CURRENT_ID.set(cid)
+    started = time.monotonic()
+    try:
+        out = _answer_inner(question, history)
+    except psycopg.OperationalError as exc:
+        _journal.warning("[%s] база недоступна за %.1f с: %s | питання: %.80s",
+                         cid, time.monotonic() - started,
+                         type(exc).__name__, question or "")
+        return ANSWER_DB_DOWN
+    finally:
+        _CURRENT_ID.reset(token)
+    _journal.info("[%s] %.1f с | відповідь %d символів | питання: %.80s",
+                  cid, time.monotonic() - started, len(out or ""),
+                  question or "")
     return out
 
 
