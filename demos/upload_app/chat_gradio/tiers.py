@@ -213,14 +213,22 @@ MODEL_HISTORY_TURNS = 0
 MODEL_RETRIES = 0
 
 
+#: Скільки разів модель реально викликали. Потрібне приладу заміру: критерій
+#: Ш1 («без моделі -- менше 3 с») неможливо перевірити, вгадуючи по назві
+#: дороги. Лічильник дешевий і не змінює поведінки.
+MODEL_CALLS = 0
+
+
 def _model_json(system, user, schema):
     """Один структурований виклик: JSON за схемою, temperature 0.
     Виняток нагору не йде -- None означає «модель не відповіла».
 
     Один виклик, без ретраїв: див. MODEL_RETRIES вище."""
+    global MODEL_CALLS
     model = _get_model()
     if model is None:
         return None
+    MODEL_CALLS += 1
     try:
         with _MODEL_LOCK:
             out = model.create_chat_completion(

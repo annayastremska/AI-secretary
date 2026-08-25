@@ -143,8 +143,10 @@ def main():
     questions = _load_questions(args.limit)
     print(f"тест-сет: {len(questions)} питань + {len(NEGATIVE)} негативних")
 
+    tiers = chat_app.tier_chat
     rows = []
     for i, item in enumerate(questions, 1):
+        calls_before = tiers.MODEL_CALLS
         started = time.monotonic()
         error = None
         try:
@@ -152,9 +154,15 @@ def main():
         except Exception as exc:                     # виняток -- це провал
             text, error = "", f"{type(exc).__name__}: {exc}"
         took = time.monotonic() - started
+        # Чи викликали модель -- ФАКТ із лічильника, не припущення за назвою
+        # дороги. Без цього критерій Ш1 («без моделі менше 3 с») перевірити
+        # неможливо: дороги «підрахунок» і «довідник» ходять до моделі не
+        # завжди, і за підписом це не видно.
+        used_model = tiers.MODEL_CALLS > calls_before
         tier = _tier_of(text)
         rows.append({"питання": item["q"], "група": item["group"],
-                     "ярус": tier, "секунд": round(took, 2),
+                     "ярус": tier, "з_моделлю": used_model,
+                     "секунд": round(took, 2),
                      "порушення": (["виняток: " + error] if error
                                    else _rule_checks(text, tier)),
                      "символів": len(text or "")})
