@@ -425,7 +425,12 @@ def rules_route(question):
             d_to = date_to or on_date or today
             return "list_by_state", {"dims": dims, "state": state,
                                      "date_from": d_from, "date_to": d_to}
-        if re.search(r"скільки|кількість", low):
+        # «скільк» коренем, не «скільки» цілим словом: замовниця питає
+        # «СКІЛЬКОМ зараз у відпустці» (давальний), і на цьому питання
+        # падало з каталогу на стару дорогу, яка рахує РЯДКИ, а не
+        # людей, і не фільтрує стан. Знайдено адверсарним проходом
+        # 25.08: демо-сценарій провалювався саме тут.
+        if re.search(r"скільк|кількіст", low):
             if date_from and date_to:
                 return "count_by_state_period", {
                     "dims": dims, "state": state,
