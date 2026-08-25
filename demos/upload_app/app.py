@@ -44,7 +44,34 @@ if not os.path.isabs(CONFIG_PATH):
 # сканує inbox не рекурсивно, тож наші копії йому не заважають.
 UPLOADS_DIR = os.path.join(PROJECT_ROOT, "data", "inbox", "upload_app")
 
-OUTPUT_ROOT = os.path.join(PROJECT_ROOT, "data", "output")
+# Вихід пайплайна читаємо З ТОГО САМОГО профілю, який пайплайну й передаємо.
+#
+# Раніше тут був літерал `data/output`, і це ламало головний сценарій демо.
+# Заміряно 25.08.2026 на сервері: профіль `config-gpu.yaml` пише в
+# `data/output-demo` (окремий вихід під демо-набір -- навмисно, щоб у базу
+# їхав РІВНО він), апка ж шукала запис у `data/output/index/processed.jsonl`,
+# не знаходила і віддавала «пайплайн завершився, але запису з таким хешем
+# немає». Тобто пайплайн відпрацював правильно, а апка казала «не вдалося»:
+# найгірший вид поломки -- та, що бреше про успішну роботу.
+#
+# Локально нічого не змінюється: у `config-app.yaml` вихід і є `data/output`.
+def _output_root():
+    """Корінь виходу пайплайна за активним профілем; `data/output` --
+    останній рубіж, якщо профіль не читається (тоді апка все одно скаже
+    про це на першому ж завантаженні, а не впаде на імпорті)."""
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as fh:
+            cfg = yaml.safe_load(fh) or {}
+        out = ((cfg.get("paths") or {}).get("output_dir")
+               or (cfg.get("storage") or {}).get("local_root"))
+        if out:
+            return out if os.path.isabs(out) else os.path.join(PROJECT_ROOT, out)
+    except (OSError, ValueError):
+        pass
+    return os.path.join(PROJECT_ROOT, "data", "output")
+
+
+OUTPUT_ROOT = _output_root()
 INDEX_PATH = os.path.join(OUTPUT_ROOT, "index", "processed.jsonl")
 
 # Лоадер команди БД -- імпортом, як його ж CLI-обгортка. Шлях, не копія коду:
@@ -270,8 +297,12 @@ def _run_pipeline_job(job_id):
     if not key:
         _set_step(job, "pipeline", "failed", elapsed, "вихідний .md не знайдено в індексі")
         job["state"] = "pipeline_failed"
-        job["error"] = ("пайплайн завершився, але запису з таким хешем немає в "
-                        "data/output/index/processed.jsonl -- див. лог пайплайна нижче")
+        # Шлях у тексті -- справжній, а не літерал: саме розбіжність між
+        # «де апка шукала» і «куди профіль писав» і давала цю помилку
+        # 25.08, і повідомлення з вигаданим шляхом тоді збивало зі сліду.
+        job["error"] = (f"пайплайн завершився, але запису з таким хешем немає в "
+                        f"{INDEX_PATH} (профіль: {CONFIG_PATH}) -- див. лог "
+                        f"пайплайна нижче")
         return
 
     md_path = os.path.join(OUTPUT_ROOT, key.replace("/", os.sep))
@@ -324,6 +355,57 @@ def _commit_job(job_id):
 @app.get("/")
 def index():
     return FileResponse(os.path.join(APP_DIR, "static", "index.html"))
+
+
+# ── Статичні файли обличчя ──────────────────────────────────────────────────
+#
+# Явний перелік, а не StaticFiles на теку: назви файлів тут відомі наперед, а
+# перелік не дає ні обходу шляху (`/static/../.env`), ні випадкової віддачі
+# файлу, який хтось поклав у теку «на хвилинку». Знак системи один на всі
+# сторінки -- він живе в chat_gradio/assets і не дублюється.
+STATIC_FILES = {
+    "theme-tokens.css": (os.path.join(APP_DIR, "static", "theme-tokens.css"),
+                         "text/css"),
+    "pages.css": (os.path.join(APP_DIR, "static", "pages.css"), "text/css"),
+    "mark.svg": (os.path.join(APP_DIR, "chat_gradio", "assets", "mark.svg"),
+                 "image/svg+xml"),
+}
+
+
+@app.get("/static/{name}")
+def static_file(name: str):
+    entry = STATIC_FILES.get(name)
+    if entry is None:
+        return JSONResponse(status_code=404, content={"error": "немає такого файлу"})
+    path, media = entry
+    return FileResponse(path, media_type=media)
+
+
+# ── Сторінка «Статистика» (задача B2) ───────────────────────────────────────
+#
+# П'ята річ, яку мусить уміти демо: показати цифри якості. Досі відповідь на
+# «де цифри» була «у консолі»: run_pipeline.py пише run-report.json, база
+# знає свої лічильники, а в інтерфейсі не було ні того, ні того.
+#
+# Числа збирає demos/upload_app/stats.py -- тим самим read-only способом, що
+# чат (chat_gradio/db.py::_query). Ключове правило продукту, яке ця сторінка
+# мусить ПОКАЗУВАТИ, а не переказувати: підтверджені факти й чернетки --
+# окремі числа, які ніде не складаються в одне.
+from demos.upload_app import stats as stats_mod  # noqa: E402
+
+
+@app.get("/stats")
+def stats_page():
+    return FileResponse(os.path.join(APP_DIR, "static", "stats.html"))
+
+
+@app.get("/api/stats")
+def stats_api():
+    # collect() винятків не кидає: недоступна база -- це поле db_available у
+    # відповіді, і сторінка каже «база недоступна» замість 500.
+    # Звіт прогону шукається у теці виходу ТОГО профілю, який читає апка.
+    return stats_mod.collect(
+        report_path=stats_mod.default_report_path(CONFIG_PATH))
 
 
 # ── Чат (друга сторінка тієї самої апки, /chat) ──────────────────────────────
