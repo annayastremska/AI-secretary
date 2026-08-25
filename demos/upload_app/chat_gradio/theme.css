@@ -1,90 +1,17 @@
-/* Візуальний шар стенду чата. Тільки представлення: логіки, правил і текстів
+/* Візуальний шар чата (/chat). Тільки представлення: логіки, правил і текстів
    відповідей цей файл не знає й не змінює.
 
-   Правило файлу: жодного кольору, радіуса чи тіні поза :root. Якщо значення
-   треба «трохи інше» — це сигнал, що бракує токена, а не привід вписати hex
-   у місці використання.
+   ТОКЕНИ ТУТ БІЛЬШЕ НЕ ЖИВУТЬ. Кольори, радіуси, відступи й шрифти -- у
+   ../static/theme-tokens.css, спільному з двома звичайними сторінками апки
+   (/ -- завантаження, /stats -- статистика). make_head_css() підклеює той
+   файл ПЕРЕД цим, в один <style> (задача B3: дві сторінки -- один продукт).
+   Тому тут лишається рівно те, що стосується Gradio.
+
+   Правило файлу те саме: жодного кольору чи радіуса inline. Треба нове
+   значення -- новий токен у theme-tokens.css.
 
    Класи Gradio (.message, .message-row, .bubble-wrap, .icon-button-wrapper …)
    зняті інспектуванням DOM Gradio 6.23, не з документації. */
-
-:root {
-    /* ── Радіуси: рівно три ─────────────────────────────────────────────── */
-    --r-sm: 8px;
-    --r-md: 12px;   /* поле вводу і кнопки — спільний радіус */
-    --r-lg: 16px;
-    --r-full: 50%;  /* коло: крапка стану, крапки очікування */
-
-    /* ── Шкала відступів 4/8/12/16/24/32 ────────────────────────────────── */
-    --s-1: 4px;
-    --s-2: 8px;
-    --s-3: 12px;
-    --s-4: 16px;
-    --s-5: 24px;
-    --s-6: 32px;
-
-    /* ── Нейтральна база: п'ять відтінків ───────────────────────────────── */
-    --c-bg:       #ffffff;
-    --c-surface:  #f7f8fa;
-    --c-border:   #e4e6eb;
-    --c-muted:    #6b7280;
-    --c-text:     #16181d;
-
-    /* ── Акцент: приглушений, не насичений ──────────────────────────────── */
-    --c-accent:      #4a6fa5;
-    --c-accent-soft: rgba(74, 111, 165, 0.08);
-    --c-accent-line: rgba(74, 111, 165, 0.22);
-    --c-on-accent:   #ffffff;  /* текст на залитому акценті */
-
-    /* ── Семантичні: успіх / попередження / помилка ─────────────────────── */
-    --c-success:      #2f7d5d;
-    --c-success-soft: rgba(47, 125, 93, 0.05);
-    --c-warn:         #b45309;
-    --c-warn-soft:    rgba(180, 83, 9, 0.05);
-    --c-error:        #b42318;
-    --c-error-soft:   rgba(180, 35, 24, 0.05);
-
-    /* ── Одна тінь ──────────────────────────────────────────────────────── */
-    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
-
-    /* ── Розкладка ──────────────────────────────────────────────────────── */
-    --col: 760px;          /* ширина колонки чата */
-    --header-h: 57px;
-    --composer-h: 104px;
-
-    /* адаптація: Google Fonts (Inter) вирізано -- жодних зовнішніх запитів,
-       усе локально; системний стек */
-    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
-
-    color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-    :root {
-        --c-bg:       #16181d;
-        --c-surface:  #1e2027;
-        --c-border:   #2c2f38;
-        --c-muted:    #9aa0aa;
-        --c-text:     #e8eaed;
-
-        --c-accent:      #8aabdc;
-        --c-accent-soft: rgba(138, 171, 220, 0.10);
-        --c-accent-line: rgba(138, 171, 220, 0.28);
-        --c-on-accent:   #16181d;
-
-        --c-success:      #5cb98d;
-        --c-success-soft: rgba(92, 185, 141, 0.08);
-        --c-warn:         #e0a35c;
-        --c-warn-soft:    rgba(224, 163, 92, 0.08);
-        --c-error:        #e07a70;
-        --c-error-soft:   rgba(224, 122, 112, 0.08);
-
-        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-
-        color-scheme: dark;
-    }
-}
 
 /* Gradio тримає власний набір змінних і під body.dark підмінює їх на темні.
    Прив'язуємо їх до наших токенів — інакше компоненти живуть своїм життям. */
@@ -166,9 +93,10 @@ label.float,
 }
 #new-chat:hover { background: var(--c-accent-soft) }
 
-/* адаптація: посилання на сторінку завантаження документа (та сама апка, /) --
-   виглядає як вторинна кнопка, що й «Новий чат» */
-#upload-link {
+/* адаптація: переходи на інші сторінки тієї самої апки (/ -- завантаження,
+   /stats -- статистика). Виглядають як вторинна кнопка «Новий чат»: у чаті
+   це посилання, у шапці звичайних сторінок -- пункти nav, набір той самий. */
+.page-link {
     display: block;
     margin-top: var(--s-2);
     background: transparent;
@@ -182,7 +110,7 @@ label.float,
     text-decoration: none;
     cursor: pointer;
 }
-#upload-link:hover { background: var(--c-accent-soft) }
+.page-link:hover { background: var(--c-accent-soft) }
 
 .side-heading, .side-heading p {
     font-size: 11px !important;
@@ -484,7 +412,45 @@ details.src > *:not(summary) {
     border-color: var(--c-accent-line);
 }
 
-/* ── Очікування відповіді: три крапки на місці відповіді ────────────────── */
+/* ── Очікування відповіді: назва ярусу + секундомір ─────────────────────── */
+/*
+ * Було: три крапки на весь час обробки. При 43-47 с на виклик локальної
+ * моделі це читалось як «зависло» (задача B1, критерій Ш3). Стало: крапки
+ * лишились як рух, але поруч -- назва ярусу, який зараз працює, рухомий
+ * секундомір і, для модельних ярусів, одне речення «чому довго».
+ * Розмітку дає chat_gradio/progress.py (render), тут -- лише вигляд.
+ */
+
+.working {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-1) 0;
+}
+.working .typing { padding-top: 6px }
+.working-body { min-width: 0 }
+.working-now {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s-2);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--c-text);
+}
+.working-now b { font-weight: 600 }
+.working-time {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--c-muted);
+    font-variant-numeric: tabular-nums;   /* секунди не стрибають по ширині */
+}
+.working-trail, .working-hint {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--c-muted);
+    margin-top: 2px;
+}
+.working-hint { color: var(--c-warn) }
 
 .typing { display: inline-flex; gap: 5px; padding: var(--s-1) 0 }
 .typing i {

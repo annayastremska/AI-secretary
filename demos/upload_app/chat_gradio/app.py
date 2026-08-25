@@ -58,6 +58,12 @@ import tiers as tier_chat  # noqa: E402
 # поруч; без ваг encoder-а чат працює без нього (деградація, не падіння).
 import vector_route as tier_vector  # noqa: E402
 
+# Видимий стан обробки (задача B1, критерій Ш3): яруси кажуть, де вони
+# зараз, а вікно показує це, поки answer() ще думає. Виклики progress.stage()
+# нічого не роблять без активного трекера -- логіка доріг від них не
+# залежить, тести й CLI працюють як раніше.
+import progress  # noqa: E402
+
 WARN_FALLBACK = "⚠️ локальна модель недоступна, маршрут обрано правилами"
 CLARIFY_MARK = "🔎 уточнення"
 
@@ -972,6 +978,7 @@ def _fmt_source_block(source_lines, route_label):
 def _catalog_tier(question):
     """Каталог шаблонів (правила з tiers.py: регекси, звірений SQL) -> текст
     або None. Детерміновано, без моделі."""
+    progress.stage("rules")
     try:
         routed = tier_chat.rules_route(question)
     except Exception:
@@ -993,6 +1000,7 @@ def _vector_tier(question):
     (tiers.params_for_template). None -> питання їде далі (модель -> ярус
     2): нижче порога, ярус вимкнено (немає ваг) або обов'язковий параметр
     не витягся."""
+    progress.stage("vector")
     # агрегати (середнє, мін/макс...) каталог не вміє -- те саме правило,
     # що в rules_route: пропустити в ярус 2, а не тягнути в схожий шаблон
     if tier_chat._AGGREGATE.search(question.lower()):
@@ -1040,6 +1048,7 @@ def _model_catalog_tier(question):
     (None = далі пробуємо ярус 2)."""
     if not (model_available() and tier_chat._get_model() is not None):
         return None
+    progress.stage("model_catalog")
     try:
         routed = tier_chat.model_route(question)
     except Exception:
@@ -1064,6 +1073,7 @@ def _tier2_tier(question):
     таймаут 5 с, SQL у згортці) -> текст або None."""
     if not (model_available() and tier_chat._get_model() is not None):
         return None
+    progress.stage("tier2")
     try:
         text, source = tier_chat.tier2_answer(question)
     except Exception:
@@ -1191,6 +1201,7 @@ def answer(question, history=None):
             + footer("відмова (без моделі)"))
 
     if route is None and model_ok:
+        progress.stage("model_route")
         try:
             r = mamaylm_json(ROUTE_SYSTEM, merged, ROUTE_SCHEMA, "route") or {}
             route = r.get("route") if r.get("route") in ROUTES else None
@@ -1271,6 +1282,7 @@ def answer(question, history=None):
                 # сам же й назвав у попередній відповіді.
 
     if route == "підрахунок":
+        progress.stage("db")
         result = dispatch_count(params, clarified, clarify_hint, merged)
         if isinstance(result, tuple) and result[0] == "clarify":
             out = f"{CLARIFY_MARK}\n{result[1]}" + footer("підрахунок (потрібне уточнення)")
@@ -1283,6 +1295,7 @@ def answer(question, history=None):
         else:
             out = result
     elif route == "довідник":
+        progress.stage("db")
         out = answer_reference(merged)
     elif route == "цитата":
         out = ANSWER_QUOTE
@@ -1320,6 +1333,10 @@ def answer(question, history=None):
 ASSETS = os.path.join(HERE, "assets")
 MARK = os.path.join(ASSETS, "mark.svg")
 THEME_CSS = os.path.join(HERE, "theme.css")
+# Спільні токени обличчя апки (задача B3): один файл на чат і на дві звичайні
+# сторінки (/ і /stats). Лежить у static/, бо звідти його <link>-ом беруть
+# сторінки; чат підклеює його вмістом (див. make_head_css).
+TOKENS_CSS = os.path.join(os.path.dirname(HERE), "static", "theme-tokens.css")
 
 TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
 
@@ -1373,8 +1390,17 @@ def make_head_css():
     # Gradio 6 скоупить усе, що прийшло через css/css_paths (`:root`
     # переписується і не збігається ні з чим) -- той самий файл через head
     # працює без скоупінгу (рішення з оригіналу, лишено).
-    with open(THEME_CSS, encoding="utf-8") as fh:
-        return f"<style>{fh.read()}</style>"
+    #
+    # Два файли в один <style> і саме в такому порядку: спершу спільні
+    # токени (:root), потім правила чата, які на них спираються. <link> на
+    # /static/theme-tokens.css тут не годиться -- head Gradio віддається до
+    # монтування, і відносний шлях під root_path=/chat не резолвиться;
+    # вміст файлу від місця монтування не залежить.
+    parts = []
+    for path in (TOKENS_CSS, THEME_CSS):
+        with open(path, encoding="utf-8") as fh:
+            parts.append(fh.read())
+    return "<style>" + "\n".join(parts) + "</style>"
 
 
 def build_blocks():
@@ -1391,37 +1417,54 @@ def build_blocks():
     ]
 
     def respond(message, history):
-        """Генератор: спершу крапки на місці відповіді, потім сама відповідь.
-        Дає чесний стан очікування там, де він буде видимий, — локальна модель
-        на CPU думає десятки секунд."""
+        """Генератор: кадри ВИДИМОГО СТАНУ на місці відповіді, потім сама
+        відповідь.
+
+        Було: одні крапки на весь час обробки. Стало (задача B1, критерій
+        Ш3): назва ярусу, який зараз працює, і секундомір, який рухається.
+        Причина -- 43-47 с на виклик локальної моделі: три нерухомі крапки
+        на такому часі люди читають як «зависло», а назва ярусу («модель
+        складає SQL-запит») ще й розповідає, як продукт улаштований.
+
+        Механіка -- progress.stream(): answer() їде в окремому потоці, а цей
+        генератор тікає таймером і віддає кадри. Сам answer() не змінився:
+        яруси лише позначають, де вони (progress.stage), нічого не
+        повертаючи інакше.
+        """
         message = (message or "").strip()
         history = history or []
         if not message:
             yield "", history, gr.update(), gr.update(visible=False), message
             return
         asked = history + [{"role": "user", "content": message}]
-        yield ("", gr.update(value=asked + [{"role": "assistant",
-                                             "content": TYPING_HTML}],
-                             visible=True),
-               gr.update(visible=False), gr.update(visible=False), message)
-        try:
-            reply = answer(message, history)
-            # Попередження про правила — один раз за сесію: у лівій панелі воно
-            # висить постійно, у кожній відповіді лише глушить текст. Шукаємо в
-            # історії вже відрендерений блок, а не сирий маркер: після
-            # render_reply() сирого тексту в історії не лишається.
-            if reply.startswith(WARN_FALLBACK) and any(
-                    "note--info" in _msg_text(m) for m in history):
-                reply = reply[len(WARN_FALLBACK):].lstrip("\n")
-            rendered, failed = render_reply(reply), False
-        except Exception as exc:                       # noqa: BLE001
-            rendered = _note("error", "Запит не вдалося виконати: "
-                                      f"{type(exc).__name__}. Дані не змінено.")
-            failed = True
-        yield ("", gr.update(value=asked + [{"role": "assistant",
-                                             "content": rendered}],
-                             visible=True),
-               gr.update(visible=False), gr.update(visible=failed), message)
+
+        def frame(content, failed=False):
+            return ("", gr.update(value=asked + [{"role": "assistant",
+                                                  "content": content}],
+                                  visible=True),
+                    gr.update(visible=False), gr.update(visible=failed),
+                    message)
+
+        rendered, failed = None, False
+        for kind, payload in progress.stream(lambda: answer(message, history)):
+            if kind == "stage":
+                yield frame(payload)
+            elif kind == "error":
+                rendered = _note("error", "Запит не вдалося виконати: "
+                                          f"{type(payload).__name__}. "
+                                          "Дані не змінено.")
+                failed = True
+            else:
+                reply = payload
+                # Попередження про правила — один раз за сесію: у лівій панелі
+                # воно висить постійно, у кожній відповіді лише глушить текст.
+                # Шукаємо в історії вже відрендерений блок, а не сирий маркер:
+                # після render_reply() сирого тексту в історії не лишається.
+                if reply.startswith(WARN_FALLBACK) and any(
+                        "note--info" in _msg_text(m) for m in history):
+                    reply = reply[len(WARN_FALLBACK):].lstrip("\n")
+                rendered = render_reply(reply)
+        yield frame(rendered if rendered is not None else TYPING_HTML, failed)
 
     def _msg_text(m):
         if isinstance(m, dict):
@@ -1456,8 +1499,13 @@ def build_blocks():
                     f'<div class="brand-sub">дані з Postgres, локально</div>'
                     f'</div></div>')
                 new_chat = gr.Button("＋  Новий чат", elem_id="new-chat")
-                gr.HTML('<a href="/" id="upload-link">⬆&nbsp; Завантажити '
-                        'документ</a>')
+                # Переходи між сторінками апки -- ті самі три, що в шапці
+                # звичайних сторінок (/ і /stats): один продукт означає, що
+                # набір переходів не змінюється від екрана до екрана.
+                gr.HTML('<a href="/" class="page-link">⬆&nbsp; Завантажити '
+                        'документ</a>'
+                        '<a href="/stats" class="page-link">▤&nbsp; '
+                        'Статистика</a>', elem_id="page-links")
                 gr.Markdown("Приклади питань", elem_classes="side-heading")
                 with gr.Column(elem_id="examples"):
                     side_btns = [gr.Button(q) for q in EXAMPLES]

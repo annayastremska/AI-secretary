@@ -3,101 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI-секретар</title>
-<style>
-  /* Все локально: жодних CDN, шрифтів, аналітики. Системні шрифти. */
-  :root {
-    --ink: #1a1e24; --muted: #5c6672; --line: #d9dee5; --bg: #f4f6f8;
-    --card: #ffffff; --accent: #1f6feb;
-    --ok-bg: #e6f4ea; --ok-ink: #1e6e3e;
-    --warn-bg: #fdf3d7; --warn-ink: #8a6d00;
-    --info-bg: #e8f0fe; --info-ink: #1a56b0;
-    --pending-bg: #fbe9e0; --pending-ink: #a04a12;
-    --err-bg: #fdecea; --err-ink: #b3261e;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 system-ui, "Segoe UI", sans-serif; }
-  main { max-width: 820px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 1.35rem; margin: 0 0 18px; }
-  section { background: var(--card); border: 1px solid var(--line);
-            border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; }
-  h2 { font-size: 0.8rem; margin: 0 0 10px; color: var(--muted);
-       text-transform: uppercase; letter-spacing: 0.05em; }
-  /* Зона завантаження: велика, одна первинна дія */
-  .dropzone { display: block; border: 2px dashed var(--line); border-radius: 10px;
-              padding: 42px 20px; text-align: center; cursor: pointer;
-              color: var(--muted); font-size: 1.05rem; transition: border-color .15s, background .15s; }
-  .dropzone:hover, .dropzone:focus-within, .dropzone.drag { border-color: var(--accent);
-              background: var(--info-bg); color: var(--info-ink); }
-  .dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-  .dropzone .big { font-weight: 600; color: var(--ink); display: block; margin-bottom: 4px; }
-  .dropzone.disabled { pointer-events: none; opacity: 0.55; }
-  /* Степер: компактний, лише стан і таймер */
-  ol.stepper { list-style: none; margin: 0; padding: 0; display: flex;
-               flex-wrap: wrap; gap: 8px 22px; }
-  ol.stepper li { display: flex; align-items: center; gap: 8px; }
-  .dot { flex: none; width: 20px; height: 20px; border-radius: 50%;
-         display: inline-flex; align-items: center; justify-content: center;
-         font-size: 11px; border: 2px solid var(--line); color: var(--muted);
-         background: #fff; }
-  li.done .dot { border-color: var(--ok-ink); background: var(--ok-bg); color: var(--ok-ink); }
-  li.running .dot { border-color: var(--accent); color: var(--accent); }
-  li.failed .dot { border-color: var(--err-ink); background: var(--err-bg); color: var(--err-ink); }
-  li.pendingstep { opacity: 0.5; }
-  .stepname { font-weight: 600; }
-  .steptime { color: var(--muted); font-variant-numeric: tabular-nums; }
-  li.running .steptime { color: var(--accent); font-weight: 600; }
-  .spin { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
-          border: 2px solid var(--accent); border-top-color: transparent;
-          animation: spin 0.9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .hint { color: var(--muted); font-size: 0.88rem; margin: 10px 0 0; }
-  /* Статуси */
-  .badge { display: inline-block; padding: 3px 12px; border-radius: 999px;
-           font-size: 0.9rem; font-weight: 600; }
-  .badge.confirmed { background: var(--ok-bg); color: var(--ok-ink); }
-  .badge.needs_review { background: var(--warn-bg); color: var(--warn-ink); }
-  .badge.duplicate, .badge.unchanged { background: var(--info-bg); color: var(--info-ink); }
-  .badge.unresolved { background: var(--pending-bg); color: var(--pending-ink); }
-  .badge.error { background: var(--err-bg); color: var(--err-ink); }
-  .next { margin: 8px 0 0; }
-  .note { border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-size: 0.92rem; }
-  .note.warn { background: var(--warn-bg); color: var(--warn-ink); }
-  .note.info { background: var(--info-bg); color: var(--info-ink); }
-  .note.pending { background: var(--pending-bg); color: var(--pending-ink); }
-  .note.err { background: var(--err-bg); color: var(--err-ink); }
-  /* Таблиці полів */
-  .tablewrap { overflow-x: auto; margin-top: 6px; }
-  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
-  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line);
-           vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
-  td.gap { color: var(--muted); font-style: italic; }
-  td.src { color: var(--muted); white-space: nowrap; }
-  h3 { font-size: 0.95rem; margin: 16px 0 2px; }
-  /* Кнопки */
-  button { font: inherit; padding: 10px 22px; border-radius: 8px; cursor: pointer;
-           border: 1px solid var(--line); background: #fff; }
-  button.primary { background: var(--accent); border-color: var(--accent);
-                   color: #fff; font-weight: 600; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  details { margin-top: 12px; }
-  details > summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; }
-  pre.log { background: #f0f2f5; border-radius: 8px; padding: 10px;
-            overflow-x: auto; font-size: 0.78rem; max-height: 240px; }
-  .hidden { display: none; }
-  /* Повернення до чату: плаваюча, ненав'язлива */
-  a.tochat { position: fixed; right: 18px; bottom: 18px; background: var(--card);
-             border: 1px solid var(--line); border-radius: 999px;
-             padding: 8px 16px; color: var(--accent); text-decoration: none;
-             font-size: 0.9rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-  a.tochat:hover { border-color: var(--accent); }
-</style>
+<title>Завантаження документа — AI-секретар</title>
+<!-- Обличчя спільне з чатом і сторінкою статистики (задача B3): токени
+     ../static/theme-tokens.css + шар звичайних сторінок pages.css. Власного
+     набору кольорів у цієї сторінки БІЛЬШЕ НЕМА: раніше тут жила власна
+     палітра (свій насичений синій, свої радіуси), і від чата сторінка
+     відрізнялась усім -- кольором, радіусами, вагою тексту.
+     Жодного CDN і зовнішнього шрифта (перевірка №7 у README апки). -->
+<link rel="stylesheet" href="/static/theme-tokens.css">
+<link rel="stylesheet" href="/static/pages.css">
 </head>
 <body>
+<!-- Шапка -- та сама на всіх трьох екранах (/, /stats, /chat): один продукт
+     означає, зокрема, що «де я і куди можна» не змінюється від сторінки до
+     сторінки. Раніше перехід на чат був плаваючою пігулкою в куті. -->
+<header class="appbar">
+  <a class="brand" href="/">
+    <img src="/static/mark.svg" alt="">
+    <span>
+      <span class="brand-name">AI-секретар</span><br>
+      <span class="brand-sub">облік особового складу</span>
+    </span>
+  </a>
+  <nav>
+    <a href="/" aria-current="page">Завантажити документ</a>
+    <a href="/stats">Статистика</a>
+    <a href="/chat">Чат</a>
+  </nav>
+</header>
+
 <main>
-  <h1>AI-секретар</h1>
+  <h1>Завантаження документа</h1>
+  <p class="lede">Документ проходить розпізнавання й витяг полів, потім ви
+    бачите, що витяглось — і лише після цього окремою кнопкою це йде в базу.
+    Непевні поля позначені: такий запис стає чернеткою й у підрахунки не
+    входить, доки людина не підтвердить.</p>
 
   <section>
     <label class="dropzone" id="dropzone">
@@ -122,7 +62,7 @@
     <h2>Витягнуто з документа</h2>
     <div id="status-line" aria-live="polite"></div>
     <div id="review-body"></div>
-    <p style="margin-top:16px">
+    <p class="actions">
       <button class="primary" id="commit-btn">Записати в базу</button>
     </p>
   </section>
@@ -132,8 +72,6 @@
     <div id="db-body" aria-live="polite"></div>
   </section>
 </main>
-
-<a class="tochat" href="/chat">Повернутися до чату</a>
 
 <script>
 "use strict";

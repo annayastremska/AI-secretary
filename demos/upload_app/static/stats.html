@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Статистика — AI-секретар</title>
+<!-- Обличчя спільне з чатом: токени + шар звичайних сторінок. Жодного CDN,
+     зовнішнього шрифта чи аналітики (перевірка №7 у README апки). -->
+<link rel="stylesheet" href="/static/theme-tokens.css">
+<link rel="stylesheet" href="/static/pages.css">
+</head>
+<body>
+<header class="appbar">
+  <a class="brand" href="/">
+    <img src="/static/mark.svg" alt="">
+    <span>
+      <span class="brand-name">AI-секретар</span><br>
+      <span class="brand-sub">облік особового складу</span>
+    </span>
+  </a>
+  <nav>
+    <a href="/">Завантажити документ</a>
+    <a href="/stats" aria-current="page">Статистика</a>
+    <a href="/chat">Чат</a>
+  </nav>
+</header>
+
+<main>
+  <h1>Статистика</h1>
+  <p class="lede">Скільком документам що зробили. Підтверджені факти й
+    чернетки — окремими числами: чернетка в підрахунки не входить, доки
+    людина не підтвердила.</p>
+
+  <div id="db-error"></div>
+
+  <section id="db-sec">
+    <h2>База</h2>
+    <div class="tiles" id="db-tiles"></div>
+    <div id="db-breakdowns"></div>
+  </section>
+
+  <section id="queue-sec">
+    <h2>Чекає підтвердження людиною</h2>
+    <div id="queue-body"></div>
+  </section>
+
+  <section id="report-sec">
+    <h2>Останній прогін пайплайна</h2>
+    <div id="report-body"></div>
+  </section>
+
+  <p class="asof" id="asof"></p>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+/* Порядок плиток задає код сторінки, а не порядок ключів у JSON: «чернетки»
+   мусять стояти поруч із «підтвердженими» і мати свій колір -- це і є
+   правило продукту, показане оком. */
+function tile(num, label, note, cls) {
+  const d = document.createElement("div");
+  d.className = "tile" + (cls ? " " + cls : "");
+  const n = document.createElement("div");
+  n.className = "tile-num"; n.textContent = num == null ? "—" : String(num);
+  const l = document.createElement("div");
+  l.className = "tile-label"; l.textContent = label;
+  d.append(n, l);
+  if (note) {
+    const s = document.createElement("div");
+    s.className = "tile-note"; s.textContent = note;
+    d.appendChild(s);
+  }
+  return d;
+}
+
+function note(cls, msg) {
+  const d = document.createElement("div");
+  d.className = "note " + cls; d.textContent = msg; return d;
+}
+
+function kvList(map, labels) {
+  const dl = document.createElement("dl");
+  dl.className = "kv";
+  const keys = Object.keys(map || {});
+  if (!keys.length) {
+    const p = document.createElement("p");
+    p.className = "hint"; p.textContent = "порожньо";
+    return p;
+  }
+  for (const k of keys.sort((a, b) => map[b] - map[a])) {
+    const row = document.createElement("div");
+    const dt = document.createElement("dt");
+    dt.textContent = (labels && labels[k]) ? labels[k] + " (" + k + ")" : k;
+    const dd = document.createElement("dd");
+    dd.textContent = String(map[k]);
+    row.append(dt, dd);
+    dl.appendChild(row);
+  }
+  return dl;
+}
+
+function block(title, node) {
+  const wrap = document.createElement("div");
+  const h = document.createElement("h3");
+  h.textContent = title;
+  wrap.append(h, node);
+  return wrap;
+}
+
+async function load() {
+  let data;
+  try {
+    const resp = await fetch("/api/stats");
+    data = await resp.json();
+  } catch (err) {
+    $("db-error").appendChild(note("err",
+      "Сторінка не змогла отримати цифри: " + err));
+    return;
+  }
+  render(data);
+}
+
+function render(data) {
+  $("asof").textContent = "Цифри зняті " + (data.collected_at || "").replace("T", " ");
+
+  /* База недоступна -- так і сказано; жодних нулів замість чисел, бо нуль
+     означав би «у базі порожньо», а це інша річ. */
+  if (!data.db_available) {
+    $("db-tiles").classList.add("hidden");
+    $("db-sec").appendChild(note("err",
+      "База недоступна — цифр показати не можу. " +
+      "Причина: " + (data.db_error || "невідома") +
+      ". Це не «нуль у базі»: невідомо."));
+    $("queue-body").appendChild(note("err", "База недоступна."));
+  } else {
+    const d = data.documents, f = data.facts, q = data.review_queue;
+    const tiles = $("db-tiles");
+    tiles.append(
+      tile(d.total, "документів у базі"),
+      tile(f.confirmed, "підтверджених фактів", "входять у підрахунки", "tile--ok"),
+      tile(f.unconfirmed, "чернеток", "у підрахунки НЕ входять", "tile--draft"),
+      tile(data.people, "осіб у реєстрі"),
+      tile(q.open_total, "чекає підтвердження", "нерозв'язані записи черги",
+           "tile--pending"));
+    if (d.failed)
+      tiles.appendChild(tile(d.failed, "збоїв обробки", "документ не пройшов конвеєр"));
+
+    const br = $("db-breakdowns");
+    br.appendChild(block("Документи за станом",
+      kvList(d.by_status, data.labels.doc_status)));
+    br.appendChild(block("Документи за доменом",
+      kvList(d.by_domain, data.labels.domain)));
+    br.appendChild(block("Записи фактів за станом",
+      kvList(f.by_status, data.labels.fact_status)));
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = "Усього рядків у таблиці фактів: " + f.rows_total +
+      " — це не підсумок для підрахунків, у ньому лежать і чернетки, і відхилені.";
+    br.appendChild(hint);
+
+    $("queue-body").appendChild(kvList(q.by_type, data.labels.queue));
+    $("queue-body").appendChild(note(q.open_total ? "pending" : "info",
+      q.open_total
+        ? "Ці записи чекають людину. Доки вона не підтвердила, вони не " +
+          "входять у жодну цифру відповіді."
+        : "Черга порожня — усе, що система знайшла, підтверджено."));
+  }
+
+  /* Звіт прогону */
+  const rb = $("report-body");
+  if (data.run_report_error) {
+    rb.appendChild(note("err", "Звіт прогону не читається: " + data.run_report_error));
+  }
+  const r = data.run_report;
+  if (!r) {
+    rb.appendChild(note("info",
+      "Звіту прогону ще немає (" + data.run_report_path + "). " +
+      "Він з'явиться після першого прогону пайплайна."));
+    return;
+  }
+  const docs = r["документів"] || {}, facts = r["факти"] || {}, fields = r["поля"] || {};
+  const tiles = document.createElement("div");
+  tiles.className = "tiles";
+  tiles.append(
+    tile(docs["усього"], "документів у прогоні"),
+    tile(facts["підтверджені"], "підтверджених фактів", null, "tile--ok"),
+    tile(facts["чернетки"], "чернеток", "чекають людину", "tile--draft"),
+    tile(fields["прогалини"], "прогалин у полях",
+         "з " + (fields["обіцяних_схемами"] || 0) + " обіцяних схемами"));
+  rb.appendChild(tiles);
+  rb.appendChild(block("Документи за статусом",
+    kvList(docs["за_статусом"], data.labels.doc_status)));
+  const gaps = r["прогалини_за_полем"] || {};
+  if (Object.keys(gaps).length)
+    rb.appendChild(block("Куди дивитись наступним (найчастіші прогалини)",
+      kvList(gaps, null)));
+  const meta = document.createElement("p");
+  meta.className = "hint";
+  meta.textContent = "Прогін: " + (r["коли"] || "?") + ", версія коду " +
+    (r["версія_коду"] || "?") + " · файл " + data.run_report_path +
+    (data.run_report_mtime ? " (оновлено " +
+      data.run_report_mtime.replace("T", " ") + ")" : "");
+  rb.appendChild(meta);
+  /* Межа чесності -- зі самого звіту, не наша переказка */
+  if (r["_що_це_міряє"])
+    rb.appendChild(note("info", r["_що_це_міряє"]));
+}
+
+load();
+</script>
+</body>
+</html>
