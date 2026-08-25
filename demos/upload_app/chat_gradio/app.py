@@ -1715,7 +1715,7 @@ def build_blocks():
                     f'<div id="brand">'
                     f'{mark_svg}'
                     f'<div><div class="brand-name">AI-секретар</div>'
-                    f'<div class="brand-sub">дані з Postgres, локально</div>'
+                    f'<div class="brand-sub">облік особового складу</div>'
                     f'</div></div>')
                 new_chat = gr.Button("＋  Новий чат", elem_id="new-chat")
                 # Переходи між сторінками апки -- ті самі три, що в шапці

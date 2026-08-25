@@ -28,8 +28,7 @@
 <main>
   <h1>Статистика</h1>
   <p class="lede">Стан бази, з якої чат бере відповіді, і виміряна якість
-    обробки документів. Чернетки показані окремо: у підрахунки вони не входять,
-    доки людина не підтвердила.</p>
+    обробки.</p>
 
   <div id="db-error"></div>
 
@@ -37,6 +36,7 @@
     <h2>База зараз</h2>
     <div class="tiles" id="db-tiles"></div>
     <p class="hint" id="db-types"></p>
+    <p class="hint" id="queue-note"></p>
   </section>
 
   <section id="quality-sec">
@@ -135,8 +135,8 @@ function render(data) {
       tile(d.total, "документів"),
       tile(data.people, "осіб у реєстрі"),
       tile(f.confirmed, "підтверджених фактів", "входять у підрахунки", "tile--ok"),
-      tile(f.unconfirmed, "чернеток", "у підрахунки НЕ входять", "tile--draft"),
-      tile(q.open_total, "чекає підтвердження", null, "tile--pending"));
+      tile(f.unconfirmed, "чернеток", "факти з непевним полем: у підрахунки не входять", "tile--draft"),
+      tile(q.open_total, "завдань для людини", "перевірити й підтвердити", "tile--pending"));
 
     /* Типи документів -- одним рядком, без таблиці: на сторінці потрібне
        основне, а не всі розкладки (правка Ані 25.08). */
@@ -146,6 +146,17 @@ function render(data) {
       .map(([k, v]) => (labels[k] || k) + " " + v);
     $("db-types").textContent = parts.length
       ? "Типи документів: " + parts.join(" · ")
+      : "";
+
+    /* Два числа поруч плутають, якщо не сказати різницю (питання Ані 26.08):
+       чернетки -- про ДАНІ (факт непевний), черга -- про РОБОТУ (що людині
+       перевірити). Вони перетинаються лише частково. */
+    const qt = data.labels.queue || {}, byType = q.by_type || {};
+    const queueParts = Object.entries(byType)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => (qt[k] || k) + " " + v);
+    $("queue-note").textContent = queueParts.length
+      ? "Завдання: " + queueParts.join(" · ")
       : "";
   }
 
@@ -160,18 +171,14 @@ function render(data) {
       tile((qm.fields_pct !== null ? qm.fields_pct + "%" : "—"),
            "полів витягнуто правильно",
            qm.fields_ok + " з " + qm.fields_total + " на " + qm.documents +
-           " документах з відомою відповіддю", "tile--ok"),
-      tile(qm.normative_ok + "/" + qm.normative_total, "нормативних розпізнано",
-           "як норм-акт, без фактів про особу"),
+           " документах", "tile--ok"),
+      tile(qm.normative_ok + "/" + qm.normative_total, "нормативних розпізнано"),
       tile(qm.tests_passed + " / " + qm.tests_total, "тестів пайплайна",
-           "проходить " + qm.tests_passed + ", падає " + qm.tests_failed +
-           ", очікуваних провалів (xfail) " + qm.tests_xfailed +
-           ". Тести самої апки — окремий набір, у це число не входять"));
+           "падає " + qm.tests_failed + ", очікуваних провалів " +
+           qm.tests_xfailed));
     $("quality-note").textContent =
       "Заміряно " + (qm.measured_at || "?").replace("T", " ") +
-      " приладом eval/evaluate на корпусах, де правильна відповідь відома " +
-      "заздалегідь. Це не самооцінка моделі: кожне поле звіряється з еталоном. " +
-      "Обсяг бази вище — це не якість, а кількість.";
+      ": кожне поле звірене з відомою правильною відповіддю.";
   }
 }
 
