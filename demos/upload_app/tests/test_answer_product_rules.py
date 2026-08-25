@@ -103,5 +103,26 @@ def test_blocked_template_answers_with_its_own_refusal(rendered):
     assert any("заблоковано" in s for s in source)
 
 
+def test_every_answer_carries_the_db_slice_date():
+    """Зріз БАЗИ (момент читання) -- у кожній відповіді, бо footer() стоїть під
+    кожною. Знайдено замірним прогоном: 69 відповідей із 124 не мали жодної
+    дати -- шаблони каталогу її казали, старіші дороги (підрахунок, довідник,
+    діагностика) ні."""
+    import datetime
+    today = datetime.date.today().isoformat()
+    for route in ("відмова", "підрахунок", "довідник", "діагностика"):
+        assert f"зріз бази: {today}" in chat_app.footer(route), route
+
+
+def test_slice_date_does_not_contradict_the_data_slice():
+    """Дві дати в одній відповіді -- це не суперечність: «Зріз: на 6 травня» про
+    ДАНІ, «зріз бази» про момент читання. Перевірка, що обидві живуть разом і
+    формулювання різні."""
+    text = ("Трьом у відпустці.\n"
+            "Зріз: на 2026-05-06 (за підтвердженими фактами).")
+    out = text + chat_app.footer("каталог шаблонів (count_by_state_on_date)")
+    assert "Зріз: на 2026-05-06" in out and "зріз бази:" in out
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
