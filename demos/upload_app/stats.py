@@ -32,6 +32,7 @@ SQL -- форми, вже звірені з живою базою у `query_cata
 таблиця, та сама умова.
 """
 import datetime
+import io
 import json
 import os
 import sys
@@ -234,6 +235,8 @@ def collect(query=None, report_path=None):
             "queue": QUEUE_LABELS,
             "domain": DOMAIN_LABELS,
         },
+        "quality": quality_metrics()[0],
+        "quality_error": quality_metrics()[1],
         "run_report": report,
         "run_report_error": report_error,
         "run_report_path": os.path.relpath(path, PROJECT_ROOT).replace("\\", "/"),
@@ -243,3 +246,70 @@ def collect(query=None, report_path=None):
     }
     out.update(counters or {})
     return out
+
+# ── Виміряна якість пайплайна ────────────────────────────────────────────────
+#
+# Джерело -- `eval/baseline.json`, той самий файл, проти якого щодня йде
+# перевірка «не ламає». Він У РЕПО навмисно: цифра, яка лежить у чиємусь
+# локальному звіті, нічого не доводить, а ця видна в історії коду.
+#
+# Чому саме ці числа. Аня 25.08: на сторінці має бути «якась виміряна
+# успішність пайплайну -- метрики». Найчесніша така метрика в нас одна: частка
+# полів, витягнутих ПРАВИЛЬНО проти заздалегідь відомої відповіді, на корпусах,
+# де ця відповідь є. Усе інше (скільки документів, скільки фактів) -- це обсяг,
+# не якість.
+
+BASELINE_PATH = os.path.join(PROJECT_ROOT, "eval", "baseline.json")
+
+#: Корпуси з еталоном -> як їх називати людині.
+_CORPORA = {
+    "leave": "відпустки (docx)",
+    "leave_pdf": "відпустки (pdf)",
+    "deployment": "відрядження (docx)",
+    "deployment_pdf": "відрядження (pdf)",
+    "story": "демо-історія (docx)",
+    "story_pdf": "демо-історія (pdf)",
+}
+
+
+def quality_metrics(path=None):
+    """-> (метрики, помилка). Помилка -- рядок для людини, не виняток."""
+    path = path or BASELINE_PATH
+    try:
+        with io.open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+    m = data.get("measurements") or {}
+    fields_ok = fields_total = docs = 0
+    per_corpus = {}
+    for key, label in _CORPORA.items():
+        entry = m.get(key) or {}
+        ok, total = entry.get("fields_ok"), entry.get("fields_total")
+        if ok is None or not total:
+            continue
+        fields_ok += ok
+        fields_total += total
+        docs += entry.get("documents") or 0
+        per_corpus[label] = {"ok": ok, "total": total}
+
+    normative = m.get("normative") or {}
+    tests = m.get("tests") or {}
+    return {
+        # ГОЛОВНА цифра сторінки: частка полів, витягнутих правильно проти
+        # заздалегідь відомої відповіді.
+        "fields_ok": fields_ok,
+        "fields_total": fields_total,
+        "fields_pct": (round(100.0 * fields_ok / fields_total, 1)
+                       if fields_total else None),
+        "documents": docs,
+        "per_corpus": per_corpus,
+        "normative_ok": normative.get("confirmed_normative"),
+        "normative_total": normative.get("documents"),
+        "tests_passed": tests.get("passed"),
+        "measured_at": (datetime.datetime.fromtimestamp(os.path.getmtime(path))
+                        .replace(microsecond=0).isoformat()
+                        if os.path.exists(path) else None),
+    }, None
+

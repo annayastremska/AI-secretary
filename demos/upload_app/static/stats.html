@@ -27,26 +27,22 @@
 
 <main>
   <h1>Статистика</h1>
-  <p class="lede">Скільком документам що зробили. Підтверджені факти й
-    чернетки — окремими числами: чернетка в підрахунки не входить, доки
-    людина не підтвердила.</p>
+  <p class="lede">Стан бази, з якої чат бере відповіді, і виміряна якість
+    обробки документів. Чернетки показані окремо: у підрахунки вони не входять,
+    доки людина не підтвердила.</p>
 
   <div id="db-error"></div>
 
   <section id="db-sec">
-    <h2>База</h2>
+    <h2>База зараз</h2>
     <div class="tiles" id="db-tiles"></div>
-    <div id="db-breakdowns"></div>
+    <p class="hint" id="db-types"></p>
   </section>
 
-  <section id="queue-sec">
-    <h2>Чекає підтвердження людиною</h2>
-    <div id="queue-body"></div>
-  </section>
-
-  <section id="report-sec">
-    <h2>Останній прогін пайплайна</h2>
-    <div id="report-body"></div>
+  <section id="quality-sec">
+    <h2>Виміряна якість обробки</h2>
+    <div class="tiles" id="quality-tiles"></div>
+    <p class="hint" id="quality-note"></p>
   </section>
 
   <p class="asof" id="asof"></p>
@@ -133,80 +129,48 @@ function render(data) {
       "База недоступна — цифр показати не можу. " +
       "Причина: " + (data.db_error || "невідома") +
       ". Це не «нуль у базі»: невідомо."));
-    $("queue-body").appendChild(note("err", "База недоступна."));
   } else {
     const d = data.documents, f = data.facts, q = data.review_queue;
-    const tiles = $("db-tiles");
-    tiles.append(
-      tile(d.total, "документів у базі"),
+    $("db-tiles").append(
+      tile(d.total, "документів"),
+      tile(data.people, "осіб у реєстрі"),
       tile(f.confirmed, "підтверджених фактів", "входять у підрахунки", "tile--ok"),
       tile(f.unconfirmed, "чернеток", "у підрахунки НЕ входять", "tile--draft"),
-      tile(data.people, "осіб у реєстрі"),
-      tile(q.open_total, "чекає підтвердження", "нерозв'язані записи черги",
-           "tile--pending"));
-    if (d.failed)
-      tiles.appendChild(tile(d.failed, "збоїв обробки", "документ не пройшов конвеєр"));
+      tile(q.open_total, "чекає підтвердження", null, "tile--pending"));
 
-    const br = $("db-breakdowns");
-    br.appendChild(block("Документи за станом",
-      kvList(d.by_status, data.labels.doc_status)));
-    br.appendChild(block("Документи за доменом",
-      kvList(d.by_domain, data.labels.domain)));
-    br.appendChild(block("Записи фактів за станом",
-      kvList(f.by_status, data.labels.fact_status)));
-    const hint = document.createElement("p");
-    hint.className = "hint";
-    hint.textContent = "Усього рядків у таблиці фактів: " + f.rows_total +
-      " — це не підсумок для підрахунків, у ньому лежать і чернетки, і відхилені.";
-    br.appendChild(hint);
-
-    $("queue-body").appendChild(kvList(q.by_type, data.labels.queue));
-    $("queue-body").appendChild(note(q.open_total ? "pending" : "info",
-      q.open_total
-        ? "Ці записи чекають людину. Доки вона не підтвердила, вони не " +
-          "входять у жодну цифру відповіді."
-        : "Черга порожня — усе, що система знайшла, підтверджено."));
+    /* Типи документів -- одним рядком, без таблиці: на сторінці потрібне
+       основне, а не всі розкладки (правка Ані 25.08). */
+    const labels = data.labels.domain || {};
+    const parts = Object.entries(d.by_domain || {})
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => (labels[k] || k) + " " + v);
+    $("db-types").textContent = parts.length
+      ? "Типи документів: " + parts.join(" · ")
+      : "";
   }
 
-  /* Звіт прогону */
-  const rb = $("report-body");
-  if (data.run_report_error) {
-    rb.appendChild(note("err", "Звіт прогону не читається: " + data.run_report_error));
+  /* Виміряна якість: одна головна цифра (частка правильно витягнутих полів
+     проти заздалегідь відомої відповіді) плюс те, що її підпирає. */
+  const qm = data.quality;
+  if (!qm) {
+    $("quality-sec").appendChild(note("err",
+      "Цифри якості не читаються: " + (data.quality_error || "невідомо")));
+  } else {
+    $("quality-tiles").append(
+      tile((qm.fields_pct !== null ? qm.fields_pct + "%" : "—"),
+           "полів витягнуто правильно",
+           qm.fields_ok + " з " + qm.fields_total + " на " + qm.documents +
+           " документах з відомою відповіддю", "tile--ok"),
+      tile(qm.normative_ok + "/" + qm.normative_total, "нормативних розпізнано",
+           "як норм-акт, без фактів про особу"),
+      tile(qm.tests_passed, "тестів проходить",
+           "поведінка коду, включно з випадками, яких у корпусі немає"));
+    $("quality-note").textContent =
+      "Заміряно " + (qm.measured_at || "?").replace("T", " ") +
+      " приладом eval/evaluate на корпусах, де правильна відповідь відома " +
+      "заздалегідь. Це не самооцінка моделі: кожне поле звіряється з еталоном. " +
+      "Обсяг бази вище — це не якість, а кількість.";
   }
-  const r = data.run_report;
-  if (!r) {
-    rb.appendChild(note("info",
-      "Звіту прогону ще немає (" + data.run_report_path + "). " +
-      "Він з'явиться після першого прогону пайплайна."));
-    return;
-  }
-  const docs = r["документів"] || {}, facts = r["факти"] || {}, fields = r["поля"] || {};
-  const tiles = document.createElement("div");
-  tiles.className = "tiles";
-  tiles.append(
-    tile(docs["усього"], "документів у прогоні"),
-    tile(facts["підтверджені"], "підтверджених фактів", null, "tile--ok"),
-    tile(facts["чернетки"], "чернеток", "чекають людину", "tile--draft"),
-    tile(fields["прогалини"], "прогалин у полях",
-         "з " + (fields["обіцяних_схемами"] || 0) + " обіцяних схемами"));
-  rb.appendChild(tiles);
-  rb.appendChild(block("Документи за статусом",
-    kvList(docs["за_статусом"], data.labels.doc_status)));
-  const gaps = r["прогалини_за_полем"] || {};
-  if (Object.keys(gaps).length)
-    rb.appendChild(block("Куди дивитись наступним (найчастіші прогалини)",
-      kvList(gaps, null)));
-  const meta = document.createElement("p");
-  meta.className = "hint";
-  meta.textContent = "Прогін: " + (r["коли"] || "?") + ", версія коду " +
-    (r["версія_коду"] || "?") + " · файл " + data.run_report_path +
-    (data.run_report_mtime ? " (оновлено " +
-      data.run_report_mtime.replace("T", " ") + ")" : "");
-  rb.appendChild(meta);
-  /* Межа чесності -- зі самого звіту, не наша переказка */
-  if (r["_що_це_міряє"])
-    rb.appendChild(note("info", r["_що_це_міряє"]));
-}
 
 load();
 </script>

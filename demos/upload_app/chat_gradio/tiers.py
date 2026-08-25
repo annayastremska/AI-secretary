@@ -663,6 +663,44 @@ def _fmt_period(r):
     return "період не вказано"
 
 
+def _closest_names(query, limit=3):
+    """Найближчі за написанням прізвища з реєстру -> перелік або [].
+
+    Навіщо. 25.08 Аня питала «що відомо про Усика», чат чесно казав «у реєстрі
+    немає особи за «Усик»» -- і це виглядало як поломка, хоч було правдою:
+    прізвища в базі синтетичні (Данильчук, Килимник, Яремків…), Усика серед них
+    нема. Відмова без підказки не бреше, але й не допомагає: людина не знає, чи
+    вона помилилась у прізвищі, чи система зламалась.
+
+    Тому підказка -- не вигадка, а ФАКТ із бази: ось хто справді є, і ось
+    наскільки схоже. Порівняння за написанням (difflib), без моделі.
+    """
+    try:
+        rows = _run_template_sql(
+            "SELECT o.canonical_name AS name FROM objects o "
+            "JOIN object_kinds k ON k.id = o.kind_id AND k.code = 'person'",
+            {})
+    except Exception:
+        return []
+    import difflib
+    q = (query or "").strip().lower()
+    if not q or not rows:
+        return []
+    scored = []
+    for r in rows:
+        name = (r["name"] or "").strip()
+        if not name:
+            continue
+        # порівнюємо і з повним рядком, і з кожним словом: людина зазвичай
+        # називає лише прізвище
+        best = max([difflib.SequenceMatcher(None, q, name.lower()).ratio()]
+                   + [difflib.SequenceMatcher(None, q, w.lower()).ratio()
+                      for w in name.split()])
+        scored.append((best, name))
+    scored.sort(reverse=True)
+    return [name for score, name in scored[:limit] if score >= 0.55]
+
+
 def run_template(template_id, params):
     """Виконати шаблон і скласти текст відповіді. -> (text, source_lines).
 
@@ -729,8 +767,19 @@ def run_template(template_id, params):
 
     elif template_id == "person_status":
         if not rows:
+            asked = params.get("name", params["name_pattern"])
             lines.append(f"Не знайшла: у реєстрі немає особи за "
-                         f"«{_esc(params.get('name', params['name_pattern']))}».")
+                         f"«{_esc(asked)}».")
+            near = _closest_names(asked)
+            total = _people_total()
+            if near:
+                lines.append("Найближчі за написанням у реєстрі: "
+                             + ", ".join(_esc(n) for n in near)
+                             + ". Якщо потрібен хтось із них — назвіть точніше.")
+            elif total:
+                lines.append(f"У реєстрі {_people(total)}; схожого прізвища "
+                             f"немає. Можливо, документа про цю особу в базі "
+                             f"ще немає.")
         else:
             by_person = {}
             for r in rows:

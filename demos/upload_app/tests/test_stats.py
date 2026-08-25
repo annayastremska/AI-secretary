@@ -244,3 +244,36 @@ def test_upload_page_has_no_private_palette():
     # жодного зовнішнього запиту (перевірка №7 README апки)
     for external in ("http://", "https://", "fonts.googleapis", "cdn."):
         assert external not in html, external
+
+def test_api_carries_measured_quality():
+    """Правка Ані 25.08: на сторінці мусить бути ВИМІРЯНА успішність пайплайна,
+    не лише обсяг бази. Джерело -- eval/baseline.json, той самий файл, проти
+    якого щодня йде перевірка «не ламає»: він у репо, тобто цифра видна в
+    історії коду, а не лежить у чиємусь локальному звіті."""
+    from demos.upload_app import stats
+    q, err = stats.quality_metrics()
+    assert err is None, err
+    assert q["fields_total"] > 0
+    assert 0 <= q["fields_pct"] <= 100
+    assert q["fields_ok"] <= q["fields_total"]
+    assert q["tests_passed"] and q["tests_passed"] > 0
+    assert q["measured_at"], "без дати заміру цифра не перевірна"
+
+
+def test_quality_is_about_fields_not_volume():
+    """Запобіжник проти підміни: «скільком документів у базі» -- це ОБСЯГ, а не
+    якість. Головна цифра якості мусить приходити з полів, звірених з
+    еталоном."""
+    from demos.upload_app import stats
+    q, _ = stats.quality_metrics()
+    assert set(q["per_corpus"]), "немає жодного корпусу з еталоном"
+    total = sum(v["total"] for v in q["per_corpus"].values())
+    assert total == q["fields_total"], (total, q["fields_total"])
+
+
+def test_missing_baseline_is_reported_not_faked():
+    """Немає файла -- кажемо про це, а не показуємо нуль: нуль означав би
+    «нічого не витягнули правильно»."""
+    from demos.upload_app import stats
+    q, err = stats.quality_metrics("/nonexistent/baseline.json")
+    assert q is None and err

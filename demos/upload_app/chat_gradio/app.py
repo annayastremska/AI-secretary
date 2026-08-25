@@ -549,6 +549,10 @@ def answer_absent(date, subdivision, not_returned=False):
              f"до {_esc(r['date_to'])}" for r in rows]
     if not rows:
         body = f"0 — на {date}{where} чинних документів про відсутність немає."
+        # Нуль поза покриттям -- це не «нікого немає», а «даних немає».
+        note = db.coverage_note(date)
+        if note:
+            body += "\n" + note
     else:
         body = (f"**{plural_people(len(rows))}** поза частиною на {date}{where}.\n"
                 + "\n".join(items))
@@ -688,9 +692,14 @@ def dispatch_count(params, clarified, clarify_hint, question=""):
             if not clarified:
                 # текст уточнення пише модель -- екрануємо, як і решту
                 # недовіреного (сама вона бачила питання користувача)
+                # Покриття беремо З БАЗИ. Раніше тут стояв літерал «дані
+                # стенду -- травень 2026», і 25.08 він відправив замовницю
+                # питати про травень, якого в базі немає взагалі: підказка
+                # системи виявилась єдиним неправдивим рядком у діалозі.
+                cover = db.coverage_note()
                 q = (_esc(clarify_hint) if clarify_hint else
-                     "За яку дату рахувати? Назвіть у форматі YYYY-MM-DD "
-                     "(дані стенду — травень 2026).")
+                     "За яку дату рахувати? Назвіть у форматі YYYY-MM-DD."
+                     + (f" {cover}" if cover else ""))
                 return ("clarify", q)
             return ("Відповісти не можу: дата зрізу так і не названа у форматі "
                     "YYYY-MM-DD, а підставляти дату самостійно система не має "
