@@ -70,11 +70,17 @@ USER = """Питання військовослужбовця:
    саме, який порядок). Якщо текст про сусідню тему, про інший вид відпустки,
    про інший орган -- це НЕ відповідь.
 
-2. Якщо відповідає -- виберіть із тексту речення (одне-три), які містять
-   відповідь. Скопіюйте їх ДОСЛІВНО, символ за символом, без жодних змін:
+2. Якщо відповідає -- виберіть із тексту НЕ БІЛЬШЕ ДВОХ речень, які містять
+   саму відповідь. Скопіюйте їх ДОСЛІВНО, символ за символом, без жодних змін:
    не виправляйте розділові знаки, не скорочуйте, не додавайте слів. Ми
    перевіряємо, що ваша цитата є точним підрядком документа, і відкидаємо її,
    якщо це не так.
+
+   ВАЖЛИВО про довгі переліки. Якщо відповідь -- це довгий перелік (підстави,
+   умови, види), НЕ переписуйте весь перелік. Візьміть рядок, який його
+   вводить, і не більше двох перших елементів. Повний текст користувач побачить
+   окремо: ваша задача -- вказати МІСЦЕ відповіді, а не переписати документ.
+   Цитата довша за 400 символів не приймається.
 
 Поверни рівно такий JSON:
 {{"answers": true|false, "why": "<коротко, чому саме так>", "quote": "<дослівна цитата або порожньо>"}}"""
@@ -109,8 +115,28 @@ def ask(question, title, ident, addr, body, max_tokens=900):
     return data, usage, time.time() - t0, txt, truncated
 
 
+# Символи, які модель тихо «виправляє», переписуючи цитату: кручений апостроф
+# у «військовозобов’язаних», різні тире, різні лапки, нерозривний пробіл.
+# Без цього зведення підрядкова перевірка відкидала цілком доречні цитати --
+# на позитивному наборі так згинули дві з п'яти відповідей.
+CONFUSE = {
+    "’": "'", "‘": "'", "`": "'", "´": "'", "ʼ": "'", "＇": "'",
+    "–": "-", "—": "-", "‐": "-", "‑": "-", "−": "-", "―": "-",
+    "«": '"', "»": '"', "“": '"', "”": '"', "„": '"', "‟": '"',
+    " ": " ", " ": " ", " ": " ",
+}
+_TRANS = str.maketrans(CONFUSE)
+
+
 def norm(s):
-    return re.sub(r"\s+", " ", (s or "")).strip()
+    """Зведення для ПОРІВНЯННЯ: пробіли, апострофи, тире, лапки, регістр.
+
+    Регістр теж: модель іноді починає цитату з великої літери там, де в
+    оригіналі мала (бо «це ж початок речення»). Для перевірки «чи це справді
+    з документа» регістр не має значення -- показуємо ми все одно оригінал.
+    """
+    s = (s or "").translate(_TRANS)
+    return re.sub(r"\s+", " ", s).strip().casefold()
 
 
 def main(argv=None):
@@ -118,6 +144,10 @@ def main(argv=None):
     ap.add_argument("--questions", required=True)
     ap.add_argument("--top", type=int, default=2,
                     help="скільком верхнім одиницям задавати питання")
+    ap.add_argument("--rerank", type=int, default=0,
+                    help="розмір пулу реранкера; 0 -- без реранкера. "
+                         "Заміряно: пул 50 підняв правильну одиницю в топ-2 "
+                         "з 2/5 до 4/5 за 0.57 с")
     args = ap.parse_args(argv)
 
     with open(args.questions, encoding="utf-8") as f:
@@ -125,12 +155,25 @@ def main(argv=None):
 
     from build_units_test import load_encoder, dsn
     encode = load_encoder()
-    cost = {"calls": 0, "s": 0.0, "in": 0, "out": 0}
+    rescore = None
+    if args.rerank:
+        from measure_rerank_lift import load_reranker, RERANK_CHARS
+        rescore = load_reranker()
+    cost = {"calls": 0, "s": 0.0, "in": 0, "out": 0, "rr": 0.0}
 
     with psycopg.connect(dsn()) as conn, conn.cursor() as cur:
         for q in questions:
             vec = str(encode(["query: " + q])[0])
             fused = SU.rrf_merge(SU.lexical(cur, q), SU.semantic(cur, vec))
+            if rescore and fused:
+                pool = fused[:args.rerank]
+                texts = [SU.quote_of(cur, d, b)[0][:RERANK_CHARS]
+                         for (d, b), _m in pool]
+                t0 = time.time()
+                sc = rescore(q, texts)
+                cost["rr"] += time.time() - t0
+                order = sorted(range(len(sc)), key=lambda j: -sc[j])
+                fused = [pool[j] for j in order] + fused[args.rerank:]
             print(f"\n{'='*78}\nПИТАННЯ: {q}")
             if not fused:
                 print("  пошук нічого не дав")
@@ -152,9 +195,11 @@ def main(argv=None):
                           f"моделі, а збій розбору ({dt:.1f} с)")
                     verdicts.append((None, False))
                     continue
-                quote = norm(data.get("quote"))
-                # ГОЛОВНА перевірка: цитата мусить бути дослівним підрядком.
-                exact = bool(quote) and quote in norm(body)
+                # Зведений вигляд -- ЛИШЕ для порівняння; показуємо оригінал.
+                # Інакше цитата в підвалі відповіді їде в нижньому регістрі.
+                quote_raw = re.sub(r"\s+", " ", (data.get("quote") or "")).strip()
+                exact = bool(quote_raw) and norm(quote_raw) in norm(body)
+                quote = quote_raw
                 verdicts.append((answers, exact))
                 mark = "ВІДПОВІДАЄ" if answers else "не відповідає"
                 print(f"\n  [{base[:44]}] {title[:44]}")
@@ -169,7 +214,8 @@ def main(argv=None):
 
     print(f"\n{'='*78}\nвартість: {cost['calls']} викликів, {cost['s']:.1f} с "
           f"({cost['s']/max(1,cost['calls']):.1f} с/виклик), "
-          f"токенів у {cost['in']} / з {cost['out']}")
+          f"токенів у {cost['in']} / з {cost['out']}"
+          + (f"; реранкер {cost['rr']:.1f} с усього" if cost["rr"] else ""))
     return 0
 
 

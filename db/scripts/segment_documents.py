@@ -120,6 +120,33 @@ def _depth(label):
     return label.count(".") + 1 if label[0].isdigit() else 0
 
 
+NEST_DEPTH = 2         # скільком компонентам шляху дозволено бути в мітці
+
+# Мітку НЕ обрізаємо при збереженні. Пробував (стеля 60) -- зміряно, що це
+# створює дублікати: різні «Додаток ... / 192» після обрізання злипаються в
+# один рядок, і їх стало 825 замість 402. Довжина обмінюється на унікальність
+# напряму, тому в базі лишається повна мітка (вона розрізняє), а скорочення --
+# справа показу.
+
+
+def _cap(path):
+    """Обрізає шлях до останніх NEST_DEPTH компонентів.
+
+    Без цього обмеження шлях накопичувався з усіх рівнів, які стек колись
+    бачив, і виходили мітки на 240 символів:
+    `3/1.14/2.2/3.3/4.11/5.4/6.20/7.11/8.5/9.9/...`. Таких було 13% від усіх
+    одиниць.
+
+    Причина, чому я цього не побачив раніше: я міряв УНІКАЛЬНІСТЬ мітки
+    (дублікати 2210 -> 637) і на цій підставі назвав `nest` переможцем. А
+    мітка потрібна як АДРЕСА -- її мусить бути видно в підвалі відповіді
+    («Стаття 26 / 5»). Унікальність без придатності нічого не варта, і саме
+    тому довжина мітки тепер серед метрик.
+    """
+    parts = [p for p in path.split("/") if p]
+    return "/".join(parts[-NEST_DEPTH:]) if len(parts) > NEST_DEPTH else path
+
+
 def _nest(ordered):
     """Не ВІДКИДАТИ межу, що не продовжує послідовність, а ПЕРЕ-ПІДПОРЯДКУВАТИ.
 
@@ -149,10 +176,10 @@ def _nest(ordered):
             stack.pop()
         if stack and last == stack[-1][0] + 1:
             parent = stack[-1][1].rsplit("/", 1)[0] if "/" in stack[-1][1] else ""
-            stack[-1] = (last, f"{parent}/{label}" if parent else label)
+            stack[-1] = (last, _cap(f"{parent}/{label}" if parent else label))
         else:
             prefix = stack[-1][1] if stack else ""
-            stack.append((last, f"{prefix}/{label}" if prefix else label))
+            stack.append((last, _cap(f"{prefix}/{label}" if prefix else label)))
         out.append((pos, kind, stack[-1][1]))
     return out
 
@@ -388,13 +415,17 @@ def check(name, text, family, units):
     huge = sum(1 for s in sizes if s > MAX_UNIT)
     med = sizes[len(sizes) // 2] if sizes else 0
     toc = sum(1 for u in units if TOC_LINE.search(u["text"][:200]))
+    lens = sorted(len(u["label"]) for u in units)
+    long_lbl = sum(1 for x in lens if x > 40)
 
     print(f"  {str(name):>30} {family:<28} одиниць {len(units):>5} "
           f"медіана {med:>5} дрібних {tiny:>4} завеликих {huge:>3} "
-          f"дублі {dup:>4} зміст {toc:>3}"
+          f"дублі {dup:>4} зміст {toc:>3} мітка>40 {long_lbl:>4}"
           + ("  ⚠ " + "; ".join(problems) if problems else ""))
     return dict(units=len(units), tiny=tiny, huge=huge, dup=dup, toc=toc,
-                problems=problems)
+                problems=problems, long_lbl=long_lbl,
+                lbl_med=lens[len(lens)//2] if lens else 0,
+                lbl_max=lens[-1] if lens else 0)
 
 
 def main(argv=None):
@@ -474,6 +505,9 @@ def main(argv=None):
         print(f"  завеликих (>{MAX_UNIT}): {sum(s['huge'] for s in stats)}")
         print(f"  дублікатів міток: {sum(s['dup'] for s in stats)}")
         print(f"  одиниць зі змістом: {sum(s['toc'] for s in stats)}")
+        print(f"  міток довших за 40 символів: {sum(s['long_lbl'] for s in stats)}"
+              f"   (медіана довжини {max(s['lbl_med'] for s in stats)}, "
+              f"максимум {max(s['lbl_max'] for s in stats)})")
     return 0
 
 
