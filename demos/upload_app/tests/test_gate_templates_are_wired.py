@@ -44,7 +44,16 @@ def _catalog_examples():
     return out
 
 
-def test_every_routed_template_is_reachable():
+ROSTER = ["1-ша механізована рота", "2-га механізована рота",
+          "3-тя механізована рота", "Взвод забезпечення",
+          "Управління батальйону"]
+
+
+def test_every_routed_template_is_reachable(monkeypatch):
+    # Перелік підрозділів -- підставний: тест про МАРШРУТИ, і бази тут немає.
+    # (`subdivisions()` більше не глушить помилку бази -- інакше при впалій
+    # базі чат казав би «такого підрозділу немає» замість «база недоступна».)
+    monkeypatch.setattr(tiers, "subdivisions", lambda: ROSTER)
     missing = {}
     for question in _catalog_examples():
         route = tiers.rules_route(question)

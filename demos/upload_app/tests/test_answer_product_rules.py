@@ -42,7 +42,9 @@ def _fake_rows_for(sql):
                        # без неї рендер падав KeyError -- заглушка «на всі
                        # шаблони» цього не покривала
                        ("subdivision", "2-га механізована рота"),
-                       ("зі_штаткою", 300)):
+                       ("зі_штаткою", 300),
+                       # доповнення (count_not_in_state) віддає два числа
+                       ("total", 303), ("in_state", 12)):
         if key in sql or True:
             row[key] = value
     return [row]

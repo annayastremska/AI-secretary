@@ -1349,6 +1349,7 @@ def _extra_tiers(question):
 _STATE_TEMPLATES = {
     "count_by_state_on_date",
     "count_by_state_period",
+    "count_not_in_state",
     "list_by_state",
     "absent_breakdown_on_date",
     "returning_on_date",

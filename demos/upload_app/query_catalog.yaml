@@ -878,6 +878,43 @@ templates:
           WHERE sd.code = 'subdivision'
             AND sf.value ILIKE %(subdivision)s)
 
+  # Нащо: заперечення. «Хто НЕ у відпустці», «скільком не у відрядженні».
+  # Ворожий прохід 26.08: чат віддавав тих, хто В стані, тобто відповідав на
+  # ПРОТИЛЕЖНЕ питання -- упевнено, з джерелом і датою зрізу.
+  # Межі: доповнення рахується від ШТАТКИ (скільком осіб у реєстрі), а не від
+  # «фактичної наявності» -- база не знає, хто сьогодні в частині фізично.
+  # Переліку не даємо: 291 прізвище -- не відповідь; даємо два числа й межу.
+  - id: count_not_in_state
+    title: Скільком НЕ у стані (доповнення до підрахунку)
+    examples:
+      - Хто не у відпустці зараз?
+      - Скільком не у відрядженні 30 серпня 2026?
+      - Скільки людей не відсутні сьогодні?
+    params: [dims, on_date]
+    answer_hint: >
+      Два числа й віднімання вголос: усього в реєстрі мінус ті, хто в стані.
+      Обов'язково сказати, що це склад ЗА ШТАТКОЮ, а не фактична наявність, і
+      що переліку немає навмисно.
+    sql: >
+      SELECT (SELECT COUNT(*) FROM people) AS total,
+             (SELECT COUNT(DISTINCT f.object_id)
+                FROM facts f
+                JOIN dimensions d ON d.id = f.dimension_id
+               WHERE d.code = ANY(%(dims)s)
+                 AND f.status = 'confirmed'
+                 AND f.valid_from IS NOT NULL
+                 AND f.valid_from <= %(on_date)s
+                 AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)) AS in_state
+    sql_unconfirmed: >
+      SELECT COUNT(DISTINCT f.object_id) AS n
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+
   # Нащо: «ХТО у 2 роті у відпустці» -- питання на перелік, а не на число.
   # Знайдено живим прогоном 26.08: гейт підрозділів віддавав будь-яке питання
   # у підрахунок, і на «хто» людина отримувала цифру. Формально правда, але не

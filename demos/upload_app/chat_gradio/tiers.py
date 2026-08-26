@@ -291,8 +291,12 @@ def subdivisions():
                 "WHERE d.code = 'subdivision' AND f.value <> '' "
                 "ORDER BY f.value", {})
             _SUBDIVISIONS = [r["v"] for r in rows]
-        except Exception:
-            _SUBDIVISIONS = []
+        except psycopg.Error:
+            # НЕ глушимо: порожній перелік підрозділів веде до відмови «такого
+            # підрозділу в штатці немає», тобто при впалій базі чат сказав би
+            # неправду про склад частини замість «база недоступна». Виняток
+            # доходить до answer(), і там уже є окремий текст (ANSWER_DB_DOWN).
+            raise
     return _SUBDIVISIONS
 
 
@@ -360,6 +364,17 @@ _ENTITLEMENT = re.compile(
 # ...і лише разом із підрахунком або переліком ЛЮДЕЙ. Без цієї другої
 # половини гейт з'їв би нормативні питання, у яких слово «підрозділ» --
 # частина процедури, а не фільтр («яка процедура у підрозділі»).
+#: Заперечення в питанні про стан: «хто НЕ у відпустці», «скільком не у
+#: відрядженні». Ворожий прохід 26.08: чат відповідав на ПРОТИЛЕЖНЕ питання --
+#: віддавав тих, хто В стані, і робив це впевнено, з джерелом і датою зрізу.
+#:
+#: Рахувати доповнення можна, і це корисно: у штатці 303 особи, у відпустці
+#: 12 -> не у відпустці 291. Але для ПЕРЕЛІКУ це безсенсовно (291 прізвище), і
+#: тут чесніше сказати межу й дати цифру.
+_NEGATED_STATE = re.compile(
+    r"\bн[еі]\b[^.?!]{0,20}?(відпуст|відрядж|відсутн)|"
+    r"(відпуст|відрядж|відсутн)\w*[^.?!]{0,10}?\bнема\b")
+
 _COUNT_OR_LIST = re.compile(
     r"скільк|кількіст|\bхто\b|список|перелічи|перелік|покажи|відсутн|"
     r"наявн|склад")
@@ -463,11 +478,45 @@ def extract_dates(question):
 
     if "зараз" in low or "сьогодні" in low or "на даний момент" in low:
         return today, None, None
+
+    # Відносні вирази. Без них «рік тому» тихо ставало СЬОГОДНІ, і чат на
+    # питання про минуле впевнено віддавав сьогоднішній перелік (ворожий
+    # прохід 26.08). Той самий клас, що «1 січня 1990» -> поточний рік.
+    if "вчора" in low or "учора" in low:
+        return today - datetime.timedelta(days=1), None, None
+    if "позавчора" in low:
+        return today - datetime.timedelta(days=2), None, None
+    m = re.search(r"(\d+)?\s*(рік|року|роки|років|місяц\w*|тижн\w*|"
+                  r"тиждень|дн\w*|день)\s+тому", low)
+    if m:
+        count = int(m.group(1) or 1)
+        unit = m.group(2)
+        if unit.startswith(("рік", "року", "роки", "років")):
+            days = 365 * count
+        elif unit.startswith("місяц"):
+            days = 30 * count
+        elif unit.startswith(("тижн", "тиждень")):
+            days = 7 * count
+        else:
+            days = count
+        return today - datetime.timedelta(days=days), None, None
+    if "минулого року" in low:
+        return None, datetime.date(today.year - 1, 1, 1), \
+               datetime.date(today.year - 1, 12, 31)
+    if "минулого місяця" in low:
+        first = datetime.date(today.year, today.month, 1)
+        last_prev = first - datetime.timedelta(days=1)
+        return None, datetime.date(last_prev.year, last_prev.month, 1), last_prev
     return None, None, None
 
 
 def extract_state(question):
     low = question.lower()
+    # Обидва стани в одному питанні («у відпустці І у відрядженні») -- це
+    # питання про відсутніх узагалі. Доти вигравав перший `if`, і відповідь
+    # тихо була лише про відпустки (ворожий прохід 26.08).
+    if re.search(r"відпуст", low) and re.search(r"відрядж", low):
+        return "absent"
     if re.search(r"відпуст", low):
         return "leave"
     if re.search(r"відрядж", low):
@@ -552,6 +601,15 @@ def rules_route(question):
     # там, де підрозділ поєднаний із ПІДРАХУНКОМ або ПЕРЕЛІКОМ людей, бо
     # саме таку відповідь база дати не може: зв'язку особа-підрозділ у ній
     # немає (штатка -- зона Андрія, її ще нема).
+    # ГЕЙТ ЗАПЕРЕЧЕННЯ -- перед усіма підрахунками стану, включно з
+    # підрозділами: «хто НЕ у відпустці» це інше питання, а не те саме з
+    # мінусом. Стоїть тут, бо нижче питання вже «впізнають» як звичайний
+    # підрахунок і заперечення губиться (ворожий прохід 26.08).
+    if state and _NEGATED_STATE.search(low) and _COUNT_OR_LIST.search(low):
+        return "count_not_in_state", {"dims": STATE_DIMS[state],
+                                      "state": state,
+                                      "on_date": on_date or today}
+
     if _SUBDIVISION.search(low) and _COUNT_OR_LIST.search(low):
         # Штатка в базі з 25.08 (300 осіб, вимір `subdivision`), тому питання
         # про підрозділ тепер ВІДПОВІДНЕ. Доти тут стояла чесна відмова -- і
@@ -563,6 +621,19 @@ def rules_route(question):
         #   - підрозділ названий, але такого немає -> ЧЕСНА ВІДМОВА, не нуль
         #     (нуль читався б як «там нікого», а насправді немає підрозділу);
         #   - підрозділ не названий («по підрозділах», «по ротах») -> розклад.
+        # Порівняння, суперлатив і «дві роти разом» -- це питання на РОЗКЛАД,
+        # а не про одну роту. Ворожий прохід 26.08 дав три різні неправди:
+        # «у якій роті найбільше» -> відмова «такого підрозділу немає»;
+        # «у 1 більше, ніж у 2?» -> цифра лише по 1-й; «у 2 і 3 разом» ->
+        # цифра лише по 3-й. Усі три виглядали як відповідь на питання.
+        if re.search(r"найбільш|найменш|більше|менше|порівня|котр|яка з|"
+                     r"у якій\s+(?:рот|взвод|підрозділ)|"
+                     r"\d\s*(?:-?[а-яіїєґ]{1,2})?\s*(?:та|і|й|,)\s*\d\s*"
+                     r"(?:-?[а-яіїєґ]{1,2})?\s*рот|разом", low):
+            st = state or "absent"
+            return "subdivision_breakdown", {"dims": STATE_DIMS[st],
+                                             "state": st,
+                                             "on_date": on_date or today}
         want = extract_subdivision(question)
         if want == "невідомий":
             return "subdivision_unknown", {}
@@ -1133,6 +1204,23 @@ def run_template(template_id, params):
         lines.append(f"Непідтверджених (чернетки, у підрахунок не входять): {u}.")
         lines += _unmatched_note(params)
         lines += _zero_coverage_lines(n, params.get("on_date"))
+
+    elif template_id == "count_not_in_state":
+        total = rows[0]["total"] if rows else 0
+        in_state = rows[0]["in_state"] if rows else 0
+        u = unconfirmed[0]["n"] if unconfirmed else 0
+        lines.append(f"{_people(total - in_state)} НЕ {state_lbl}: "
+                     f"{total} у реєстрі мінус {in_state} {state_lbl}.")
+        lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
+        # Дві межі, без яких цифра неправдива: доповнення рахується від
+        # ШТАТКИ (хто сьогодні в частині фізично, база не знає), і чернетки
+        # не враховані в тих, хто в стані.
+        lines.append("Це доповнення до складу ЗА ШТАТКОЮ: чи людина сьогодні "
+                     "фізично в частині, база не знає.")
+        lines.append(f"Непідтверджених записів про {state_lbl} (у підрахунок "
+                     f"не входять): {u}.")
+        lines.append("Переліку не даю навмисно: кількасот прізвищ — це не "
+                     "відповідь. Можу перелічити тих, хто в стані.")
 
     elif template_id == "count_by_state_period":
         n = rows[0]["n"]
