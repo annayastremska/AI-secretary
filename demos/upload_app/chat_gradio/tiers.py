@@ -574,6 +574,13 @@ def rules_route(question):
         common = {"dims": STATE_DIMS[st], "state": st,
                   "on_date": on_date or today}
         if want:
+            # «Хто…» -- це питання на ПЕРЕЛІК, і підрозділ цього не змінює.
+            # Доти гейт віддавав усе в підрахунок, і на «хто у 2 роті у
+            # відпустці» людина отримувала цифру: формально правда, але не
+            # відповідь -- прізвища потрібні, щоб подзвонити.
+            if re.search(r"^хто\b|хто\s|список|покажи|перелік", low):
+                return "list_by_state_in_subdivision", dict(common,
+                                                            subdivision=want)
             return "count_by_state_in_subdivision", dict(common,
                                                          subdivision=want)
         return "subdivision_breakdown", common
@@ -1265,6 +1272,36 @@ def run_template(template_id, params):
         lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
         lines.append(f"Непідтверджених (чернетки, у підрахунок не входять): {u}.")
         lines += _zero_coverage_lines(n, params.get("on_date"))
+
+    elif template_id == "list_by_state_in_subdivision":
+        where = _subdivision_label(params.get("subdivision"))
+        u_rows = unconfirmed or []
+        if not rows:
+            lines.append(f"Нікого: підтверджених записів «{state_lbl}» — "
+                         f"{where} — на {params['on_date']} немає.")
+        else:
+            lines.append(f"{_people(len({r['name'] for r in rows}))} "
+                         f"{state_lbl} — {where}:")
+            for r in rows:
+                lines.append(f"- {_esc(r['name'])} — "
+                             f"{_esc(DIM_LABEL.get(r['dim'], r['dim']))}"
+                             f", {_fmt_period(r)} "
+                             f"(документ №{r['source_doc_id']} у базі)")
+        in_sub = _subdivision_size(params.get("subdivision"))
+        if in_sub:
+            lines.append(f"Склад підрозділу за штаткою: {_people(in_sub)}.")
+        lines.append(f"Зріз: на {params['on_date']} "
+                     f"(за підтвердженими фактами).")
+        if u_rows:
+            lines.append(f"Окремо непідтверджені (чекають перевірки людиною, "
+                         f"у підсумок не входять): {len(u_rows)}")
+            for r in u_rows:
+                lines.append(f"- {_esc(r['name'])} — "
+                             f"{_esc(DIM_LABEL.get(r['dim'], r['dim']))}"
+                             f", {_fmt_period(r)} — непідтверджено")
+        else:
+            lines.append("Непідтверджених записів на цю дату: 0.")
+        lines += _zero_coverage_lines(len(rows), params.get("on_date"))
 
     elif template_id == "subdivision_breakdown":
         if not rows:

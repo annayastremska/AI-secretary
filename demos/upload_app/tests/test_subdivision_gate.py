@@ -45,17 +45,27 @@ KNOWN = [
     "Скільком у другій роті у відпустці?",
     "Скільком у 1-й механізованій роті у відрядженні?",
     "Скільком у взводі забезпечення у відпустці сьогодні?",
+]
+
+#: «Хто…» про підрозділ -- це ПЕРЕЛІК, не число (26.08). Доти гейт віддавав
+#: усе в підрахунок, і на «хто у 3 роті» людина отримувала цифру: формально
+#: правда, але не відповідь -- прізвища потрібні, щоб подзвонити.
+KNOWN_LIST = [
     "Хто відсутній у 3 роті?",
+    "Покажи відсутніх у взводі забезпечення",
+    "Хто у 2 роті зараз у відпустці?",
 ]
 
 
-@pytest.mark.parametrize("question", KNOWN)
-def test_known_subdivision_is_counted(question):
+@pytest.mark.parametrize("question", KNOWN + KNOWN_LIST)
+def test_known_subdivision_is_answered_not_refused(question):
     """ГОЛОВНЕ: підрозділ зі штатки більше не отримує відмову."""
     route = tiers.rules_route(question)
     assert route, question
     tid, params = route
-    assert tid == "count_by_state_in_subdivision", (question, tid)
+    want = ("list_by_state_in_subdivision" if question in KNOWN_LIST
+            else "count_by_state_in_subdivision")
+    assert tid == want, (question, tid)
     # параметри мусять бути ПОВНІ: без dims/on_date шаблон не виконається, і
     # питання тихо поїде на стару дорогу просити дату (так і було в першій
     # спробі -- перевірено на сервері)

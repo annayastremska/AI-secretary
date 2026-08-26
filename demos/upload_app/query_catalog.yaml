@@ -864,6 +864,55 @@ templates:
           WHERE sd.code = 'subdivision'
             AND sf.value ILIKE %(subdivision)s)
 
+  # Нащо: «ХТО у 2 роті у відпустці» -- питання на перелік, а не на число.
+  # Знайдено живим прогоном 26.08: гейт підрозділів віддавав будь-яке питання
+  # у підрахунок, і на «хто» людина отримувала цифру. Формально правда, але не
+  # відповідь: секретареві потрібні прізвища, щоб подзвонити.
+  - id: list_by_state_in_subdivision
+    title: Хто у стані в конкретному підрозділі на дату
+    examples:
+      - Хто у 2 роті зараз у відпустці?
+      - Покажи відсутніх у взводі забезпечення
+      - Список у відрядженні по 1-й роті
+    params: [dims, on_date, subdivision]
+    answer_hint: >
+      Перелік осіб ЦЬОГО підрозділу: ПІБ, вимір, період, номер документа.
+      Назвати підрозділ так, як він у базі, і дату зрізу. Чернетки -- окремо.
+    sql: >
+      SELECT o.canonical_name AS name, d.code AS dim,
+             f.valid_from, f.valid_to, f.source_doc_id
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN objects o ON o.id = f.object_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'confirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+        AND EXISTS (SELECT 1 FROM facts sf
+                    JOIN dimensions sd ON sd.id = sf.dimension_id
+                                      AND sd.code = 'subdivision'
+                    WHERE sf.object_id = f.object_id
+                      AND sf.value ILIKE %(subdivision)s)
+      ORDER BY o.canonical_name
+    sql_unconfirmed: >
+      SELECT o.canonical_name AS name, d.code AS dim,
+             f.valid_from, f.valid_to, f.source_doc_id
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN objects o ON o.id = f.object_id
+      WHERE d.code = ANY(%(dims)s)
+        AND f.status = 'unconfirmed'
+        AND f.valid_from IS NOT NULL
+        AND f.valid_from <= %(on_date)s
+        AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+        AND EXISTS (SELECT 1 FROM facts sf
+                    JOIN dimensions sd ON sd.id = sf.dimension_id
+                                      AND sd.code = 'subdivision'
+                    WHERE sf.object_id = f.object_id
+                      AND sf.value ILIKE %(subdivision)s)
+      ORDER BY o.canonical_name
+
   # Нащо: «скільки всього по підрозділах» -- одна відповідь замість п'яти
   # питань. Це і є та таблиця, яку секретар зводить руками.
   - id: subdivision_breakdown
