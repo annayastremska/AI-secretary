@@ -47,6 +47,24 @@ CANDIDATES = 70
 QUOTE_CAP = 3000
 QUERY_PREFIX = "query: "
 
+# Домен як фільтр УСЕРЕДИНІ запиту -- пропозиція Ані
+# (docs/contracts/2026-08-22_domain-as-search-filter.md).
+#
+# Сьогодні цей фільтр не змінює НІ ОДНОГО рядка: одиниці будуються лише з
+# `domain='normative'` (див. build_units_test.py), тому весь індекс і так
+# процедурний. Заміряно: leave 95 документів, deployment 63, normative 44 --
+# але одиниці є тільки в normative, а факти тільки в leave/deployment/staffing.
+# Тобто два шляхи відповіді розділені ДАНИМИ, а не запитом.
+#
+# Фільтр усе одно ставиться, і причина конкретна: інваріант живе в скрипті
+# індексації, а не в запиті, і зникає в ту мить, коли хтось проіндексує
+# гібридний документ (довідка ВЛК дає І факти, І текст для цитати -- це
+# розділ 7 архітектурного документа, тобто планована річ). Тоді пошук почне
+# тихо віддавати відпускні квитки на процедурні питання -- рівно та поломка,
+# про яку Аня й писала: на «скільком зараз у відпустці» найрелевантнішим за
+# текстом буде фрагмент СТАТУТУ, а не квиток.
+PROCEDURAL = ("normative",)
+
 
 def only_docs(cur, doc_ids):
     """Обмежує пошук переліком документів -- для запиту з номером.
@@ -73,9 +91,11 @@ def lexical(cur, query, limit=CANDIDATES, docs=None):
           JOIN documents d ON d.id = u.document_id
          WHERE u.tsv @@ {tsq}
            AND d.validity = 'current'
+           AND d.domain = ANY(%(domains)s)
            {dfilter}
          ORDER BY score DESC LIMIT %(lim)s
-    """, {"q": query, "lim": limit, "docs": docs})
+    """, {"q": query, "lim": limit, "docs": docs,
+          "domains": list(PROCEDURAL)})
     return cur.fetchall()
 
 
@@ -93,9 +113,11 @@ def semantic(cur, vec, limit=CANDIDATES, docs=None):
           JOIN documents d ON d.id = u.document_id
          WHERE u.embedding IS NOT NULL
            AND d.validity = 'current'
+           AND d.domain = ANY(%(domains)s)
            {dfilter}
          ORDER BY u.embedding <=> %(v)s::public.vector LIMIT %(lim)s
-    """, {"v": vec, "lim": limit, "docs": docs})
+    """, {"v": vec, "lim": limit, "docs": docs,
+          "domains": list(PROCEDURAL)})
     return cur.fetchall()
 
 
