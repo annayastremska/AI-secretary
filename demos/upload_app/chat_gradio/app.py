@@ -669,6 +669,34 @@ def answer_returning(date, subdivision):
     return body + footer("підрахунок", doc_source(rows), unconfirmed_note(date))
 
 
+def current_absences(rows, today=None):
+    """-> документи, за якими людини НЕМА В ЧАСТИНІ САМЕ ЗАРАЗ.
+
+    `status == 'чинний'` -- це про довіру до факту (confirmed), а не про те,
+    чи триває відсутність сьогодні. 26.08 їх переплутали, і відповідь про
+    Гавриша казала «Поза частиною — відпустка до 2026-08-14», тобто про
+    відпустку, що скінчилась 12 днів тому. Дві умови поверх статусу:
+
+      * період мусить накривати сьогодні;
+      * відмітки про фактичне повернення бути не мусить -- якщо людина вже
+        повернулась, документ ще чинний, а людина в частині.
+    """
+    day = (today or datetime.date.today()).isoformat()
+    out = []
+    for r in rows:
+        if r["status"] != "чинний":
+            continue
+        if (r.get("actual_return") or "").strip():
+            continue
+        start, end = (r.get("date_from") or ""), (r.get("date_to") or "")
+        if start and start > day:
+            continue                      # ще не почалась
+        if end and end < day:
+            continue                      # вже скінчилась
+        out.append(r)
+    return out
+
+
 def answer_person(name):
     """Відповідь про людину: СПЕРШУ хто вона, потім документи.
 
@@ -680,7 +708,7 @@ def answer_person(name):
     а не як заголовок."""
     people = db.find_people(name=name)
     rows = db.absences_for_person(name, only_active=False)
-    active = [r for r in rows if r["status"] == "чинний"]
+    active = current_absences(rows)
     parts = []
     # 1) ХТО ЦЕ -- перше, що людина читає
     if people:
@@ -720,9 +748,21 @@ def answer_person(name):
         # «скасовано» означає «більше не діє», «чернетка» -- «ще не враховано».
         # Тому формулювання виводиться зі СТАНІВ документів, а не одне на всі
         # випадки.
+        # Чинні документи є, але жоден не накриває сьогодні -- людина в
+        # частині, і сказати треба саме це, а не «всі документи скасовані».
+        past = [r for r in rows if r["status"] == "чинний"]
         drafts = [r for r in rows if r.get("fact_status") == "unconfirmed"]
         cancelled = [r for r in rows if r["status"] == "скасований"]
-        if drafts and not cancelled:
+        if past:
+            last = max(past, key=lambda r: (r.get("date_to") or ""))
+            returned = (last.get("actual_return") or "").strip()
+            parts.append(
+                f"**У частині** — за документами зараз відсутності немає. "
+                f"Остання: {_esc(last['doc_type'])} {_esc(last['doc_number'])}"
+                + (f", до {_esc(last['date_to'])}" if last["date_to"] else "")
+                + (f", фактично повернувся {_esc(returned)}." if returned
+                   else "."))
+        elif drafts and not cancelled:
             parts.append(
                 f"**За документами у частині** — усі записи про відсутність "
                 f"({len(drafts)}) у стані чернетки: вони чекають підтвердження "

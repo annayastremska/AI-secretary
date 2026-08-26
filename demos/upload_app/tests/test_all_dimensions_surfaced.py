@@ -19,6 +19,8 @@
 Запуск:
     python -m pytest demos/upload_app/tests/test_all_dimensions_surfaced.py -q
 """
+import datetime
+
 from demos.upload_app.chat_gradio import app
 
 tiers = app.tier_chat
@@ -88,3 +90,44 @@ def test_list_says_plainly_when_document_number_is_missing(monkeypatch):
         "list_by_state", {"dims": ["leave"], "state": "leave",
                           "date_from": "2026-08-30", "date_to": "2026-08-30"})
     assert "номер документа не витягнуто" in text
+
+
+def _row(**kw):
+    return dict(ROW, **kw)
+
+
+def test_current_absence_ignores_finished_documents():
+    """«Поза частиною» -- це про сьогодні, а не про «є чинний документ».
+
+    Живий прогін 26.08 на Гавришу: відповідь казала «Поза частиною —
+    відпустка №101, до 2026-08-14», хоч та відпустка скінчилась 12 днів тому і
+    в тій самій відповіді стояло «фактично повернувся 2026-08-15». Сьогодні він
+    у відрядженні. `status == 'чинний'` -- про довіру до факту, не про те, чи
+    людини немає ЗАРАЗ."""
+    today = datetime.date(2026, 8, 26)
+    finished = _row(doc_number="№101", date_from="2026-08-03",
+                    date_to="2026-08-14", actual_return="2026-08-15")
+    ongoing = _row(doc_number="№207", doc_type="відрядження",
+                   date_from="2026-08-26", date_to="2026-08-31",
+                   actual_return="")
+    future = _row(doc_number="№300", date_from="2026-09-10",
+                  date_to="2026-09-20", actual_return="")
+    got = app.current_absences([finished, ongoing, future], today=today)
+    assert [r["doc_number"] for r in got] == ["№207"]
+
+
+def test_returned_person_is_told_they_are_in_the_unit(monkeypatch):
+    """Чинний документ є, але він у минулому -> «У частині», не «Поза»."""
+    today = datetime.date(2026, 8, 26)
+    finished = _row(doc_number="№101", date_from="2026-08-03",
+                    date_to="2026-08-14", actual_return="2026-08-15")
+    monkeypatch.setattr(app.db, "find_people", lambda name=None, **k: [])
+    monkeypatch.setattr(app.db, "absences_for_person", lambda *a, **k: [finished])
+    monkeypatch.setattr(app.db, "coverage_note", lambda *a, **k: "")
+    monkeypatch.setattr(app.datetime, "date",
+                        type("D", (), {"today": staticmethod(lambda: today),
+                                       "fromisoformat": datetime.date.fromisoformat}))
+    out = app.answer_person("Гавриш")
+    assert "**У частині**" in out
+    assert "Поза частиною" not in out
+    assert "фактично повернувся 2026-08-15" in out
