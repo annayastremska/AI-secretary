@@ -139,8 +139,58 @@ def norm(s):
     return re.sub(r"\s+", " ", s).strip().casefold()
 
 
+def lexemes(cur, text):
+    """Леми тексту за тим самим українським словником, що й пошук.
+
+    Не наївне порівняння слів: «обчислювальна» і «обчислювальної» -- одна лема,
+    а рядково вони різні. Службові слова словник відкидає сам, тому окремого
+    списку стоп-слів тут не треба.
+    """
+    cur.execute("SELECT unnest(tsvector_to_array(to_tsvector('ukrainian', %s)))",
+                (text,))
+    return {r[0] for r in cur.fetchall()}
+
+
+def overlap(cur, question, quote):
+    """Частка лем питання, присутніх у цитаті.
+
+    Друга перевірка поверх підрядкової. Підрядкова ловить ВИГАДКУ (цитати, якої
+    в документі немає), але не ловить НЕДОРЕЧНІСТЬ: на питанні «що таке
+    обчислювальна система» модель видала дослівний, але сторонній перелік
+    документів для експертизи -- і сказала, що це визначення.
+    """
+    q = lexemes(cur, question)
+    # Леми, яких у корпусі немає ЖОДНОГО разу, з знаменника прибираємо: це
+    # одруківки й слова поза корпусом, і вони не можуть бути в жодній цитаті.
+    # Без цього питання «за скільки днів подавати рапорд на відпустак» давало
+    # збіг 0.00 через ВЛАСНІ одруківки, а не через недоречність цитати.
+    dropped = set()
+    if q:
+        # `plainto_tsquery('simple', ...)` -- бо в `tsv` уже лежать леми
+        # Hunspell, і повторно стемити їх не треба, лише привести регістр.
+        # Перша версія цього запиту склеювала tsquery з рядка через `||` і
+        # ламалась на лапках -- `known` виходив порожнім, тому ВСІ леми
+        # вважались невідомими і збіг ставав 1.00 у кожному випадку.
+        cur.execute(f"""
+            SELECT l FROM unnest(%s::text[]) AS l
+             WHERE EXISTS (SELECT 1 FROM {SU.SCHEMA}.document_units u
+                            WHERE u.tsv @@ plainto_tsquery('simple', l))
+        """, (sorted(q),))
+        known = {r[0] for r in cur.fetchall()}
+        dropped = q - known
+        q = known
+    if not q:
+        return 1.0, dropped
+    a = lexemes(cur, quote)
+    missing = q - a
+    return len(q & a) / len(q), missing
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--min-overlap", type=float, default=0.5,
+                    help="нижче цієї частки лем питання цитата позначається "
+                         "як підозріла")
     ap.add_argument("--questions", required=True)
     ap.add_argument("--top", type=int, default=2,
                     help="скільком верхнім одиницям задавати питання")
@@ -164,7 +214,9 @@ def main(argv=None):
     with psycopg.connect(dsn()) as conn, conn.cursor() as cur:
         for q in questions:
             vec = str(encode(["query: " + q])[0])
-            fused = SU.rrf_merge(SU.lexical(cur, q), SU.semantic(cur, vec))
+            fused = SU.dedupe_by_text(
+                cur, SU.rrf_merge(SU.lexical(cur, q), SU.semantic(cur, vec)),
+                SU.canon_map(cur))
             if rescore and fused:
                 pool = fused[:args.rerank]
                 texts = [SU.quote_of(cur, d, b)[0][:RERANK_CHARS]
@@ -200,13 +252,19 @@ def main(argv=None):
                 quote_raw = re.sub(r"\s+", " ", (data.get("quote") or "")).strip()
                 exact = bool(quote_raw) and norm(quote_raw) in norm(body)
                 quote = quote_raw
+                ov, missing = (overlap(cur, q, quote_raw) if quote_raw
+                               else (0.0, set()))
                 verdicts.append((answers, exact))
                 mark = "ВІДПОВІДАЄ" if answers else "не відповідає"
                 print(f"\n  [{base[:44]}] {title[:44]}")
                 print(f"    модель: {mark}   цитата дослівна: "
                       f"{'ТАК' if exact else ('НІ -- ВІДКИНУТО' if quote else 'немає')}"
                       f"   {dt:.1f} с")
-                print(f"    чому: {norm(data.get('why'))[:150]}")
+                print(f"    чому: {str(data.get('why') or '')[:150]}")
+                if quote_raw:
+                    flag = "  ⚠ ПІДОЗРІЛА" if ov < args.min_overlap else ""
+                    print(f"    збіг лем питання: {ov:.2f}{flag}"
+                          + (f"   немає: {sorted(missing)[:5]}" if missing else ""))
                 if quote:
                     print(f"    цитата: {quote[:220]}")
             if not any(a for a, _ in verdicts):

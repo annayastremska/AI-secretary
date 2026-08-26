@@ -72,6 +72,38 @@ def semantic(cur, vec, limit=CANDIDATES):
     return cur.fetchall()
 
 
+def canon_map(cur):
+    """document_id -> канонічний документ групи дублікатів."""
+    try:
+        cur.execute(f"SELECT document_id, canonical_id FROM {SCHEMA}.doc_groups")
+        return {a: b for a, b in cur.fetchall()}
+    except Exception:
+        return {}
+
+
+def dedupe_by_text(cur, fused, canon, prefix=80):
+    """Прибирає повтори того самого тексту в межах групи дублікатів.
+
+    Ключа `(канонічний документ, мітка)` НЕ достатньо: у документах-дублікатах
+    мітки різні (у 205 пункт зветься `20/20.3`, у 222 інакше), бо нумерація
+    вивантажена по-різному. Тому склеюємо ще й за початком тексту.
+
+    Навіщо: на питанні про рапорт ОБА місця топ-2 пішли на ту саму цитату з
+    пари 237/238. Дублікат не просто повторюється -- він витісняє з видачі
+    документи, які могли б відповісти, і ворота двічі платять за той самий
+    текст.
+    """
+    seen, out = set(), []
+    for (doc_id, base), meta in fused:
+        body, _s, _t = quote_of(cur, doc_id, base)
+        key = (canon.get(doc_id, doc_id), " ".join(body.split())[:prefix].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(((doc_id, base), meta))
+    return out
+
+
 def rrf_merge(*lists):
     """RRF + СКЛЕЮВАННЯ: ключ -- логічна одиниця, а не частина.
 
@@ -122,7 +154,7 @@ def answer(cur, encode, question, top=3, chars=420):
     vec = str(encode([QUERY_PREFIX + question])[0])
     lex = lexical(cur, question)
     sem = semantic(cur, vec)
-    fused = rrf_merge(lex, sem)
+    fused = dedupe_by_text(cur, rrf_merge(lex, sem), canon_map(cur))
 
     print(f"\n{'='*78}\nПИТАННЯ: {question}")
     print(f"  кандидатів: лексика {len(lex)}, семантика {len(sem)}, "
