@@ -190,6 +190,10 @@ def find_people(subdivision=None, name=None):
     rows = _query(sql + " ORDER BY o.id", params)
     return [{
         "service_id": r["service_id"] or f"ID-{r['object_id']}",
+        # service_id вище має підміну на ID-<object_id>, тому по ньому не
+        # видно, чи людина зійшлася зі штаткою. Окремий прапорець -- щоб
+        # картка особи могла це сказати (див. answer_person).
+        "in_roster": bool(r["service_id"]),
         "full_name": r["canonical_name"],
         "rank": _rank_label(r["rank_code"]),
         "position_title": "",   # окремого підтвердженого виміру посади чат не тягне
