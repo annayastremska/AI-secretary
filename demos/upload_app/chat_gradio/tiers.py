@@ -637,6 +637,19 @@ def rules_route(question):
                                                          subdivision=want)
         return "subdivision_breakdown", common
 
+    # ПИТАННЯ ПРО ДОКАЗ -- окремий шаблон, і він мусить вигравати в картки
+    # особи. «Звідки ти знаєш», «чому ти вважаєш», «на підставі чого» -- це
+    # питання не про людину, а про ПОХОДЖЕННЯ факту: спосіб отримання,
+    # упевненість і всі документи-джерела. Доти такі питання йшли на стару
+    # дорогу й отримували перелік документів -- відповідь на інше питання
+    # (блок 4 перевірки, 26.08).
+    if re.search(r"звідки (?:ти )?(?:знаєш|відомо)|чому (?:ти )?(?:вважаєш|"
+                 r"думаєш)|на підстав|яким чином|чим підтвер|доказ", low):
+        name = extract_name(question)
+        if name:
+            return "fact_provenance", {"name": name,
+                                       "name_pattern": f"%{name}%"}
+
     # ГЕЙТ НОРМАТИВКИ -- теж ПЕРЕД підрахунками, і теж через живий дефект.
     #
     # Фінальний адверсарний прохід 25.08: «За скільки днів подавати рапорт на
@@ -1278,6 +1291,49 @@ def run_template(template_id, params):
                         period = f", {_fmt_period(r)}"
                     lines.append(f"- {_esc(r['dim_name'])}: {_esc(r['value'])}{period} "
                                  f"[{mark}; запис №{r['source_doc_id']} у базі]")
+        lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
+
+    elif template_id == "fact_provenance":
+        if not rows:
+            asked = params.get("name") or params.get("name_pattern", "")
+            lines.append(f"Не знайшла фактів про «{_esc(asked)}» — отже й "
+                         f"пояснювати нічого: система про цю особу нічого не "
+                         f"стверджувала.")
+        else:
+            by_person = {}
+            for r in rows:
+                by_person.setdefault(r["name"], []).append(r)
+            for name, facts in by_person.items():
+                lines.append(f"{_esc(name)} — звідки це відомо:")
+                for r in facts:
+                    # Спосіб отримання: якорі бланка чи модель. Це головне в
+                    # цій відповіді -- саме воно відрізняє «прочитано з
+                    # відомого місця бланка» від «витягнуто моделлю».
+                    how = {"anchors": "бланк упізнано якорями",
+                           "model": "бланк визначено моделлю"}.get(
+                        r.get("identification_method"),
+                        r.get("identification_method") or "спосіб не записано")
+                    mark = ("підтверджено людиною" if r["status"] == "confirmed"
+                            else "НЕ підтверджено (чернетка)")
+                    conf = r.get("confidence")
+                    period = (f", {_fmt_period(r)}"
+                              if (r.get("valid_from") or r.get("valid_to"))
+                              else "")
+                    lines.append(
+                        f"- {_esc(r['dim_name'])}: {_esc(r['value'])}{period}")
+                    lines.append(
+                        f"  джерело: документ №{_esc(r.get('document_number') or '?')}"
+                        + (f" від {_esc(r['document_date'])}"
+                           if r.get("document_date") else "")
+                        + f"; {how}"
+                        + (f", впевненість {conf}" if conf is not None else "")
+                        + f"; {mark}")
+                    # Той самий документ часто приходить двічі -- файлом і
+                    # фотографією. Тоді у факта ДВА джерела, і назвати одне --
+                    # це показати половину доказу (таблиця fact_sources).
+                    src = r.get("all_sources")
+                    if src and "," in str(src):
+                        lines.append(f"  джерел у базі кілька: {_esc(src)}")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     elif template_id == "doc_by_number":

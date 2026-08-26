@@ -693,11 +693,19 @@ templates:
              dc.pipeline_meta -> 'identification' ->> 'score' AS identification_score,
              COALESCE(dc.pipeline_meta -> 'field_provenance' -> (f.source_field),
                       dc.pipeline_meta -> 'field_provenance') AS provenance,
-             num.value AS document_number, dat.value AS document_date
+             num.value AS document_number, dat.value AS document_date,
+             src.all_sources
       FROM facts f
       JOIN objects o ON o.id = f.object_id
       JOIN dimensions d ON d.id = f.dimension_id
       JOIN documents dc ON dc.id = f.source_doc_id
+      LEFT JOIN LATERAL (
+        SELECT string_agg(
+                 'запис №' || fs.document_id || ' (' || d3.source_kind || ')',
+                 ', ' ORDER BY fs.is_primary DESC, fs.document_id) AS all_sources
+        FROM fact_sources fs
+        JOIN documents d3 ON d3.id = fs.document_id
+        WHERE fs.fact_id = f.id) src ON true
       LEFT JOIN LATERAL (
         SELECT f2.value FROM facts f2
         JOIN dimensions d2 ON d2.id = f2.dimension_id

@@ -1370,6 +1370,9 @@ _STATE_TEMPLATES = {
     "count_by_state_on_date",
     "count_by_state_period",
     "count_not_in_state",
+    # «Звідки ти знаєш» -- питання про доказ, і на нього відповідає шаблон
+    # походження, а не картка особи зі старої дороги.
+    "fact_provenance",
     "list_by_state",
     "absent_breakdown_on_date",
     "returning_on_date",
