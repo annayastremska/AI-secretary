@@ -863,6 +863,98 @@ WHERE d.code = ANY(%(dims)s)
 """
 
 
+def _subdivision_label(pattern):
+    """Шаблон ILIKE («%2%рота%») -> назва підрозділу, як вона в базі.
+
+    Відповідь мусить називати підрозділ ТАК, ЯК ВІН У ШТАТЦІ («2-га
+    механізована рота»), а не так, як спитала людина: інакше не видно, по чому
+    саме рахували, і «2 рота» можна прочитати як будь-що."""
+    if not pattern:
+        return "підрозділ не названий"
+    like = re.compile(pattern.replace("%", ".*"), re.I)
+    for value in subdivisions():
+        if like.fullmatch(value) or like.match(value):
+            return value
+    return pattern.strip("%").replace("%", " ")
+
+
+def _subdivision_size(pattern):
+    """-> скільком осіб у цьому підрозділі за штаткою (знаменник), або None."""
+    if not pattern:
+        return None
+    try:
+        rows = _run_template_sql(
+            "SELECT COUNT(DISTINCT f.object_id) AS n FROM facts f "
+            "JOIN dimensions d ON d.id = f.dimension_id "
+            "WHERE d.code = 'subdivision' AND f.value ILIKE %(subdivision)s",
+            {"subdivision": pattern})
+        return rows[0]["n"] or None
+    except psycopg.Error:
+        return None
+
+
+def _coverage_note(asked_date):
+    """Межі покриття даних -> рядок або "".
+
+    Нащо. Третій адверсарний прохід 26.08: на «скільком у відпустці 1 січня
+    1990?» чат відповідав «0 осіб» і про межі даних НЕ казав нічого. Нуль без
+    межі читається як «нікого не було», хоч правда -- «за цю дату даних немає»
+    (правило П2). Попередження було на старій дорозі (app.answer_count), а
+    шаблони каталогу її перехопили -- і разом із дорогою зникло попередження.
+
+    Текст позичаємо в db.coverage_note, а не пишемо свій: два різні
+    формулювання про одне й те саме розійдуться при першій же правці.
+    """
+    try:
+        try:
+            from . import db as _db
+        except ImportError:                     # chat_gradio у sys.path напряму
+            import db as _db
+        return _db.coverage_note(asked_date) or ""
+    except Exception:
+        # межі -- довідка, не відповідь: якщо не дістали, краще промовчати,
+        # ніж завалити саму відповідь
+        return ""
+
+
+def _zero_coverage_lines(n, asked_date):
+    """Рядок про межі даних -- ЛИШЕ коли відповідь нульова (за межами покриття
+    ненульової й бути не може, а на кожній відповіді це був би шум)."""
+    if n or not asked_date:
+        return []
+    note = _coverage_note(asked_date)
+    return [note] if note else []
+
+
+def _names_without_service_id(name_pattern):
+    """-> множина ПІБ під цим шаблоном, у яких немає відповідника у штатці.
+
+    Той самий факт, що й у _unmatched_note, але для переліку фактів особи:
+    там цифри немає, є ім'я, тому позначаємо саме ім'я."""
+    if not name_pattern:
+        return set()
+    try:
+        rows = _run_template_sql(
+            "SELECT o.canonical_name AS name FROM objects o "
+            "JOIN object_kinds k ON k.id = o.kind_id AND k.code = 'person' "
+            "JOIN people p ON p.object_id = o.id "
+            "WHERE p.service_id IS NULL AND o.canonical_name ILIKE %(name_pattern)s",
+            {"name_pattern": name_pattern})
+        return {r["name"] for r in rows}
+    except psycopg.Error:
+        return set()
+
+
+def _unmatched_note(params):
+    """Рядок «з них N -- поза штаткою» або [] -- один текст на всі три шаблони
+    підрахунку (на дату, за період, перелік), щоб він не розійшовся."""
+    nm = _unmatched_in_state(params)
+    if not nm:
+        return []
+    return [f"З них {nm} — особи, яких немає у штатці: документ по них є, але "
+            f"сама особа чекає підтвердження людиною."]
+
+
 def _unmatched_in_state(params):
     """-> скільком осіб без відповідника у штатці попало в цю відповідь (0 --
     якщо запит не склався: краще промовчати, ніж злякати неправдою)."""
@@ -998,14 +1090,8 @@ def run_template(template_id, params):
         lines.append(f"{_people(n)} {state_lbl}{denom}.")
         lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
         lines.append(f"Непідтверджених (чернетки, у підрахунок не входять): {u}.")
-        # Скільком у цій цифрі -- люди, яких немає у штатці. Мовчати про це
-        # гірше: тоді «9» виглядає як дев'ять перевірених (див.
-        # _unmatched_in_state).
-        nm = _unmatched_in_state(params)
-        if nm:
-            lines.append(f"З них {nm} — особи, яких немає у штатці: документ "
-                         f"по них є, але сама особа чекає підтвердження "
-                         f"людиною.")
+        lines += _unmatched_note(params)
+        lines += _zero_coverage_lines(n, params.get("on_date"))
 
     elif template_id == "count_by_state_period":
         n = rows[0]["n"]
@@ -1014,6 +1100,10 @@ def run_template(template_id, params):
         lines.append(f"Зріз: період {params['date_from']} — {params['date_to']} "
                      "(за підтвердженими фактами).")
         lines.append(f"Непідтверджених (у підрахунок не входять): {u}.")
+        lines += _unmatched_note(params)
+        # межі перевіряємо по початку періоду: якщо він поза покриттям,
+        # людині треба сказати саме це, а не показувати чистий нуль
+        lines += _zero_coverage_lines(n, params.get("date_from"))
 
     elif template_id == "list_by_state":
         u_rows = unconfirmed or []
@@ -1036,6 +1126,8 @@ def run_template(template_id, params):
                              f", {_fmt_period(r)} — непідтверджено")
         else:
             lines.append("Непідтверджених записів за цей період: 0.")
+        lines += _unmatched_note(params)
+        lines += _zero_coverage_lines(len(rows), params.get("date_from"))
 
     elif template_id == "person_status":
         if not rows:
@@ -1059,8 +1151,13 @@ def run_template(template_id, params):
             if len(by_person) > 1:
                 lines.append(f"Знайдено {len(by_person)} осіб за запитом — "
                              "уточніть ПІБ повніше.")
+            no_sid = _names_without_service_id(params.get("name_pattern"))
             for name, facts in by_person.items():
                 lines.append(f"{_esc(name)}:")
+                if name in no_sid:
+                    lines.append("- ⚠️ відповідника у штатці немає: особу "
+                                 "створено з документа, вона чекає "
+                                 "підтвердження людиною")
                 for r in facts:
                     mark = ("підтверджено" if r["status"] == "confirmed"
                             else "НЕ підтверджено, потребує перевірки")
@@ -1128,6 +1225,63 @@ def run_template(template_id, params):
                      f"(у {_plural(docs or 0, 'документі', 'документах', 'документах')}).")
         lines.append("Це чернетки: у підрахунки вони не входять, доки людина "
                      "не підтвердить.")
+        lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
+
+    elif template_id == "count_by_state_in_subdivision":
+        # Знайдено третім адверсарним проходом 26.08: у цих шаблонів свого
+        # складача тексту НЕ БУЛО, і найголовніше питання показу («скільки в 2
+        # роті у відпустці») віддавало сиру таблицю «n | 1» -- без назви
+        # підрозділу, без дати, без знаменника. Формально не брехня, але
+        # показувати таке нікому не можна.
+        n = rows[0]["n"] if rows else 0
+        u = unconfirmed[0]["n"] if unconfirmed else 0
+        where = _subdivision_label(params.get("subdivision"))
+        lines.append(f"{_people(n)} {state_lbl} — {where}.")
+        # Знаменник тут ІНШИЙ, ніж у відповіді по частині: склад підрозділу.
+        # Не сказати цього означало б дати порівнювати число з 303.
+        in_sub = _subdivision_size(params.get("subdivision"))
+        if in_sub:
+            lines.append(f"Склад підрозділу за штаткою: {_people(in_sub)}.")
+        lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
+        lines.append(f"Непідтверджених (чернетки, у підрахунок не входять): {u}.")
+        lines += _zero_coverage_lines(n, params.get("on_date"))
+
+    elif template_id == "subdivision_breakdown":
+        if not rows:
+            lines.append("Підтверджених відсутностей на цю дату немає ні в "
+                         "одному підрозділі.")
+        else:
+            lines.append(f"Розклад {state_lbl or 'відсутніх'} по підрозділах:")
+            for r in rows:
+                # .get, а не [..]: якщо колонку в каталозі перейменують,
+                # відповідь має лишитись читною, а не впасти винятком і поїхати
+                # на стару дорогу
+                lines.append(f"- {_esc(r.get('subdivision') or 'підрозділ не вказано')}"
+                             f": {_people(r['n'])}")
+            lines.append(f"Разом: {_people(sum(r['n'] for r in rows))}.")
+        # Підрозділ без відсутніх у результат SQL не потрапляє. Якщо про це не
+        # сказати, брак рядка читається як «даних немає», а не як нуль.
+        lines.append("Підрозділи, яких у переліку немає, — це нуль відсутніх, "
+                     "а не брак даних.")
+        # У цього шаблона окремого запиту чернеток немає (розклад рахує лише
+        # підтверджене), тому кажемо це прямо -- інакше з відповіді не видно,
+        # повний це підрахунок чи ні (правило «чернетка ≠ факт»).
+        lines.append("Враховані лише підтверджені факти; чернетки в підрахунок "
+                     "не входять.")
+        lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
+
+    elif template_id == "roster_total":
+        n = rows[0]["n"] if rows else 0
+        with_sid = rows[0].get("зі_штаткою") if rows else 0
+        lines.append(f"У реєстрі {_people(n)}.")
+        if with_sid is not None and with_sid != n:
+            lines.append(f"З них {with_sid} мають відповідник у штатці; "
+                         f"решта {n - with_sid} — особи з документів, які "
+                         f"чекають підтвердження людиною.")
+        # Головна межа цієї відповіді: штатка -- це не «хто сьогодні в
+        # частині». Без цього рядка число читається як фактична наявність.
+        lines.append("Це склад ЗА ШТАТКОЮ: хто сьогодні в частині фізично, "
+                     "база не знає.")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     elif template_id == "documents_count":

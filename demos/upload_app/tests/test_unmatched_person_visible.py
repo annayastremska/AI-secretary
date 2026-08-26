@@ -59,7 +59,48 @@ def test_count_answer_silent_when_all_matched(monkeypatch):
     assert "у штатці" not in _count_answer(monkeypatch, 0)
 
 
+def test_note_reaches_period_and_list_templates(monkeypatch):
+    """Один текст на три шаблони підрахунку -- інакше правда буде лише в
+    одному з трьох питань («скільком зараз», «скільком за період», «хто»)."""
+    monkeypatch.setattr(tiers, "_unmatched_in_state", lambda params: 2)
+    monkeypatch.setattr(tiers, "_people_total", lambda: 303)
+    monkeypatch.setattr(tiers, "_run_template_sql",
+                        lambda sql, params: [{"n": 5}])
+    period, _ = tiers.run_template(
+        "count_by_state_period",
+        {"dims": ["leave"], "state": "leave",
+         "date_from": "2026-08-01", "date_to": "2026-08-31"})
+    assert "З них 2 — особи, яких немає у штатці" in period
+
+    monkeypatch.setattr(tiers, "_run_template_sql", lambda sql, params: [])
+    listing, _ = tiers.run_template(
+        "list_by_state",
+        {"dims": ["leave"], "state": "leave",
+         "date_from": "2026-08-01", "date_to": "2026-08-31"})
+    assert "З них 2 — особи, яких немає у штатці" in listing
+
+
 def test_unmatched_helper_returns_zero_without_dims():
     # немає з чим питати базу -> 0, а не виняток і не вигадана цифра
     assert tiers._unmatched_in_state({}) == 0
     assert tiers._unmatched_in_state({"dims": ["leave"]}) == 0
+
+
+def test_person_status_marks_the_name(monkeypatch):
+    """Другий шлях відповіді про людину -- шаблон каталогу person_status.
+    Там цифри немає, є ім'я, тож позначка мусить стояти біля імені."""
+    facts = [{"name": "Крижанівський Тарас Богданович",
+              "dim_name": "відпустка", "dim": "leave", "value": "сімейні",
+              "valid_from": "2026-08-26", "valid_to": "2026-09-01",
+              "status": "confirmed", "confidence": 0.9, "source_doc_id": 124}]
+
+    def fake_sql(sql, params):
+        if "service_id IS NULL" in sql:
+            return [{"name": "Крижанівський Тарас Богданович"}]
+        return facts
+
+    monkeypatch.setattr(tiers, "_run_template_sql", fake_sql)
+    monkeypatch.setattr(tiers, "_people_total", lambda: 303)
+    text, _ = tiers.run_template("person_status",
+                                 {"name_pattern": "%Крижанівськ%"})
+    assert "відповідника у штатці немає" in text

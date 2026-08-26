@@ -37,7 +37,12 @@ def _fake_rows_for(sql):
                        ("domain", "leave"), ("queue_type", "new_person"),
                        ("source_file", "DEMO-01.docx"), ("id", 1),
                        ("title", "Наказ"), ("snippet", "текст"),
-                       ("uploaded_at", datetime.date(2026, 5, 2))):
+                       ("uploaded_at", datetime.date(2026, 5, 2)),
+                       # 26.08: шаблони про підрозділи мають свою колонку, і
+                       # без неї рендер падав KeyError -- заглушка «на всі
+                       # шаблони» цього не покривала
+                       ("subdivision", "2-га механізована рота"),
+                       ("зі_штаткою", 300)):
         if key in sql or True:
             row[key] = value
     return [row]
