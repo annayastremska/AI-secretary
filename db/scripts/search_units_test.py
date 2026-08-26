@@ -36,7 +36,11 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "db", "scripts"))
 
 import extract_document_identity as E  # noqa: E402
 
-SCHEMA = "andriy_test"
+# Таблиці задаються повними іменами через середовище: після міграції одиниці
+# живуть у постійній схемі (`document_units`), а тестова лишається для
+# порівняння. Один і той самий скрипт мусить уміти в обидві.
+UNITS = os.environ.get("UNITS_TABLE", "document_units")
+GROUPS = os.environ.get("GROUPS_TABLE", "document_groups")
 RRF_K = 60
 CANDIDATES = 70
 QUOTE_CAP = 3000
@@ -50,7 +54,7 @@ def lexical(cur, query, limit=CANDIDATES):
            " ' & ', ' | ')::tsquery")
     cur.execute(f"""
         SELECT u.id, u.document_id, u.base_label, ts_rank(u.tsv, {tsq}) AS score
-          FROM {SCHEMA}.document_units u
+          FROM {UNITS} u
           JOIN documents d ON d.id = u.document_id
          WHERE u.tsv @@ {tsq}
            AND d.validity = 'current'
@@ -60,10 +64,15 @@ def lexical(cur, query, limit=CANDIDATES):
 
 
 def semantic(cur, vec, limit=CANDIDATES):
+    # HNSW за замовчуванням обходить лише ~40 вузлів (`hnsw.ef_search`), і при
+    # фільтрі по чинності частина з них відпадає ПІСЛЯ індексу -- тому запит на
+    # 70 кандидатів віддавав 20-52. Піднімаємо обхід: він мусить бути більшим
+    # за потрібну кількість із запасом на фільтр.
+    cur.execute("SET LOCAL hnsw.ef_search = 200")
     cur.execute(f"""
         SELECT u.id, u.document_id, u.base_label,
                1 - (u.embedding <=> %(v)s::public.vector) AS score
-          FROM {SCHEMA}.document_units u
+          FROM {UNITS} u
           JOIN documents d ON d.id = u.document_id
          WHERE u.embedding IS NOT NULL
            AND d.validity = 'current'
@@ -75,7 +84,7 @@ def semantic(cur, vec, limit=CANDIDATES):
 def canon_map(cur):
     """document_id -> канонічний документ групи дублікатів."""
     try:
-        cur.execute(f"SELECT document_id, canonical_id FROM {SCHEMA}.doc_groups")
+        cur.execute(f"SELECT document_id, canonical_id FROM {GROUPS}")
         return {a: b for a, b in cur.fetchall()}
     except Exception:
         return {}
@@ -127,7 +136,7 @@ def quote_of(cur, doc_id, base_label):
     """Цитата -- ціла логічна одиниця з ОРИГІНАЛУ, а не текст частини."""
     cur.execute(f"""
         SELECT min(char_start), max(char_end), bool_or(from_length_split)
-          FROM {SCHEMA}.document_units
+          FROM {UNITS}
          WHERE document_id = %s AND base_label = %s
     """, (doc_id, base_label))
     lo, hi, was_split = cur.fetchone()

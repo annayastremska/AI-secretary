@@ -173,7 +173,7 @@ def overlap(cur, question, quote):
         # вважались невідомими і збіг ставав 1.00 у кожному випадку.
         cur.execute(f"""
             SELECT l FROM unnest(%s::text[]) AS l
-             WHERE EXISTS (SELECT 1 FROM {SU.SCHEMA}.document_units u
+             WHERE EXISTS (SELECT 1 FROM {SU.UNITS} u
                             WHERE u.tsv @@ plainto_tsquery('simple', l))
         """, (sorted(q),))
         known = {r[0] for r in cur.fetchall()}
