@@ -133,14 +133,21 @@ templates:
       source_doc_id (запис у базі). Наприкінці підсумок «разом N осіб» і,
       якщо sql_unconfirmed непорожній, «ще M у чернетках».
     sql: >
-      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id
+      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id,
+             t.doc_number
       FROM (
         SELECT DISTINCT ON (f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, d.code AS dim, f.value,
-               f.valid_from, f.valid_to, f.source_doc_id
+               f.valid_from, f.valid_to, f.source_doc_id,
+               dn.value AS doc_number
         FROM facts f
         JOIN dimensions d ON d.id = f.dimension_id
         JOIN objects o ON o.id = f.object_id
+        LEFT JOIN LATERAL (
+          SELECT f2.value FROM facts f2
+          JOIN dimensions d2 ON d2.id = f2.dimension_id
+          WHERE f2.source_doc_id = f.source_doc_id
+            AND d2.code = 'document_number' LIMIT 1) dn ON true
         WHERE d.code = ANY(%(dims)s)
           AND f.status = 'confirmed'
           AND f.valid_from IS NOT NULL
@@ -151,14 +158,21 @@ templates:
       ) t
       ORDER BY t.name, t.valid_from
     sql_unconfirmed: >
-      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id
+      SELECT t.name, t.dim, t.value, t.valid_from, t.valid_to, t.source_doc_id,
+             t.doc_number
       FROM (
         SELECT DISTINCT ON (f.object_id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to)
                o.canonical_name AS name, d.code AS dim, f.value,
-               f.valid_from, f.valid_to, f.source_doc_id
+               f.valid_from, f.valid_to, f.source_doc_id,
+               dn.value AS doc_number
         FROM facts f
         JOIN dimensions d ON d.id = f.dimension_id
         JOIN objects o ON o.id = f.object_id
+        LEFT JOIN LATERAL (
+          SELECT f2.value FROM facts f2
+          JOIN dimensions d2 ON d2.id = f2.dimension_id
+          WHERE f2.source_doc_id = f.source_doc_id
+            AND d2.code = 'document_number' LIMIT 1) dn ON true
         WHERE d.code = ANY(%(dims)s)
           AND f.status = 'unconfirmed'
           AND f.valid_from IS NOT NULL
