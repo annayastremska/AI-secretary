@@ -472,12 +472,18 @@ def data_coverage():
             # відправляти людину в порожній період, тільки з іншого боку.
             # Покриття мусить бути про ТЕ, про що людина питає: відпустки й
             # відрядження.
-            row = _query("SELECT min(f.valid_from) AS d_from, "
-                         "max(f.valid_to) AS d_to FROM facts f "
-                         "JOIN dimensions d ON d.id = f.dimension_id "
-                         "WHERE f.valid_from IS NOT NULL "
-                         "AND d.code = ANY(%(dims)s)",
-                         {"dims": ABSENCE_DIMS})[0]
+            rows = _query("SELECT min(f.valid_from) AS d_from, "
+                          "max(f.valid_to) AS d_to FROM facts f "
+                          "JOIN dimensions d ON d.id = f.dimension_id "
+                          "WHERE f.valid_from IS NOT NULL "
+                          "AND d.code = ANY(%(dims)s)",
+                          {"dims": ABSENCE_DIMS})
+            # Порожній результат ловимо явно. Доти тут стояло `[...][0]` під
+            # `except Exception`, і IndexError глушився разом із помилками бази.
+            # Коли except звузили до помилок бази (це було потрібно, щоб
+            # «база недоступна» не перетворювалась у тиху неправду), виняток
+            # виліз -- і його зловив тест. Саме для цього звуження й робилось.
+            row = rows[0] if rows else {"d_from": None, "d_to": None}
             if row["d_from"] and row["d_to"]:
                 _COVERAGE = (row["d_from"], row["d_to"])
             else:
