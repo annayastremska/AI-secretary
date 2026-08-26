@@ -727,17 +727,17 @@ def build_checks(ctx):
                                               params={}),
         # Склад за штаткою: цифру звірити з .md неможливо -- це дані
         # штатки, яких пайплайн не виробляє. Перевіряється виконанням.
-        "roster_total": dict(kind="run", params={}),
+        "roster_total": dict(kind="execute", params={}),
         # Штатка в базі з 25.08 -> питання про підрозділи стали
         # відповідними. Обидва нові шаблони перевіряються ВИКОНАННЯМ
-        # (kind="run"): точну цифру по роті звірити нічим -- .md-файли
+        # (kind="execute"): точну цифру по роті звірити нічим -- .md-файли
         # пайплайна підрозділів не містять, це дані штатки.
         "count_by_state_in_subdivision": dict(
-            kind="run",
+            kind="execute",
             params={"dims": ["leave"], "on_date": "2026-08-28",
                     "subdivision": "%2%рота%"}),
         "subdivision_breakdown": dict(
-            kind="run",
+            kind="execute",
             params={"dims": ["leave", "deployment_location"],
                     "on_date": "2026-08-28"}),
         # розмовний маршрут (етап 3.5): SQL немає за задумом, як у
