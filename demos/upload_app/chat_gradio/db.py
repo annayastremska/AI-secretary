@@ -50,34 +50,21 @@ STATUS_LABEL = {"confirmed": "чинний",
                 "rejected": "відхилений"}
 
 
-def _read_env():
-    vals = {}
-    path = os.path.join(PROJECT_ROOT, ".env")
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    vals[k.strip()] = v.strip().strip("\"'")
-    return vals
+# Умови підключення -- в одному місці (demos/upload_app/dbconn.py). Доти тут
+# була власна копія `_read_env`/`_dsn`, і три копії вже розійшлися: у приладі
+# звірки бракувало connect_timeout. Імпорт «двома шляхами» -- бо цей модуль
+# живе і як частина пакета, і з `chat_gradio/` у sys.path (див.
+# test_single_module_instance).
+try:
+    from .. import dbconn
+except ImportError:  # pragma: no cover -- плаский запуск
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import dbconn
 
 
 def _dsn():
-    env = _read_env()
-    return (f"host=localhost port={env.get('POSTGRES_PORT', '5433')} "
-            f"dbname={env.get('APP_DB_NAME', 'milidoc')} "
-            f"user={env.get('READONLY_DB_USER', 'milidoc_readonly')} "
-            f"password={env.get('READONLY_DB_PASSWORD', '')} "
-            # connect_timeout: без нього psycopg перебирає ::1 і 127.0.0.1
-            # без обмеження, і при впалій базі чат МОВЧИТЬ ~4 хвилини
-            # замість «база недоступна» (заміряно 25.08 на сторінці
-            # статистики: 200 с до відповіді). Наше ж правило вимагає
-            # РІЗНИХ текстів для «не знайшла» і «база недоступна» -- а
-            # текст, якого немає 4 хвилини, не є ні тим, ні тим.
-            f"connect_timeout=3 "
-            f"options='-c default_transaction_read_only=on "
-            f"-c statement_timeout=5000'")
+    return dbconn.dsn(dbconn.STATEMENT_TIMEOUT_MS_CHAT)
 
 
 def _query(sql, params=None):
@@ -449,12 +436,6 @@ def unconfirmed_absences_on_date(date):
     return len(absences_on_date(date, confirmed=False))
 
 
-def unconfirmed_total():
-    rows = _query("SELECT COUNT(*) AS n FROM facts "
-                  "WHERE status = 'unconfirmed'")
-    return rows[0]["n"]
-
-
 def people_total():
     rows = _query(
         "SELECT COUNT(*) AS n FROM objects o "
@@ -497,9 +478,15 @@ def data_coverage():
                          "WHERE f.valid_from IS NOT NULL "
                          "AND d.code = ANY(%(dims)s)",
                          {"dims": ABSENCE_DIMS})[0]
-            _COVERAGE = (row["d_from"], row["d_to"])
-        except Exception:
-            _COVERAGE = (None, None)
+            if row["d_from"] and row["d_to"]:
+                _COVERAGE = (row["d_from"], row["d_to"])
+            else:
+                return (None, None)          # порожня база -- кешувати нічого
+        except psycopg.Error:
+            # НЕ кешуємо неуспіх (знайдено блоком 8, 26.08): інакше один збій
+            # бази на старті процесу назавжди прибирав би межі покриття з усіх
+            # відповідей -- тобто нуль знову читався б як «нікого не було».
+            return (None, None)
     return _COVERAGE
 
 

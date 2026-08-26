@@ -76,30 +76,15 @@ NO_TYPE = "(без типу)"
 # Не імпортуємо звідти напряму: паралельно в chat_gradio йде робота іншого
 # виконавця, і скрипт звірки не має падати через її проміжний стан.
 
-def _read_env():
-    vals = {}
-    path = os.path.join(PROJECT_ROOT, ".env")
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    vals[k.strip()] = v.strip().strip("\"'")
-    return vals
+# Умови підключення -- спільні з апкою (demos/upload_app/dbconn.py). Доти тут
+# була третя копія `_dsn`, і саме в ній НЕ БУЛО connect_timeout: при впалій базі
+# прилад мовчав би ~4 хвилини. Довший statement_timeout лишається -- це
+# усвідомлена різниця приладу, а не розбіжність копій.
+import dbconn
 
 
 def _dsn():
-    url = os.environ.get("APP_DATABASE_URL")
-    if url:
-        return url.replace("postgresql+psycopg://", "postgresql://")
-    env = _read_env()
-    return (f"host=localhost port={env.get('POSTGRES_PORT', '5433')} "
-            f"dbname={env.get('APP_DB_NAME', 'milidoc')} "
-            f"user={env.get('READONLY_DB_USER', 'milidoc_readonly')} "
-            f"password={env.get('READONLY_DB_PASSWORD', '')} "
-            f"options='-c default_transaction_read_only=on "
-            f"-c statement_timeout=15000'")
+    return dbconn.dsn(dbconn.STATEMENT_TIMEOUT_MS_TOOLS)
 
 
 # ── Незалежне читання .md-записів (дзеркало parse_frontmatter лоадера) ───────

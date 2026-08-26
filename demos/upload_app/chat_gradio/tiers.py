@@ -97,32 +97,21 @@ QUEUE_LABEL = {
 # згенерований SQL проскочить повз валідатор, DML відіб'є САМА БАЗА.
 
 
-def _read_env():
-    vals = {}
-    path = os.path.join(PROJECT_ROOT, ".env")
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    vals[k.strip()] = v.strip().strip("\"'")
-    return vals
+# Умови підключення -- в одному місці (demos/upload_app/dbconn.py). Доти тут
+# була власна копія `_read_env`/`_dsn`, і три копії вже розійшлися: у приладі
+# звірки бракувало connect_timeout. Імпорт «двома шляхами» -- бо цей модуль
+# живе і як частина пакета, і з `chat_gradio/` у sys.path (див.
+# test_single_module_instance).
+try:
+    from .. import dbconn
+except ImportError:  # pragma: no cover -- плаский запуск
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import dbconn
 
 
 def _dsn():
-    env = _read_env()
-    user = env.get("READONLY_DB_USER", "milidoc_readonly")
-    pwd = env.get("READONLY_DB_PASSWORD", "")
-    port = env.get("POSTGRES_PORT", "5433")
-    db = env.get("APP_DB_NAME", "milidoc")
-    return (f"host=localhost port={port} dbname={db} user={user} "
-            f"password={pwd} "
-            # Те саме, що в db.py: без connect_timeout впала база означає
-            # чотирихвилинне молчання замість чесного «недоступна».
-            f"connect_timeout=3 "
-            f"options='-c default_transaction_read_only=on "
-            f"-c statement_timeout=5000'")
+    return dbconn.dsn(dbconn.STATEMENT_TIMEOUT_MS_CHAT)
 
 
 def _connect():
@@ -401,14 +390,6 @@ UNKNOWN_DOMAIN = re.compile(
 _DESTRUCTIVE = re.compile(
     r"вида[лл]|знищ|очист|drop\b|delete\b|truncate\b|update\b|insert\b|"
     r"зміни\s|встанов\s|підтверд[иь]\b", re.I)
-
-
-def _month_from(text):
-    low = text.lower()
-    for stem, num in MONTHS.items():
-        if stem in low:
-            return num
-    return None
 
 
 def _month_span(text):
