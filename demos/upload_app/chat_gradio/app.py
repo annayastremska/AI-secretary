@@ -528,6 +528,29 @@ def describe_doc(r):
     detail = " · ".join(_esc(x) for x in (r["reason"], r["place"]) if x)
     if detail:
         out.append(f"  {detail}")
+    # Решта відомого про документ. Аудит 26.08 (питання Ані «ти пропрацював це
+    # з усіма видами питань?»): у базі 17 вимірів, а картка показувала чотири.
+    # Показуємо ЛИШЕ те, що справді є: порожнє поле не згадуємо, інакше
+    # відповідь роздується прочерками.
+    extra = []
+    for key, label in (("leave_days", "днів"),
+                       ("deployment_days", "днів"),
+                       ("deployment_org", "організація"),
+                       ("deployment_purpose", "мета"),
+                       ("unit_to_report", "прибути до"),
+                       ("order_number", "наказ-підстава №"),
+                       ("order_date", "від"),
+                       ("travel_document", "проїзний документ")):
+        value = (r.get(key) or "").strip()
+        if value:
+            extra.append(f"{label} {_esc(value)}")
+    if extra:
+        out.append("  " + " · ".join(extra))
+    # Фактичне повернення -- окремим рядком, бо це найцінніша відмітка: вона
+    # означає «людина вже в частині», хоч документ ще чинний.
+    actual = (r.get("actual_return") or "").strip()
+    if actual:
+        out.append(f"  фактично повернувся {_esc(actual)}")
     if empty_fields(r):
         out.append(f"  ⚠️ порожні поля: {', '.join(empty_fields(r))} — з "
                    "документа їх встановити не можна")
@@ -606,8 +629,17 @@ def answer_absent(date, subdivision, not_returned=False):
     if not_returned:
         # питання №3 замовника: відмітки про фактичне повернення в даних немає
         # (контракт, «Що з цього НЕ покривається») — застереження одним рядком
-        body += ("\n\nЦе ті, у кого відсутність триває за документами; "
-                 "відмітки про фактичне повернення в даних немає.")
+        # ТУТ БУЛА НЕПРАВДА (аудит 26.08): «відмітки про фактичне повернення
+        # в даних немає» -- при 51 підтвердженому факті `leave_actual_return`.
+        # Тепер кажемо правду по цій вибірці: у скількох вона є, у скількох ні.
+        with_ret = sum(1 for r in rows if (r.get("actual_return") or "").strip())
+        if with_ret:
+            body += (f"\n\nЦе ті, у кого відсутність триває за документами. "
+                     f"У {with_ret} із {len(rows)} є відмітка про фактичне "
+                     f"повернення — вона показана в картці документа.")
+        else:
+            body += ("\n\nЦе ті, у кого відсутність триває за документами; "
+                     "відмітки про фактичне повернення ні в кого з них немає.")
     return body + footer("підрахунок", doc_source(rows), unconfirmed_note(date))
 
 
@@ -631,8 +663,9 @@ def answer_returning(date, subdivision):
                  for r in rows]
         body = (f"**{plural_people(len(rows))}** повертаються {date}{where}.\n"
                 + "\n".join(items)
-                + "\n\nЦе дата завершення за документом; фактичне повернення "
-                  "в даних не фіксується.")
+                + "\n\nЦе дата завершення за документом. Фактичне повернення "
+                  "фіксується окремою відміткою — якщо вона є, її видно в "
+                  "картці документа.")
     return body + footer("підрахунок", doc_source(rows), unconfirmed_note(date))
 
 

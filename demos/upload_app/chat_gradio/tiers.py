@@ -1037,6 +1037,20 @@ def _sql_params(template_id, params):
             if k in _SQL_PARAM_NAMES}, t
 
 
+def _doc_ref(r):
+    """«наказ №1030 (запис №127 у базі)» або лише запис, якщо номера немає.
+
+    Доти в переліках стояло «(документ №127 у базі)», де 127 -- номер ЗАПИСУ.
+    На «покажи документ №127» чат відповідав «такого немає» і був правий:
+    номер наказу 1030. Відповідь сама пропонувала питання, на яке відмовляла.
+    """
+    num = (r.get("doc_number") or "").strip().lstrip("№").strip()
+    rec = r.get("source_doc_id")
+    if num:
+        return f"документ №{_esc(num)} (запис №{rec} у базі)"
+    return f"запис №{rec} у базі (номер документа не витягнуто)"
+
+
 def _fmt_period(r):
     a, b = r.get("valid_from"), r.get("valid_to")
     if a and b:
@@ -1142,7 +1156,7 @@ def run_template(template_id, params):
             for r in rows:
                 lines.append(f"- {_esc(r['name'])} — "
                              f"{_esc(DIM_LABEL.get(r['dim'], r['dim']))}"
-                             f", {_fmt_period(r)} (документ №{r['source_doc_id']} у базі)")
+                             f", {_fmt_period(r)} ({_doc_ref(r)})")
         lines.append(f"Зріз: {params['date_from']} — {params['date_to']}{denom}.")
         if u_rows:
             lines.append(f"Окремо непідтверджені (потребують перевірки людиною, "
@@ -1192,7 +1206,7 @@ def run_template(template_id, params):
                     if r["valid_from"] or r["valid_to"]:
                         period = f", {_fmt_period(r)}"
                     lines.append(f"- {_esc(r['dim_name'])}: {_esc(r['value'])}{period} "
-                                 f"[{mark}; документ №{r['source_doc_id']} у базі]")
+                                 f"[{mark}; запис №{r['source_doc_id']} у базі]")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     elif template_id == "doc_by_number":
@@ -1285,8 +1299,7 @@ def run_template(template_id, params):
             for r in rows:
                 lines.append(f"- {_esc(r['name'])} — "
                              f"{_esc(DIM_LABEL.get(r['dim'], r['dim']))}"
-                             f", {_fmt_period(r)} "
-                             f"(документ №{r['source_doc_id']} у базі)")
+                             f", {_fmt_period(r)} ({_doc_ref(r)})")
         in_sub = _subdivision_size(params.get("subdivision"))
         if in_sub:
             lines.append(f"Склад підрозділу за штаткою: {_people(in_sub)}.")

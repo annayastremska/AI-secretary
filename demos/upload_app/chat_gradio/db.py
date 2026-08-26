@@ -105,7 +105,16 @@ SELECT o.canonical_name      AS person_name_raw,
        dc.source_kind        AS source_kind,
        num.value             AS doc_number_val,
        dat.value             AS doc_date_val,
-       place.value           AS place_val
+       place.value           AS place_val,
+       ldays.value           AS leave_days_val,
+       unit_rep.value        AS unit_to_report_val,
+       act_ret.value         AS actual_return_val,
+       dep_org.value         AS deployment_org_val,
+       dep_purp.value        AS deployment_purpose_val,
+       dep_days.value        AS deployment_days_val,
+       ord_num.value         AS order_number_val,
+       ord_date.value        AS order_date_val,
+       trav_doc.value        AS travel_document_val
 FROM facts f
 JOIN dimensions d ON d.id = f.dimension_id
 JOIN objects o ON o.id = f.object_id
@@ -126,6 +135,26 @@ LEFT JOIN LATERAL (
     WHERE f2.source_doc_id = f.source_doc_id
       AND d2.code IN ('leave_place', 'deployment_location')
       AND d2.code <> 'leave' LIMIT 1) place ON true
+""" + "".join(
+    # Решта вимірів документа, яких у відповіді не було НІКОЛИ (аудит 26.08).
+    # Кожен -- окремий LATERAL із тим самим шаблоном, щоб не плодити руками
+    # дев'ять однакових блоків і не забути один із них.
+    f"""
+LEFT JOIN LATERAL (
+    SELECT f2.value FROM facts f2
+    JOIN dimensions d2 ON d2.id = f2.dimension_id
+    WHERE f2.source_doc_id = f.source_doc_id
+      AND d2.code = '{code}' LIMIT 1) {alias} ON true"""
+    for code, alias in (("leave_days", "ldays"),
+                        ("unit_to_report", "unit_rep"),
+                        ("leave_actual_return", "act_ret"),
+                        ("deployment_org", "dep_org"),
+                        ("deployment_purpose", "dep_purp"),
+                        ("deployment_days", "dep_days"),
+                        ("order_number", "ord_num"),
+                        ("order_date", "ord_date"),
+                        ("travel_document", "trav_doc"))
+) + """
 WHERE d.code = ANY(%(dims)s)
 """
 
@@ -148,6 +177,18 @@ def _absence_row(r):
         "place": (r["place_val"] or r["reason"] or ""),
         "status": STATUS_LABEL.get(r["fact_status"], r["fact_status"]),
         "fact_status": r["fact_status"],
+        # Решта вимірів документа. Доти чат їх не показував НІДЕ, хоч вони в
+        # базі є: тривалість, куди прибути, фактичне повернення, організація й
+        # мета відрядження, наказ-підстава, проїзний документ.
+        "leave_days": r["leave_days_val"] or "",
+        "unit_to_report": r["unit_to_report_val"] or "",
+        "actual_return": r["actual_return_val"] or "",
+        "deployment_org": r["deployment_org_val"] or "",
+        "deployment_purpose": r["deployment_purpose_val"] or "",
+        "deployment_days": r["deployment_days_val"] or "",
+        "order_number": r["order_number_val"] or "",
+        "order_date": r["order_date_val"] or "",
+        "travel_document": r["travel_document_val"] or "",
         "superseded_by": "",  # у схемі такого зв'язку немає
         "source_file": (f"запис №{r['source_doc_id']} у базі "
                         f"({r['source_kind']})"),
