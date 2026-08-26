@@ -26,7 +26,7 @@ import uuid
 
 import yaml
 from fastapi import FastAPI, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(APP_DIR))
@@ -384,6 +384,34 @@ STATIC_FILES = {
     "mark.svg": (os.path.join(APP_DIR, "chat_gradio", "assets", "mark.svg"),
                  "image/svg+xml"),
 }
+
+
+#: Яку версію обличчя віддавати: v1 (як було) або v2 («строга» база, олива,
+#: IBM Plex, дві теми). Рішення Ані 27.08: стару НЕ видаляти, дати порівняти.
+#: Тому перемикання -- одна змінна, а не правка файлів.
+APP_THEME = os.environ.get("APP_THEME", "v1").strip().lower()
+
+#: Пари файлів на кожну версію: токени + шар звичайних сторінок.
+_SKINS = {
+    "v1": ("theme-tokens.css", "pages.css"),
+    "v2": ("theme-tokens-v2.css", "pages-v2.css"),
+}
+
+
+@app.get("/static/skin.css")
+def skin_css():
+    """Одне посилання зі сторінок замість двох файлів.
+
+    Нащо маршрут, а не два <link>: інакше перемикання версії означало б
+    правку розмітки обох сторінок, тобто ще одне місце, де версії можуть
+    розійтись. Тут вибір робиться в одному рядку."""
+    tokens, pages = _SKINS.get(APP_THEME, _SKINS["v1"])
+    parts = []
+    for name in (tokens, pages):
+        with open(os.path.join(APP_DIR, "static", name), encoding="utf-8") as fh:
+            parts.append("/* " + name + " */\n" + fh.read())
+    return Response("\n".join(parts), media_type="text/css",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/static/{name}")

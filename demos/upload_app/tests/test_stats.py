@@ -194,7 +194,7 @@ def test_routes_serve_page_and_json(monkeypatch):
     assert page.status_code == 200
     assert "Статистика" in page.text
     # сторінка тягне спільні токени, а не власні кольори
-    assert "/static/theme-tokens.css" in page.text
+    assert "/static/skin.css" in page.text
     assert "<style" not in page.text.split("<body")[0].replace(
         '<style class="dead-style-placeholder">', "")
 
@@ -239,8 +239,7 @@ def test_both_pages_use_the_same_tokens():
 def test_upload_page_has_no_private_palette():
     html = open(os.path.join(APP_DIR, "static", "index.html"),
                 encoding="utf-8").read()
-    assert "/static/theme-tokens.css" in html
-    assert "/static/pages.css" in html
+    assert "/static/skin.css" in html
     for dead in ("--ink:", "--ok-bg:", "#1f6feb"):
         assert dead not in html, f"стара палітра сторінки лишилась: {dead}"
     # шапка з переходами -- та сама, що на сторінці статистики

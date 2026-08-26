@@ -1741,11 +1741,17 @@ def answer(question, history=None):
 
 ASSETS = os.path.join(HERE, "assets")
 MARK = os.path.join(ASSETS, "mark.svg")
-THEME_CSS = os.path.join(HERE, "theme.css")
+#: Версія обличчя -- та сама змінна, що на сторінках (див. app.APP_THEME).
+#: Стара тема лишається на місці: перемикання й відкат -- одна змінна.
+_THEME_VERSION = os.environ.get("APP_THEME", "v1").strip().lower()
+THEME_CSS = os.path.join(
+    HERE, "theme-v2.css" if _THEME_VERSION == "v2" else "theme.css")
 # Спільні токени обличчя апки (задача B3): один файл на чат і на дві звичайні
 # сторінки (/ і /stats). Лежить у static/, бо звідти його <link>-ом беруть
 # сторінки; чат підклеює його вмістом (див. make_head_css).
-TOKENS_CSS = os.path.join(os.path.dirname(HERE), "static", "theme-tokens.css")
+TOKENS_CSS = os.path.join(
+    os.path.dirname(HERE), "static",
+    "theme-tokens-v2.css" if _THEME_VERSION == "v2" else "theme-tokens.css")
 
 TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
 

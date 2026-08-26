@@ -571,3 +571,91 @@ details.src > *:not(summary) {
     .gradio-container .examples button,
     .gradio-container .hero-examples button { width: 100%; min-height: 48px }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ШАР ВЕРСІЇ 2 для чата: та сама «строга» база, що на сторінках.
+   Файл -- копія theme.css плюс цей шар. Стара версія лишається недоторканою.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.gradio-container, .gradio-container * { font-family: var(--font) }
+.gradio-container { background: var(--c-bg); color: var(--c-text) }
+
+/* Повідомлення: прямі кути, межа лінією. Питання людини -- залите оливою,
+   відповідь -- на поверхні з лівою лінією-акцентом: видно, де чиє, навіть
+   у чорно-білому друку слайда. */
+.gradio-container .message {
+    border-radius: 0 !important;
+    font-size: 15px;
+    line-height: 1.5;
+}
+.gradio-container .message.user, .gradio-container .user .message {
+    background: var(--c-accent) !important;
+    color: var(--c-on-accent) !important;
+    border: 0 !important;
+}
+.gradio-container .message.bot, .gradio-container .bot .message {
+    background: var(--c-surface) !important;
+    border: 1px solid var(--c-border) !important;
+    border-left: 3px solid var(--c-accent-line) !important;
+}
+
+/* Блок джерела під відповіддю: капітельний підпис, моноширинний SQL. */
+.gradio-container details > summary {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--c-muted);
+    cursor: pointer;
+}
+.gradio-container details[open] > summary { color: var(--c-accent) }
+.gradio-container details pre, .gradio-container details code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+/* Поле питання й кнопка: прямокутні, з видимим фокусом. */
+.gradio-container textarea, .gradio-container input[type="text"] {
+    border-radius: 0 !important;
+    border: 1px solid var(--c-border) !important;
+    background: var(--c-bg) !important;
+    color: var(--c-text) !important;
+    font-size: 15px;
+}
+.gradio-container textarea:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 0;
+    border-color: var(--c-accent) !important;
+}
+.gradio-container button {
+    border-radius: 0 !important;
+    font-weight: 600;
+    transition: background-color .12s ease, color .12s ease;
+}
+
+/* Приклади питань: прямокутні «картки-підказки» з тихою межею. */
+.gradio-container .examples button,
+.gradio-container .hero-examples button {
+    border-radius: 0 !important;
+    border: 1px solid var(--c-border) !important;
+    background: var(--c-bg) !important;
+    color: var(--c-text) !important;
+    text-align: left;
+}
+.gradio-container .examples button:hover,
+.gradio-container .hero-examples button:hover {
+    background: var(--c-surface) !important;
+    border-color: var(--c-text) !important;
+}
+
+/* Цифри у відповідях не «стрибають» шириною. */
+.gradio-container .message strong, .gradio-container .message b {
+    font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gradio-container *, .gradio-container *::before, .gradio-container *::after {
+        animation-duration: .001ms !important;
+        transition-duration: .001ms !important;
+    }
+}

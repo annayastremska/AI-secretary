@@ -1,0 +1,276 @@
+/* ТОКЕНИ ОБЛИЧЧЯ, ВЕРСІЯ 2 -- «строга» база (рішення Ані 27.08).
+ *
+ * Стара версія (theme-tokens.css + pages.css) ЛИШАЄТЬСЯ НА МІСЦІ й не
+ * чіпається: перемикання між виглядами -- змінна оточення APP_THEME (v1 або
+ * v2), обидва набори читаються одним маршрутом /static/skin.css. Тобто відкат
+ * -- це одна змінна, а не повернення файлів із історії.
+ *
+ * Звідки взято рішення:
+ *   * геометрія й типографічна шкала -- дизайн-система Ані «Modernist»
+ *     (claude.ai/design): прямі кути, сильні розділові лінії, жирні
+ *     заголовки, шкала 42/32/25/20/16/13, тіло 15/1.55, теплі нейтральні;
+ *   * акцент -- НЕ червоний із Modernist, а глибока олива #4A5D3A: червоний у
+ *     нас уже означає помилку, і кнопка «підтвердити» злилася б із
+ *     попередженням. Колір «підтверджено» переведено в бірюзовий, щоб два
+ *     зелених не плуталися;
+ *   * шрифт -- IBM Plex Sans (+ Mono для цифр, номерів документів і SQL).
+ *     Archivo із Modernist відкинутий із твердої причини: у нього НЕМАЄ
+ *     кириличної підмножини -- український текст падав би на системний шрифт;
+ *   * дві теми: світла (демо з проєктора) і темна за налаштуванням пристрою.
+ *
+ * Шрифти лежать у репозиторії (static/fonts/*.woff2), жодного зовнішнього
+ * запиту зі сторінки -- правило №7 із README апки лишається виконаним.
+ */
+
+/* ── Шрифт: локальні файли, підмножини включно з кирилицею ────────────────── */
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-400-cyrillic.woff2") format("woff2");
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-400-cyrillic-ext.woff2") format("woff2");
+    unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-400-latin.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2192, U+2212, U+2215;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-400-latin-ext.woff2") format("woff2");
+    unicode-range: U+0100-02AF, U+0304-0308, U+1E00-1EFF, U+2020, U+20A0-20AB;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-600-cyrillic.woff2") format("woff2");
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-600-cyrillic-ext.woff2") format("woff2");
+    unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-600-latin.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2192, U+2212, U+2215;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-600-latin-ext.woff2") format("woff2");
+    unicode-range: U+0100-02AF, U+0304-0308, U+1E00-1EFF, U+2020, U+20A0-20AB;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-700-cyrillic.woff2") format("woff2");
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-700-cyrillic-ext.woff2") format("woff2");
+    unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-700-latin.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2192, U+2212, U+2215;
+}
+@font-face {
+    font-family: "Plex";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/plexsans-700-latin-ext.woff2") format("woff2");
+    unicode-range: U+0100-02AF, U+0304-0308, U+1E00-1EFF, U+2020, U+20A0-20AB;
+}
+@font-face {
+    font-family: "PlexMono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexmono-400-cyrillic.woff2") format("woff2");
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+    font-family: "PlexMono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexmono-400-cyrillic-ext.woff2") format("woff2");
+    unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+    font-family: "PlexMono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexmono-400-latin.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2192, U+2212, U+2215;
+}
+@font-face {
+    font-family: "PlexMono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/plexmono-400-latin-ext.woff2") format("woff2");
+    unicode-range: U+0100-02AF, U+0304-0308, U+1E00-1EFF, U+2020, U+20A0-20AB;
+}
+
+:root {
+    /* ── Геометрія: прямі кути (Modernist, radius 0) ─────────────────────── */
+    --r-sm: 0;
+    --r-md: 0;
+    --r-lg: 0;
+    --r-full: 50%;   /* коло лишається колом: крапка стану, крапки очікування */
+    --r-pill: 0;
+
+    /* ── Шкала відступів (та сама, що була: 4/8/12/16/24/32) ────────────── */
+    --s-1: 4px;
+    --s-2: 8px;
+    --s-3: 12px;
+    --s-4: 16px;
+    --s-5: 24px;
+    --s-6: 32px;
+
+    /* ── Теплі нейтральні з Modernist ───────────────────────────────────── */
+    --c-bg:       #f6f5f4;
+    --c-surface:  #eceaea;
+    --c-border:   #cfcbca;
+    --c-muted:    #605d5d;
+    --c-text:     #201e1d;
+    /* сильні розділові лінії -- частина цієї бази */
+    --c-divider:  #b6b1b0;
+    --c-hairline: #dedbda;
+
+    /* ── Акцент: глибока олива ──────────────────────────────────────────── */
+    --c-accent:      #4a5d3a;
+    --c-accent-600:  #3e4f30;
+    --c-accent-700:  #333f27;
+    --c-accent-soft: rgba(74, 93, 58, 0.09);
+    --c-accent-line: rgba(74, 93, 58, 0.28);
+    --c-on-accent:   #f6f5f4;
+
+    /* ── Семантичні: «підтверджено» -- бірюзовий, щоб не плутатись з оливою */
+    --c-success:      #0f766e;
+    --c-success-soft: rgba(15, 118, 110, 0.07);
+    --c-warn:         #b45309;
+    --c-warn-soft:    rgba(180, 83, 9, 0.07);
+    --c-error:        #b42318;
+    --c-error-soft:   rgba(180, 35, 24, 0.07);
+    /* «чекає людину» -- окремий стан, не помилка й не попередження */
+    --c-pending:      #8a5a2b;
+    --c-pending-soft: rgba(138, 90, 43, 0.08);
+
+    /* ── Тіні: ледь помітні, бо межі тримають лінії, а не тінь ──────────── */
+    --shadow-sm: 0 1px 2px rgba(32, 30, 29, 0.07);
+    --shadow-md: 0 3px 10px rgba(32, 30, 29, 0.10);
+
+    /* ── Розкладка ──────────────────────────────────────────────────────── */
+    --col: 780px;
+    --header-h: 57px;
+    --composer-h: 104px;
+
+    /* ── Шрифт: локальний Plex, системний -- лише як запас ───────────────── */
+    --font: "Plex", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "PlexMono", ui-monospace, SFMono-Regular, Consolas, monospace;
+    --font-heading: var(--font);
+    --w-heading: 700;
+
+    color-scheme: light dark;
+}
+
+/* ── Темна тема: за налаштуванням пристрою ────────────────────────────────
+ * Значення підібрані так, щоб контраст тексту до тла лишався не нижчим за
+ * 4.5:1, а акцент був видимим на темному (олива світлішає).
+ */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --c-bg:       #17181a;
+        --c-surface:  #202224;
+        --c-border:   #34373a;
+        --c-muted:    #a2a6ab;
+        --c-text:     #e9e8e6;
+        --c-divider:  #43474b;
+        --c-hairline: #2a2d30;
+
+        --c-accent:      #9db67f;
+        --c-accent-600:  #b0c795;
+        --c-accent-700:  #c2d6ac;
+        --c-accent-soft: rgba(157, 182, 127, 0.14);
+        --c-accent-line: rgba(157, 182, 127, 0.34);
+        --c-on-accent:   #17181a;
+
+        --c-success:      #4fbfaf;
+        --c-success-soft: rgba(79, 191, 175, 0.13);
+        --c-warn:         #e0a45c;
+        --c-warn-soft:    rgba(224, 164, 92, 0.13);
+        --c-error:        #ef8175;
+        --c-error-soft:   rgba(239, 129, 117, 0.13);
+        --c-pending:      #d3a06a;
+        --c-pending-soft: rgba(211, 160, 106, 0.14);
+
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+        --shadow-md: 0 3px 12px rgba(0, 0, 0, 0.55);
+    }
+}
+
+/* Явний вибір теми перемагає налаштування пристрою в ОБИДВІ сторони. */
+:root[data-theme="dark"] {
+    --c-bg:       #17181a;
+    --c-surface:  #202224;
+    --c-border:   #34373a;
+    --c-muted:    #a2a6ab;
+    --c-text:     #e9e8e6;
+    --c-divider:  #43474b;
+    --c-hairline: #2a2d30;
+    --c-accent:      #9db67f;
+    --c-accent-600:  #b0c795;
+    --c-accent-700:  #c2d6ac;
+    --c-accent-soft: rgba(157, 182, 127, 0.14);
+    --c-accent-line: rgba(157, 182, 127, 0.34);
+    --c-on-accent:   #17181a;
+    --c-success:      #4fbfaf;
+    --c-success-soft: rgba(79, 191, 175, 0.13);
+    --c-warn:         #e0a45c;
+    --c-warn-soft:    rgba(224, 164, 92, 0.13);
+    --c-error:        #ef8175;
+    --c-error-soft:   rgba(239, 129, 117, 0.13);
+    --c-pending:      #d3a06a;
+    --c-pending-soft: rgba(211, 160, 106, 0.14);
+}

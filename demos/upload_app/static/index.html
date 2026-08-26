@@ -10,8 +10,9 @@
      палітра (свій насичений синій, свої радіуси), і від чата сторінка
      відрізнялась усім -- кольором, радіусами, вагою тексту.
      Жодного CDN і зовнішнього шрифта (перевірка №7 у README апки). -->
-<link rel="stylesheet" href="/static/theme-tokens.css">
-<link rel="stylesheet" href="/static/pages.css">
+<!-- Обличчя одним посиланням: яку версію віддати, вирішує
+     сервер за APP_THEME (v1 -- як було, v2 -- строга база). -->
+<link rel="stylesheet" href="/static/skin.css">
 </head>
 <body>
 <!-- Шапка -- та сама на всіх трьох екранах (/, /stats, /chat): один продукт
@@ -42,10 +43,27 @@
   <section>
     <label class="dropzone" id="dropzone">
       <span class="big">Перетягніть файл документа сюди</span>
-      або натисніть, щоб обрати (фото, скан, docx, pdf)
+      <span class="dz-hint">або натисніть, щоб обрати (фото, скан, docx, pdf)</span>
       <input type="file" id="file"
              accept=".docx,.pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp">
     </label>
+
+    <!-- Телефонний варіант того самого: перетягувати на телефоні нічого не
+         вийде, тому дві великі кнопки. Обидві -- ті самі поля вибору файла;
+         у камери стоїть capture, тому телефон одразу відкриває камеру, а не
+         галерею. На ноутбуці блок схований медіа-запитом. -->
+    <div class="pick-mobile">
+      <label class="pick pick--camera">
+        <span aria-hidden="true">◉</span> Зняти камерою
+        <input type="file" id="file-camera" accept="image/*" capture="environment">
+      </label>
+      <label class="pick">
+        <span aria-hidden="true">□</span> Вибрати файл
+        <input type="file" id="file-pick"
+               accept=".docx,.pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp">
+      </label>
+      <p class="pick-note">docx, pdf або фото документа</p>
+    </div>
     <div id="upload-error"></div>
   </section>
 
@@ -106,6 +124,16 @@ $("file").addEventListener("change", () => {
 dz.addEventListener("drop", e => {
   if (e.dataTransfer.files.length) startUpload(e.dataTransfer.files[0]);
 });
+
+/* Телефонні кнопки ведуть у ТОЙ САМИЙ startUpload, що й зона
+   перетягування: окремої дороги завантаження для телефона немає, інакше вона
+   розійшлася б із головною при першій же правці. */
+for (const id of ["file-camera", "file-pick"]) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", () => {
+    if (el.files && el.files.length) startUpload(el.files[0]);
+  });
+}
 
 async function startUpload(file) {
   const fd = new FormData();

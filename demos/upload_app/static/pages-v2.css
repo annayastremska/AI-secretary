@@ -462,3 +462,120 @@ pre.log {
     text-align: center;
 }
 .dz-hint { display: block }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ШАР ВЕРСІЇ 2: типографіка й геометрія «строгої» бази.
+   Файл -- КОПІЯ pages.css плюс цей шар у кінці. Стара версія лишається
+   недоторканою (рішення Ані 27.08: не видаляти старе, дати порівняти).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* 1. Типографічна шкала Modernist. Заголовки -- жирні, з мінусовим
+      міжлітерним, тіло 15/1.55. Цифри моноширинні за шириною знака, щоб
+      стовпці не «стрибали». */
+body {
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-text-size-adjust: 100%;
+}
+h1, h2, h3, h4 {
+    font-family: var(--font-heading);
+    font-weight: var(--w-heading);
+    line-height: 1.14;
+    letter-spacing: -0.015em;
+}
+h1 { font-size: 32px; margin: 0 0 var(--s-2) }
+h3 { font-size: 17px; margin: var(--s-5) 0 var(--s-2) }
+/* h2 у нас -- рубрика над блоком: капітель із розрідженням, як у Modernist */
+h2 {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--c-muted);
+    font-weight: 600;
+}
+.lede { font-size: 15px; max-width: 68ch }
+code, kbd, samp, pre, .mono, .num { font-family: var(--font-mono) }
+.tile-num, .num, td.n, th.n { font-variant-numeric: tabular-nums }
+
+/* 2. Межі тримають ЛІНІЇ, не тіні: у Modernist розділювачі сильні. */
+.card, section, .panel, .box {
+    border: 1px solid var(--c-border);
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--c-bg);
+}
+.appbar {
+    border-bottom: 2px solid var(--c-divider);
+    background: var(--c-bg);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+hr { height: 2px; border: 0; background: var(--c-divider); margin: var(--s-5) 0 }
+
+/* 3. Кнопки: залиті, прямокутні, підпис тим самим шрифтом заголовків.
+      Стани -- не «підсвітка», а зміна тону, щоб натиск був відчутним. */
+button, .btn, .pick {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    border-radius: 0;
+    transition: background-color .12s ease, border-color .12s ease,
+                color .12s ease, transform .06s ease;
+}
+button:hover, .btn:hover { background: var(--c-accent-600) }
+button:active, .btn:active { background: var(--c-accent-700); transform: translateY(1px) }
+button:disabled, .btn:disabled { opacity: .45; cursor: not-allowed }
+.btn.ghost, .pick:not(.pick--camera) {
+    background: transparent;
+    border: 1px solid var(--c-divider);
+    color: var(--c-text);
+}
+.btn.ghost:hover, .pick:not(.pick--camera):hover {
+    background: var(--c-surface);
+    border-color: var(--c-text);
+}
+
+/* 4. Видимий фокус із клавіатури -- окремо від наведення мишею. */
+:focus { outline: none }
+:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+}
+::selection { background: var(--c-accent-soft) }
+
+/* 5. Таблиці: капітельна голова з жирною лінією під нею, рядки -- тонкою. */
+table { border-collapse: collapse; width: 100% }
+th {
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--c-muted);
+    padding: var(--s-2);
+    border-bottom: 2px solid var(--c-divider);
+}
+td { padding: var(--s-2); border-bottom: 1px solid var(--c-hairline) }
+tbody tr:hover { background: var(--c-surface) }
+
+/* 6. Плитки цифр: цифра велика й моноширинна за шириною, підпис тихий. */
+.tile { border: 1px solid var(--c-border); border-radius: 0; background: var(--c-bg) }
+.tile-num { font-weight: 700; letter-spacing: -0.02em }
+.tile-label { color: var(--c-muted) }
+.tile--ok { border-color: var(--c-accent-line); background: var(--c-accent-soft) }
+
+/* 7. Рух: плавно, але поважно. Хто вимкнув анімації -- не отримує їх. */
+a, .tab, .chip, summary { transition: color .12s ease, background-color .12s ease }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        transition-duration: .001ms !important;
+    }
+}
+
+/* 8. Дрібне, що робить вигляд охайним: без синьої підсвітки натиску на
+      телефоні, з місцем під приліплену шапку при переходах по якорях. */
+* { -webkit-tap-highlight-color: transparent }
+:target { scroll-margin-top: calc(var(--header-h) + var(--s-4)) }
+img, svg { display: block; max-width: 100% }
