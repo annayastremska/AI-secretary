@@ -65,6 +65,17 @@ QUERY_PREFIX = "query: "
 # текстом буде фрагмент СТАТУТУ, а не квиток.
 PROCEDURAL = ("normative",)
 
+# Розширення запиту синонімами. Таблиця будується з КОРПУСУ
+# (build_synonyms.py), а не зі списку від руки: нормативні тексти самі
+# оголошують свої скорочення -- «(далі - ВМС ЗСУ)», «несанкціонований доступ
+# (НСД)».
+#
+# Розширюється ЛИШЕ лексична гілка. Причина: вектор запиту -- це один вектор,
+# і дописування в текст запиту синонімів його РОЗМИВАЄ (середнє по кількох
+# формулюваннях схоже на все погано). Лексика ж працює по окремих лемах, тому
+# додатковий терм там нічого не псує -- він або збігається, або ні.
+SYNONYMS = os.environ.get("SYNONYMS_TABLE", "andriy_test.synonyms")
+
 
 def only_docs(cur, doc_ids):
     """Обмежує пошук переліком документів -- для запиту з номером.
@@ -77,9 +88,51 @@ def only_docs(cur, doc_ids):
     return doc_ids
 
 
-def lexical(cur, query, limit=CANDIDATES, docs=None):
+def expand(cur, query, max_terms=6):
+    """-> список додаткових термів для лексичної гілки.
+
+    Двобічно: на «НСД» додає «несанкціонований доступ», на «несанкціонований
+    доступ» додає «НСД». Друге не менш важливе -- у документі може стояти саме
+    скорочення, а людина пише повністю.
+    """
+    try:
+        # Скорочення шукається ПО МЕЖАХ СЛОВА (`\y`), а не підрядком.
+        # Заміряно, чому: з `ILIKE '%%abbr%%'` двобуквенне `ВІ` знаходилось
+        # усередині слова «ВІдпустку», і запит «за скільки днів подавати
+        # рапорт на відпустку» -- без жодного скорочення -- отримував
+        # синоніми «автомобільної техніки» й «відкрита інформація».
+        # Повна форма лишається підрядком: це кілька слів, там межа не потрібна.
+        cur.execute(rf"""
+            SELECT abbr, full_form FROM {SYNONYMS}
+             WHERE %(q)s ~* ('\y' || abbr || '\y')
+                OR %(q)s ILIKE '%%' || full_form || '%%'
+             GROUP BY abbr, full_form
+             ORDER BY length(abbr) DESC, max(seen) DESC, abbr
+             LIMIT %(lim)s
+        """, {"q": query, "lim": max_terms})
+    except psycopg.Error as e:
+        # Глушник тут був подвійною помилкою: він ховав справжню причину І
+        # лишав транзакцію в аварійному стані, після чого падали всі наступні
+        # запити з «current transaction is aborted». Тепер відкат і скарга.
+        cur.connection.rollback()
+        print(f"  [синоніми недоступні: {str(e).splitlines()[0][:90]}]")
+        return []
+    out = []
+    low = query.lower()
+    for abbr, full in cur.fetchall():
+        # Додаємо ПРОТИЛЕЖНУ форму до тієї, що вже є в запиті.
+        out.append(full if abbr.lower() in low else abbr)
+    return [t for t in dict.fromkeys(out) if t.lower() not in low]
+
+
+def lexical(cur, query, limit=CANDIDATES, docs=None, synonyms=True):
     # АБО, не І: на дрібних одиницях вимога «усі слова в одному куску» дає нуль
     # кандидатів -- це вже було виміряно на фрагментах.
+    q_text = query
+    if synonyms:
+        extra = expand(cur, query)
+        if extra:
+            q_text = query + " " + " ".join(extra)
     tsq = ("replace(websearch_to_tsquery('ukrainian', %(q)s)::text,"
            " ' & ', ' | ')::tsquery")
     # Обмеження по документах збирається ЗМІННОЮ, а не заглушкою в тексті:
@@ -94,7 +147,7 @@ def lexical(cur, query, limit=CANDIDATES, docs=None):
            AND d.domain = ANY(%(domains)s)
            {dfilter}
          ORDER BY score DESC LIMIT %(lim)s
-    """, {"q": query, "lim": limit, "docs": docs,
+    """, {"q": q_text, "lim": limit, "docs": docs,
           "domains": list(PROCEDURAL)})
     return cur.fetchall()
 
