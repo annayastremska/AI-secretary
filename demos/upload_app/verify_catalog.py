@@ -723,6 +723,11 @@ def build_checks(ctx):
             expected=lambda rs: exp_failed(rs, ctx),
             got=got_first_row),
         "subdivision_unknown": dict(kind="blocked", params={}),
+        "absent_without_docs_impossible": dict(kind="blocked",
+                                              params={}),
+        # Склад за штаткою: цифру звірити з .md неможливо -- це дані
+        # штатки, яких пайплайн не виробляє. Перевіряється виконанням.
+        "roster_total": dict(kind="run", params={}),
         # Штатка в базі з 25.08 -> питання про підрозділи стали
         # відповідними. Обидва нові шаблони перевіряються ВИКОНАННЯМ
         # (kind="run"): точну цифру по роті звірити нічим -- .md-файли
