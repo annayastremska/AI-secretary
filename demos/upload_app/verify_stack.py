@@ -30,6 +30,44 @@ OK, FAIL, WARN = "OK", "ПРОВАЛ", "УВАГА"
 _results = []
 
 
+#: Змінні, від яких залежить, ЯКУ систему ми перевіряємо.
+#:
+#: 26.08 цей прилад дав три «провали» й один хибно-зелений -- і всі чотири
+#: через те, що його запустили без оточення служби. Без APP_PIPELINE_CONFIG
+#: апка читала `data/output` (порожню) замість `data/output-demo` (199 .md);
+#: без CHAT_MODEL_PATH чат казав «модель недоступна», і перевірка прочитала це
+#: як «база недоступна». Тобто прилад перевіряв НЕ ТУ систему, що працює.
+#:
+#: Тому оточення беремо з самої служби -- єдиного джерела правди на сервері.
+_SERVICE = "ai-secretary-app"
+_SERVICE_ENV = ("APP_PIPELINE_CONFIG", "CHAT_MODEL_PATH", "CHAT_N_GPU_LAYERS")
+
+
+def adopt_service_env():
+    """-> рядок про те, що взято з юніта (або чому не взято).
+
+    Уже виставлені змінні НЕ перетираємо: якщо людина запустила прилад із
+    власним оточенням, вона так і хотіла."""
+    import shlex
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["systemctl", "show", "-p", "Environment", _SERVICE],
+            capture_output=True, text=True, timeout=10).stdout
+    except Exception as exc:
+        return f"оточення служби не прочитано ({type(exc).__name__})"
+    body = out.partition("=")[2].strip()
+    if not body:
+        return f"служби {_SERVICE} тут немає -- оточення як є"
+    taken = []
+    for token in shlex.split(body):
+        name, _, value = token.partition("=")
+        if name in _SERVICE_ENV and not os.environ.get(name):
+            os.environ[name] = value
+            taken.append(name)
+    return ("узято з юніта: " + ", ".join(taken)) if taken else            "оточення вже виставлене, з юніта не брали"
+
+
 def check(name, group="інше"):
     """Декоратор: кожна перевірка -- одна функція, що повертає (стан, текст)."""
     def wrap(fn):
@@ -165,7 +203,9 @@ def check_output_vs_db():
         md += sum(1 for f in files if f.endswith(".md"))
     in_db = db._query("SELECT count(*) AS n FROM documents")[0]["n"]
     if not md:
-        return WARN, f"у {docs_dir} немає .md -- порівнювати нічого"
+        return FAIL, (f"у {docs_dir} немає .md -- або пайплайн туди не пише, "
+                      f"або прилад дивиться не в ту папку (26.08 було саме "
+                      f"друге: запуск без APP_PIPELINE_CONFIG)")
     diff = md - in_db
     if abs(diff) > max(5, md * 0.05):
         return FAIL, (f".md у виході {md}, документів у базі {in_db} "
@@ -199,7 +239,11 @@ def check_chat_answers():
             continue
         if "звернення: " not in out:
             problems.append(f"«{question}»: немає номера звернення")
-        if "недоступна" in out:
+        # Маркер мусить бути ТОЧНИЙ: слово «недоступна» є і в чесному
+        # «модель недоступна — відповідаю лише за шаблонними питаннями», і
+        # 26.08 прилад прочитав це як падіння бази. Тому порівнюємо з самим
+        # текстом відмови по базі, а не зі словом із нього.
+        if chat_app.ANSWER_DB_DOWN.split(".")[0] in out:
             problems.append(f"«{question}»: база недоступна")
         notes.append(f"{kind}: {len(out)} символів")
     if problems:
@@ -207,14 +251,27 @@ def check_chat_answers():
     return OK, "; ".join(notes)
 
 
-@check("питання про підрозділ дає відмову, а не число", "chat")
-def check_subdivision_refusal():
+@check("підрозділи: наявний -- число, відсутній -- відмова", "chat")
+def check_subdivision():
+    """Перевернуто 26.08. Доти прилад вимагав ВІДМОВИ на будь-яке питання про
+    підрозділ -- і був зелений, коли відмова стояла. Після заливки штатки
+    (25.08, Андрій) відмова перестала бути правдою: зв'язок особа→підрозділ у
+    базі є. Прилад лишався зеленим на застарілій правді, а це гірше за
+    червоний: він підтверджував те, чого вже немає.
+
+    Тепер перевіряються ОБИДВА боки: наявна рота дає число з назвою
+    підрозділу, неіснуюча -- відмову, яка каже, що немає самого підрозділу."""
     from demos.upload_app.chat_gradio import app as chat_app
-    out = chat_app.answer("Скільки людей у 2 роті зараз у відпустці?")
-    low = (out or "").lower()
-    if "підрозділ" not in low:
-        return FAIL, f"немає чесної відмови про підрозділи: {low[:160]}"
-    return OK, "відмова на місці (штатки в базі немає)"
+    real = chat_app.answer("Скільки людей у 2 роті зараз у відпустці?")
+    low = (real or "").lower()
+    if "рота" not in low:
+        return FAIL, f"наявна рота: у відповіді немає назви підрозділу: {low[:160]}"
+    if not any(ch.isdigit() for ch in low.split("зріз")[0]):
+        return FAIL, f"наявна рота: немає числа: {low[:160]}"
+    ghost = chat_app.answer("Скільком у відпустці в 5 роті?").lower()
+    if "немає" not in ghost:
+        return FAIL, f"неіснуюча рота: замість відмови -- {ghost[:160]}"
+    return OK, "2-га рота -> число з назвою; 5-та -> відмова, бо такої немає"
 
 
 @check("модель у чаті доступна і на карті", "chat")
@@ -222,8 +279,15 @@ def check_model_runtime():
     from demos.upload_app.chat_gradio import app as chat_app
     tiers = chat_app.tier_chat
     if not os.path.exists(tiers.MODEL_PATH):
-        return WARN, (f"ваг чата немає ({tiers.MODEL_PATH}) -- чат живе на "
-                      f"правилах і векторах")
+        # Це або справді немає ваг, або прилад запустили без оточення служби
+        # (див. adopt_service_env). Друге -- не «увага», а провал перевірки:
+        # ми міряли б не ту систему, що працює.
+        state = ("CHAT_MODEL_PATH не виставлений"
+                 if not os.environ.get("CHAT_MODEL_PATH")
+                 else "шлях виставлений, але файлу немає")
+        return FAIL, (f"ваг чата немає ({tiers.MODEL_PATH}): {state} — "
+                      f"перевірка йшла б по чату без моделі, а служба живе з "
+                      f"моделлю")
     try:
         from pipeline.llm.cuda_preload import preload
         preload()
@@ -262,6 +326,10 @@ def main():
     ap.add_argument("--json", default=None, help="куди покласти звіт")
     args = ap.parse_args()
     groups = {g.strip() for g in args.only.split(",") if g.strip()}
+
+    # ДО імпорту модулів апки: і профіль пайплайна, і шлях моделі читаються
+    # при імпорті, тому пізніше вже нічого не змінити
+    print("оточення:", adopt_service_env())
 
     checks = [fn for fn in globals().values()
               if callable(fn) and hasattr(fn, "_check")]
