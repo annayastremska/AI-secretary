@@ -317,8 +317,10 @@ def _match_person(records, pattern_core):
 
 def exp_person_status(records, ctx):
     matched = _match_person(records, ctx["surname"])
-    return len({(r.person, f["dim"], norm_apos(f["value"]), f["vf"], f["vt"],
-                 f["status"]) for r in matched for f in r.facts})
+    own = len({(r.person, f["dim"], norm_apos(f["value"]), f["vf"], f["vt"],
+                f["status"]) for r in matched for f in r.facts})
+    # + факти цієї особи зі штатки (інше джерело, див. outside_person_facts)
+    return own + ctx.get("outside_person", 0)
 
 
 def exp_doc_by_number(records, ctx):
@@ -391,6 +393,33 @@ SELECT
      JOIN documents d ON d.id = f.source_doc_id
     WHERE d.domain = 'staffing')                                  AS facts
 """
+
+
+PERSON_OUTSIDE_SQL = """
+SELECT count(*) AS n
+FROM facts f
+JOIN documents d ON d.id = f.source_doc_id
+JOIN objects o ON o.id = f.object_id
+WHERE d.domain = 'staffing'
+  AND o.canonical_name ILIKE %(name_pattern)s
+"""
+
+
+def outside_person_facts(surname):
+    """Скільком фактів ЦІЄЇ особи прийшло не з наших документів, а зі штатки.
+
+    Потрібне для двох перевірок про одну особу (person_status,
+    fact_provenance): у базі в неї тепер факти з ДВОХ джерел -- наших
+    документів і штатки (звання, посада, підрозділ). Очікуване з .md знає лише
+    про перше, тому різниця в один-два рядки -- не дефект, а друге джерело.
+    """
+    if not surname:
+        return 0
+    try:
+        return int(run_sql(PERSON_OUTSIDE_SQL,
+                           {"name_pattern": f"%{surname}%"})[0]["n"] or 0)
+    except Exception:
+        return 0
 
 
 def outside_pipeline():
@@ -491,7 +520,7 @@ def exp_date_conflicts(records, ctx):
 
 def exp_provenance(records, ctx):
     matched = _match_person(records, ctx["surname"])
-    return sum(len(r.facts) for r in matched)
+    return sum(len(r.facts) for r in matched) + ctx.get("outside_person", 0)
 
 
 def exp_normative_list(records, ctx):
@@ -836,10 +865,14 @@ def main():
     # немає, бо порівнював базу з нашим виходом як із тим самим джерелом.
     ctx["outside"] = ({"docs": 0, "people": 0, "facts": 0}
                       if args.expected_only else outside_pipeline())
+    ctx["outside_person"] = (0 if args.expected_only
+                             else outside_person_facts(ctx["surname"]))
     if ctx["outside"]["docs"]:
         print(f"поза пайплайном (штатка): документів {ctx['outside']['docs']}, "
               f"осіб {ctx['outside']['people']}, фактів "
-              f"{ctx['outside']['facts']} -- очікувані числа скориговані")
+              f"{ctx['outside']['facts']}; у обраної особи «{ctx['surname']}» "
+              f"зі штатки {ctx['outside_person']} факт(ів) -- очікувані числа "
+              f"скориговані")
     checks = build_checks(ctx)
 
     print(f"записів у {args.output_dir}: {len(records)} "
