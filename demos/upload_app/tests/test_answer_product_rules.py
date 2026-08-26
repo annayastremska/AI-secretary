@@ -54,7 +54,6 @@ def _fake_rows_for(sql):
 def rendered(monkeypatch):
     """Рендерить шаблон на підставлених рядках, без бази."""
     def _render(template_id):
-        t = tiers._CATALOG[template_id]
         monkeypatch.setattr(tiers, "_run_template_sql",
                             lambda sql, params: _fake_rows_for(sql or ""))
         monkeypatch.setattr(tiers, "_people_total", lambda: 300)

@@ -10,10 +10,7 @@
 старого скрипта знесла б її правки.
 """
 import copy
-import io
-import os
 import re
-import sys
 
 from docx import Document
 from docx.shared import Pt, RGBColor, Cm
