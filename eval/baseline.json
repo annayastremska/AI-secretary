@@ -92,8 +92,8 @@
   "tests": {
    "exit_code": 0,
    "failed": 0,
-   "passed": 296,
-   "seconds": 21.1,
+   "passed": 299,
+   "seconds": 61.8,
    "xfailed": 1
   }
  }
