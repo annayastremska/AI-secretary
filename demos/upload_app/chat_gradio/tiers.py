@@ -837,6 +837,52 @@ def _people_total():
         return None
 
 
+#: Скільком осіб у ЦІЙ відповіді немає відповідника у штатці.
+#:
+#: Питання Ані 26.08: «якщо людини немає у штатці, але по ній приходить
+#: документ -- це ж іде на розгляд людини?». Іде: завантажувач створює завдання
+#: `new_person`. Але факти при цьому лягають ПІДТВЕРДЖЕНИМИ, тому така людина
+#: входить у цифру як звичайна. Заміряно: у «9 у відпустці на 28.08» один із
+#: дев'яти -- Крижанівський, якого у штатці немає.
+#:
+#: Змінити статус фактів може лише завантажувач (зона Андрія), і це рішення
+#: записане питанням. А сказати правду можна вже зараз: цифра лишається тією
+#: самою, але поруч видно, скільком у ній осіб чекають підтвердження людиною.
+#: Мовчати про це гірше: тоді «9» виглядає як дев'ять перевірених.
+_UNMATCHED_IN_STATE_SQL = """
+SELECT COUNT(DISTINCT f.object_id) AS n
+FROM facts f
+JOIN dimensions d ON d.id = f.dimension_id
+JOIN people p ON p.object_id = f.object_id
+WHERE d.code = ANY(%(dims)s)
+  AND f.status = 'confirmed'
+  AND p.service_id IS NULL
+  AND f.valid_from IS NOT NULL
+  AND f.valid_from <= %(date_to)s
+  AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+"""
+
+
+def _unmatched_in_state(params):
+    """-> скільком осіб без відповідника у штатці попало в цю відповідь (0 --
+    якщо запит не склався: краще промовчати, ніж злякати неправдою)."""
+    dims = params.get("dims")
+    if not dims:
+        return 0
+    day = params.get("on_date")
+    date_from = params.get("date_from") or day
+    date_to = params.get("date_to") or day
+    if not date_from or not date_to:
+        return 0
+    try:
+        rows = _run_template_sql(_UNMATCHED_IN_STATE_SQL,
+                                 {"dims": dims, "date_from": date_from,
+                                  "date_to": date_to})
+        return int(rows[0]["n"] or 0)
+    except psycopg.Error:
+        return 0
+
+
 def _plural(n, one, few, many):
     if n % 10 == 1 and n % 100 != 11:
         return f"{n} {one}"
@@ -952,6 +998,14 @@ def run_template(template_id, params):
         lines.append(f"{_people(n)} {state_lbl}{denom}.")
         lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
         lines.append(f"Непідтверджених (чернетки, у підрахунок не входять): {u}.")
+        # Скільком у цій цифрі -- люди, яких немає у штатці. Мовчати про це
+        # гірше: тоді «9» виглядає як дев'ять перевірених (див.
+        # _unmatched_in_state).
+        nm = _unmatched_in_state(params)
+        if nm:
+            lines.append(f"З них {nm} — особи, яких немає у штатці: документ "
+                         f"по них є, але сама особа чекає підтвердження "
+                         f"людиною.")
 
     elif template_id == "count_by_state_period":
         n = rows[0]["n"]
