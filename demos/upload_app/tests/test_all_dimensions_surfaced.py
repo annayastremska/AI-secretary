@@ -131,3 +131,25 @@ def test_returned_person_is_told_they_are_in_the_unit(monkeypatch):
     assert "**У частині**" in out
     assert "Поза частиною" not in out
     assert "фактично повернувся 2026-08-15" in out
+
+
+def test_future_absence_is_not_called_the_last_one(monkeypatch):
+    """«Остання» і «найближча» -- різні твердження.
+
+    Живий прогін на Малишко 26.08: усі три її відпустки в майбутньому, а
+    відповідь казала «Остання: відпустка №141, до 2026-09-20» -- бо бралось
+    max(date_to). Це майбутнє під підписом минулого."""
+    today = datetime.date(2026, 8, 26)
+    soon = _row(doc_number="№118", date_from="2026-08-27",
+                date_to="2026-09-09", actual_return="")
+    later = _row(doc_number="№141", date_from="2026-09-14",
+                 date_to="2026-09-20", actual_return="")
+    monkeypatch.setattr(app.db, "find_people", lambda name=None, **k: [])
+    monkeypatch.setattr(app.db, "absences_for_person", lambda *a, **k: [soon, later])
+    monkeypatch.setattr(app.db, "coverage_note", lambda *a, **k: "")
+    monkeypatch.setattr(app.datetime, "date",
+                        type("D", (), {"today": staticmethod(lambda: today),
+                                       "fromisoformat": datetime.date.fromisoformat}))
+    out = app.answer_person("Малишко")
+    assert "Найближча: відпустка №118, з 2026-08-27" in out
+    assert "Остання" not in out

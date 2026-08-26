@@ -754,14 +754,28 @@ def answer_person(name):
         drafts = [r for r in rows if r.get("fact_status") == "unconfirmed"]
         cancelled = [r for r in rows if r["status"] == "скасований"]
         if past:
-            last = max(past, key=lambda r: (r.get("date_to") or ""))
-            returned = (last.get("actual_return") or "").strip()
-            parts.append(
-                f"**У частині** — за документами зараз відсутності немає. "
-                f"Остання: {_esc(last['doc_type'])} {_esc(last['doc_number'])}"
-                + (f", до {_esc(last['date_to'])}" if last["date_to"] else "")
-                + (f", фактично повернувся {_esc(returned)}." if returned
-                   else "."))
+            # Розділяємо минуле й майбутнє: «остання відпустка» і «найближча
+            # відпустка» -- різні твердження, а max(date_to) на живих даних
+            # давав майбутню під підписом «остання» (Малишко, 26.08).
+            today_iso = datetime.date.today().isoformat()
+            ahead = [r for r in past if (r.get("date_from") or "") > today_iso]
+            done = [r for r in past if r not in ahead]
+            lead = "**У частині** — за документами зараз відсутності немає."
+            if done:
+                last = max(done, key=lambda r: (r.get("date_to") or ""))
+                returned = (last.get("actual_return") or "").strip()
+                lead += (f" Остання: {_esc(last['doc_type'])} "
+                         f"{_esc(last['doc_number'])}"
+                         + (f", до {_esc(last['date_to'])}" if last["date_to"]
+                            else "")
+                         + (f", фактично повернувся {_esc(returned)}."
+                            if returned else "."))
+            if ahead:
+                nxt = min(ahead, key=lambda r: (r.get("date_from") or ""))
+                lead += (f" Найближча: {_esc(nxt['doc_type'])} "
+                         f"{_esc(nxt['doc_number'])}, з "
+                         f"{_esc(nxt['date_from'])}.")
+            parts.append(lead)
         elif drafts and not cancelled:
             parts.append(
                 f"**За документами у частині** — усі записи про відсутність "
