@@ -138,7 +138,21 @@ class Rec:
     def _facts(self):
         rows = []
         # Факт звання -- лоадер додає його сам (valid_from = uploaded_at).
+        #
+        # Звання в .md буває ДВОХ форм: словник {code, label} і просто рядок.
+        # 26.08 прилад упав цілком (`'str' object has no attribute 'get'`) на
+        # першому ж файлі другої форми -- тобто одна несподівана форма поля
+        # знесла всю звірку 28 шаблонів. Прилад мусить бути витриваліший за
+        # дані, які перевіряє: інакше він не інструмент, а ще одне джерело
+        # падінь.
         rank = self.subject.get("rank")
+        if isinstance(rank, str):
+            rank = {"code": rank.strip()} if rank.strip() else None
+        elif rank is not None and not isinstance(rank, dict):
+            print(f"    увага: у записі {self.meta.get('source_file') or '?'} "
+                  f"поле rank має несподіваний тип "
+                  f"{type(rank).__name__} -- звання пропущено")
+            rank = None
         if rank and rank.get("code"):
             prov = ((self.meta.get("field_provenance") or {}).get("rank")
                     or {})

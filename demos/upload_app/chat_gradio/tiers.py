@@ -955,6 +955,31 @@ WHERE d.code = ANY(%(dims)s)
 """
 
 
+_LABELS = {}
+
+
+def _dimension_label(dim_code, value):
+    """Код довідника -> підпис українською; решта значень -- як є.
+
+    Підписи лежать у `dimension_values` (їх заводить міграція Андрія), тому
+    беремо звідти, а не з копії в нашому коді: копія розійшлася б."""
+    if not value or not dim_code:
+        return value
+    if dim_code not in _LABELS:
+        try:
+            rows = _run_template_sql(
+                "SELECT dv.value, dv.label FROM dimension_values dv "
+                "JOIN dimensions d ON d.id = dv.dimension_id "
+                "WHERE d.code = %(code)s", {"code": dim_code})
+            # .get, а не [..]: рядок без очікуваних колонок не мусить
+            # ламати відповідь -- підпис це оздоба, а не сам факт
+            _LABELS[dim_code] = {r.get("value"): r.get("label") for r in rows
+                                 if r.get("value") and r.get("label")}
+        except psycopg.Error:
+            return value
+    return _LABELS[dim_code].get(value, value)
+
+
 def _subdivision_label(pattern):
     """Шаблон ILIKE («%2%рота%») -> назва підрозділу, як вона в базі.
 
@@ -1319,8 +1344,13 @@ def run_template(template_id, params):
                     period = (f", {_fmt_period(r)}"
                               if (r.get("valid_from") or r.get("valid_to"))
                               else "")
+                    # Значення довідникових вимірів (звання) у базі -- код
+                    # («sergeant»). У відповіді людині потрібен підпис
+                    # («сержант»), інакше доказ читає лише той, хто знає
+                    # довідник (знайдено живим прогоном 26.08).
+                    value = _dimension_label(r["dim"], r["value"])
                     lines.append(
-                        f"- {_esc(r['dim_name'])}: {_esc(r['value'])}{period}")
+                        f"- {_esc(r['dim_name'])}: {_esc(value)}{period}")
                     lines.append(
                         f"  джерело: документ №{_esc(r.get('document_number') or '?')}"
                         + (f" від {_esc(r['document_date'])}"
@@ -1334,6 +1364,12 @@ def run_template(template_id, params):
                     src = r.get("all_sources")
                     if src and "," in str(src):
                         lines.append(f"  джерел у базі кілька: {_esc(src)}")
+            # Скільком із показаного -- чернетки. Правило продукту вимагає
+            # цього числа в кожній відповіді з фактами, і саме тут воно
+            # особливо доречне: питали про доказ.
+            drafts = sum(1 for r in rows if r["status"] != "confirmed")
+            lines.append(f"Непідтверджених (чернетки, у підрахунки не входять) "
+                         f"серед показаного: {drafts}.")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
     elif template_id == "doc_by_number":
