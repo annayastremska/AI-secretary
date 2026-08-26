@@ -553,16 +553,43 @@ def plural_people(n):
     return f"{n} осіб"
 
 
-NO_SUBDIVISION = ("База цього не знає: у схемі немає зв'язку особа→підрозділ "
-                  "(db/README_for_chatbot_team.md, п.8), тож відповісти по "
-                  "конкретному підрозділу не можна. Можу порахувати по всій "
-                  "частині — спитайте без підрозділу." + "")
+#: Відмова про підрозділ лишається -- але тепер лише там, де вона ПРАВДА:
+#: коли названого підрозділу в штатці немає. Доти цей текст стояв на КОЖНЕ
+#: питання про підрозділ і казав «у схемі немає зв'язку особа→підрозділ». Зі
+#: штаткою (25.08) це стало неправдою про власні дані: зв'язок є, 300 рядків.
+#: Знайдено глибоким аналізом 26.08.
+def no_such_subdivision(asked):
+    known = db.subdivision_values()
+    tail = (" У базі є: " + ", ".join(_esc(v) for v in known) + "."
+            if known else "")
+    return (f"Такого підрозділу в штатці немає: «{_esc(asked)}». Нуль тут "
+            f"означав би «нікого немає», а насправді немає самого "
+            f"підрозділу.{tail}")
+
+
+def subdivision_exists(asked):
+    """-> чи є названий підрозділ у штатці.
+
+    Людина каже «2 рота», а в штатці «2-га механізована рота» -- дослівного
+    збігу не буде ніколи. Тому три спроби, від точнішої до грубшої: підрядок,
+    номер підрозділу, початок назви словами («взвод забезпечення»)."""
+    want = str(asked or "").strip().lower()
+    if not want:
+        return True
+    known = [v.lower() for v in db.subdivision_values()]
+    if not known:
+        return False          # штатки в базі немає -- підтвердити нічим
+    if any(want in v for v in known):
+        return True
+    digit = re.search(r"\d", want)
+    if digit:
+        return any(v.startswith(digit.group(0)) for v in known)
+    return any(want.split()[0][:6] in v for v in known)
 
 
 def answer_absent(date, subdivision, not_returned=False):
-    if subdivision:
-        # чесна відмова, не мовчазне ігнорування фільтра
-        return NO_SUBDIVISION + footer("відмова")
+    if subdivision and not subdivision_exists(subdivision):
+        return no_such_subdivision(subdivision) + footer("відмова")
     rows = db.absences_on_date(date, subdivision=subdivision)
     where = f" ({subdivision})" if subdivision else ""
     items = [f"- {person_label(r)} — {_esc(r['doc_type'])} {_esc(r['doc_number'])}, "
@@ -585,8 +612,8 @@ def answer_absent(date, subdivision, not_returned=False):
 
 
 def answer_returning(date, subdivision):
-    if subdivision:
-        return NO_SUBDIVISION + footer("відмова")
+    if subdivision and not subdivision_exists(subdivision):
+        return no_such_subdivision(subdivision) + footer("відмова")
     rows = db.returning_on_date(date, subdivision=subdivision)
     where = f" ({subdivision})" if subdivision else ""
     if not rows:
@@ -705,12 +732,14 @@ def answer_doc(doc_number):
 def answer_summary(date):
     rows = db.count_absent_by_subdivision(date)
     if not rows:
-        # наша схема не зберігає зв'язок особа→підрозділ -- зведення по
-        # підрозділах чесно неможливе; замість нього -- загальне число
+        # Рядків немає -- значить у базі немає самого виміру `subdivision`
+        # (до заливки штатки так і було). Тоді замість розбивки -- загальне
+        # число і пряма причина, чому розбивки немає.
         n = len(db.absences_on_date(date))
-        body = (NO_SUBDIVISION
-                + f"\nПо всій частині на {date}: {plural_people(n)} поза "
-                  "частиною (за підтвердженими фактами).")
+        body = ("Розбивки по підрозділах зараз дати не можу: у базі немає "
+                "жодного запису про підрозділи.\n"
+                f"По всій частині на {date}: {plural_people(n)} поза "
+                "частиною (за підтвердженими фактами).")
         return body + footer("підрахунок (без розбивки)", "facts + dimensions",
                              unconfirmed_note(date))
     total_abs = sum(r["absent"] for r in rows)

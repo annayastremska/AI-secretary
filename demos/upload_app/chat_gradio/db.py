@@ -21,9 +21,10 @@
 #   document_date того ж source_doc_id. Ключі словника — як у контракту.
 #
 # Що наша схема НЕ покриває (чесно, без обходів):
-#   - підрозділи: зв'язку особа→підрозділ немає (db/README_for_chatbot_team.md
-#     п.8) → find_people(subdivision=...) і count_absent_by_subdivision()
-#     повертають [], чат каже «база цього не знає»;
+#   - підрозділи: з 25.08 зв'язок Є (штатка Андрія, вимір `subdivision`);
+#     доти його не було (db/README_for_chatbot_team.md
+#     п.8). Тепер і find_people(subdivision=...), і
+#     count_absent_by_subdivision() рахують по-справжньому;
 #   - superseded_by (скасування документом): у схемі немає -- завжди None;
 #   - reference_docs: нормативних розділів немає; search_reference шукає FTS по
 #     documents.text_content з domain='normative' -- таких документів у базі
@@ -166,11 +167,9 @@ def _rank_label(code):
 def find_people(subdivision=None, name=None):
     """Люди з реєстру (objects kind=person + розширення people).
 
-    subdivision: у схемі НЕМАЄ зв'язку особа→підрозділ -- фільтр за
-    підрозділом чесно повертає [] (чат озвучує причину сам).
+    subdivision: фільтр за підрозділом працює зі штатки (25.08) -- через
+    вимір `subdivision`. Доти повертав [] і чат казав «база цього не знає».
     """
-    if subdivision:
-        return []
     sql = ("SELECT o.id AS object_id, o.canonical_name, p.service_id, "
            "rank_f.value AS rank_code "
            "FROM objects o "
@@ -187,6 +186,14 @@ def find_people(subdivision=None, name=None):
     if name:
         sql += " AND o.canonical_name ILIKE %(name)s"
         params["name"] = f"%{name}%"
+    if subdivision:
+        # той самий вимір, що й у фільтрі відсутностей, лише від o.id
+        sql += (" AND EXISTS (SELECT 1 FROM facts sf "
+                "  JOIN dimensions sd ON sd.id = sf.dimension_id "
+                "                    AND sd.code = 'subdivision' "
+                "  WHERE sf.object_id = o.id "
+                "    AND sf.value ILIKE %(subdivision)s)")
+        params["subdivision"] = _subdivision_pattern(subdivision)
     rows = _query(sql + " ORDER BY o.id", params)
     return [{
         "service_id": r["service_id"] or f"ID-{r['object_id']}",
@@ -197,9 +204,50 @@ def find_people(subdivision=None, name=None):
         "full_name": r["canonical_name"],
         "rank": _rank_label(r["rank_code"]),
         "position_title": "",   # окремого підтвердженого виміру посади чат не тягне
-        "subdivision": "",      # зв'язку особа→підрозділ у схемі немає
+        # підрозділ у картці лишається порожнім: він окремим фактом у
+        # вимірі `subdivision`, і тягнути його сюди -- окремий запит на
+        # кожну особу. Фільтрувати ПО підрозділу функція вже вміє.
+        "subdivision": "",
         "phone": "",            # телефонів у схемі немає
     } for r in rows]
+
+
+#: Умова «особа з цього підрозділу». Штатку залив Андрій 25.08, і вимір
+#: `subdivision` у базі є -- тому стара дорога більше НЕ мусить відмовляти.
+#:
+#: Знайдено глибоким аналізом 26.08: у цьому файлі три функції повертали [] із
+#: коментарем «зв'язку особа->підрозділ немає», а чат казав «база цього не
+#: знає». База знає. Такий текст -- не обережність, а неправда про власні дані:
+#: він заперечує 300 рядків штатки. Шаблони каталогу ці питання зазвичай
+#: перехоплюють, але «зазвичай» -- не гарантія: досить іншого формулювання, і
+#: людина почує заперечення того, що система має.
+_SUBDIVISION_FILTER = """
+  AND EXISTS (SELECT 1 FROM facts sf
+              JOIN dimensions sd ON sd.id = sf.dimension_id
+                                AND sd.code = 'subdivision'
+              WHERE sf.object_id = f.object_id
+                AND sf.value ILIKE %(subdivision)s)
+"""
+
+
+def _subdivision_pattern(text):
+    """Текст із питання -> шаблон ILIKE («2 рота» -> «%2 рота%»)."""
+    want = str(text or "").strip()
+    if not want:
+        return None
+    return "%" + want.strip("%") + "%"
+
+
+def subdivision_values():
+    """-> назви підрозділів зі штатки (щоб перевірити, чи такий існує)."""
+    try:
+        rows = _query("SELECT DISTINCT f.value AS v FROM facts f "
+                      "JOIN dimensions d ON d.id = f.dimension_id "
+                      "WHERE d.code = 'subdivision' AND f.value <> '' "
+                      "ORDER BY f.value", {})
+        return [r["v"] for r in rows]
+    except psycopg.Error:
+        return []
 
 
 def absences_on_date(date, subdivision=None, doc_type=None, confirmed=True):
@@ -210,8 +258,6 @@ def absences_on_date(date, subdivision=None, doc_type=None, confirmed=True):
     для окремого числа у відповіді. Умови по датах -- як у query_catalog.yaml
     (list_by_state): valid_from <= date <= COALESCE(valid_to, безстроково).
     """
-    if subdivision:
-        return []  # зв'язку особа→підрозділ немає -- чат відмовляє чесно
     sql = _ABSENCE_SELECT + (
         "  AND f.status = %(status)s "
         "  AND f.valid_from IS NOT NULL "
@@ -219,6 +265,9 @@ def absences_on_date(date, subdivision=None, doc_type=None, confirmed=True):
         "  AND (f.valid_to IS NULL OR f.valid_to >= %(d)s) ")
     params = {"dims": ABSENCE_DIMS, "d": date,
               "status": "confirmed" if confirmed else "unconfirmed"}
+    if subdivision:
+        sql += _SUBDIVISION_FILTER
+        params["subdivision"] = _subdivision_pattern(subdivision)
     if doc_type:
         dim = next((k for k, v in DOC_TYPE_BY_DIM.items() if v == doc_type),
                    doc_type)
@@ -231,12 +280,13 @@ def absences_on_date(date, subdivision=None, doc_type=None, confirmed=True):
 
 def returning_on_date(date, subdivision=None):
     """У кого в цей день закінчується відсутність (valid_to = дата)."""
-    if subdivision:
-        return []
     sql = _ABSENCE_SELECT + (
         "  AND f.status = 'confirmed' AND f.valid_to = %(d)s ")
-    rows = _query(sql + " ORDER BY num.value NULLS LAST",
-                  {"dims": ABSENCE_DIMS, "d": date})
+    params = {"dims": ABSENCE_DIMS, "d": date}
+    if subdivision:
+        sql += _SUBDIVISION_FILTER
+        params["subdivision"] = _subdivision_pattern(subdivision)
+    rows = _query(sql + " ORDER BY num.value NULLS LAST", params)
     return [_absence_row(r) for r in rows]
 
 
@@ -278,10 +328,33 @@ def document_by_number(doc_number):
 
 
 def count_absent_by_subdivision(date):
-    """Зведення по підрозділах: наша схема НЕ зберігає зв'язок
-    особа→підрозділ (db/README_for_chatbot_team.md, п.8) -- повертаємо [],
-    чат відповідає «база цього не знає», обхід не вигадуємо."""
-    return []
+    """Зведення по підрозділах -> [{subdivision, total, absent}, ...].
+
+    Доти повертала [] із поясненням «схема не зберігає зв'язок
+    особа->підрозділ». Зі штаткою (25.08) це перестало бути правдою: вимір
+    `subdivision` у базі є, і зведення -- рівно та таблиця, яку секретар
+    зводить руками. `total` -- склад ЦЬОГО підрозділу за штаткою, тобто його
+    власний знаменник, а не 303 по частині."""
+    try:
+        return _query(
+            "WITH sub AS ("
+            "  SELECT sf.object_id, sf.value AS subdivision "
+            "  FROM facts sf JOIN dimensions sd ON sd.id = sf.dimension_id "
+            "  WHERE sd.code = 'subdivision' AND sf.value <> ''), "
+            "absent AS ("
+            "  SELECT DISTINCT f.object_id FROM facts f "
+            "  JOIN dimensions d ON d.id = f.dimension_id "
+            "  WHERE d.code = ANY(%(dims)s) AND f.status = 'confirmed' "
+            "    AND f.valid_from IS NOT NULL AND f.valid_from <= %(d)s "
+            "    AND (f.valid_to IS NULL OR f.valid_to >= %(d)s)) "
+            "SELECT sub.subdivision, "
+            "       COUNT(*) AS total, "
+            "       COUNT(absent.object_id) AS absent "
+            "FROM sub LEFT JOIN absent ON absent.object_id = sub.object_id "
+            "GROUP BY sub.subdivision ORDER BY sub.subdivision",
+            {"dims": ABSENCE_DIMS, "d": date})
+    except psycopg.Error:
+        return []
 
 
 def search_reference(query, limit=3):
