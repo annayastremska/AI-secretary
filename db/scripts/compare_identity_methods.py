@@ -159,6 +159,22 @@ def load_truth():
     return truth
 
 
+def _norm_soft(s):
+    """Нормалізація, яка ЗБЕРІГАЄ пробіли -- на відміну від E.normalize_key.
+
+    `normalize_key` зчищає всі пробіли (це правильно для ключа-ідентифікатора,
+    щоб «НД ТЗІ 2.5-004-99» і «НДТЗІ2.5-004-99» були одним ключем). Але для
+    РОЗБОРУ рядка це фатально: «№ 1934-XII від 06.12.1991» стає
+    «№1934-хіівід06.12.1991» -- латиниця складена в кириличну, пробіли
+    зникли, і після римських цифр стоїть «в», яке саме входить у клас
+    кириличних римських літер. Через це порівняння двічі казало «не
+    збігається» на рядках, які збігаються.
+    """
+    s = s.translate(E.CONFUSABLE).lower()
+    s = re.sub(r"[‐-―−]", "-", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def canonical(s):
     """Ідентифікатор -> (тип, розрізнювальні частини). None, якщо немає.
 
@@ -172,27 +188,32 @@ def canonical(s):
     """
     if not s or str(s).strip().upper() == "NONE":
         return None
-    s = E.normalize_key(str(s))
-    m = re.search(r"нд?тзі(\d\.\d-\d{3}-\d{2,4})", s)
+    s = _norm_soft(str(s))
+    m = re.search(r"нд\s*тзі\s*(\d\.\d\s*-\s*\d{3}\s*-\s*\d{2,4})", s)
     if m:
-        return ("tzi", m.group(1))
+        return ("tzi", re.sub(r"\s+", "", m.group(1)))
     # ВВР перевіряємо ПЕРЕД наказом: у ньому теж є «№», але є й «ст.»
-    m = re.search(r"(\d{4}),?№([\d-]+),?ст\.?(\d+)", s)
+    m = re.search(r"(\d{4})\s*,?\s*№\s*([\d-]+)\s*,?\s*ст\.?\s*(\d+)", s)
     if m:
         return ("vvr", m.group(1), m.group(2), m.group(3))
     # Номер закону («550-хіv», «80/94-вр») і номер указу («1153/2008») мусять
     # стояти ПЕРЕД загальним «№ NNN»: інакше закон 550-XIV і наказ № 550
     # злипаються в одне, а це різні документи.
-    m = re.search(r"(\d{2,5})-([івхлс]+)\b", s) or re.search(r"(\d{2,5})-([ivxlc]+)\b", s)
+    # `\b` тут не годиться: normalize_key зчищає ВСІ пробіли, тому
+    # «№ 2657-XII від 02.10.1992» стає «№2657-xiiвід02.10.1992», і після
+    # римських цифр іде літера, а не межа слова. Через це порівняння казало
+    # «не збігається» на рядках, які збігаються.
+    m = (re.search(r"(\d{2,5})\s*-\s*([івхлс]{1,6})", s)
+         or re.search(r"(\d{2,5})\s*-\s*([ivxlc]{1,6})", s))
     if m:
         return ("law", m.group(1), m.group(2))
-    m = re.search(r"(\d+)/(\d+)-вр", s)
+    m = re.search(r"(\d+)\s*/\s*(\d+)\s*-\s*вр", s)
     if m:
         return ("law_vr", m.group(1), m.group(2))
     m = re.search(r"(\d{1,5})/(\d{4})", s)
     if m:
         return ("decree", m.group(1), m.group(2))
-    num = re.search(r"№(\d+)", s)
+    num = re.search(r"№\s*(\d+)", s)
     date = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", s)
     if num:
         return ("order", num.group(1), date.groups() if date else None)
