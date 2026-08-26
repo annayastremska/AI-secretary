@@ -47,6 +47,26 @@ import extract_document_identity as E  # noqa: E402
 
 LLM = os.environ.get("LLM_URL", "http://127.0.0.1:8081/v1/chat/completions")
 
+# Строгий критерій написаний, щоб не приймати дотичне. Але заміряно, що він
+# ВІДМОВЛЯЄ і правильним відповідям, коли питання поставлене розмовно: на «як
+# підрубити інтернет у штабі» він відкинув пункт «Доступ до службової мережі
+# видає начальник зв'язку на підставі рапорту» -- тобто саму відповідь.
+# Тому критерій став параметром, і послаблення міряється проти набору «не по
+# темі»: саме там послаблення й має ціну.
+STRICT = (
+    "Критерій строгий: відповідає, тільки якщо в тексті є САМЕ те, що "
+    "запитали (строк, число, хто саме, який порядок). Якщо текст про сусідню "
+    "тему, про інший вид відпустки, про інший орган -- це НЕ відповідь."
+)
+LENIENT = (
+    "Критерій за змістом, не за словами: відповідає, якщо з тексту "
+    "військовослужбовець отримує те, що хотів дізнатися, навіть якщо питання "
+    "поставлене розмовно, а документ називає це службовим терміном "
+    "(«підрубити інтернет» -- це «доступ до мережі», «вайфай» -- це "
+    "«бездротовий сегмент»). НЕ відповідає, якщо текст про іншу тему, інший "
+    "орган або інший вид чогось -- тоді так і скажіть."
+)
+
 SYSTEM = (
     "Ти працюєш із нормативними документами Збройних Сил України. "
     "Ти НЕ переказуєш і НЕ додумуєш: ти або знаходиш у наданому тексті "
@@ -66,10 +86,7 @@ USER = """Питання військовослужбовця:
 
 Зроби дві речі.
 
-1. Вирішіть, чи цей фрагмент справді відповідає на питання. Критерій строгий:
-   відповідає, тільки якщо в тексті є САМЕ те, що запитали (строк, число, хто
-   саме, який порядок). Якщо текст про сусідню тему, про інший вид відпустки,
-   про інший орган -- це НЕ відповідь.
+1. Вирішіть, чи цей фрагмент справді відповідає на питання. {criterion}
 
 2. Якщо відповідає -- виберіть із тексту НЕ БІЛЬШЕ ДВОХ речень, які містять
    саму відповідь. Скопіюйте їх ДОСЛІВНО, символ за символом, без жодних змін:
@@ -87,12 +104,13 @@ USER = """Питання військовослужбовця:
 {{"answers": true|false, "why": "<коротко, чому саме так>", "quote": "<дослівна цитата або порожньо>"}}"""
 
 
-def ask(question, title, ident, addr, body, max_tokens=900):
+def ask(question, title, ident, addr, body, max_tokens=900, criterion=STRICT):
     payload = json.dumps({
         "messages": [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": USER.format(
-                question=question, title=title, ident=ident, addr=addr, body=body)},
+                question=question, title=title, ident=ident, addr=addr,
+                body=body, criterion=criterion)},
         ],
         "temperature": 0, "max_tokens": max_tokens,
     }).encode()
@@ -195,6 +213,11 @@ def main(argv=None):
     ap.add_argument("--questions", required=True)
     ap.add_argument("--top", type=int, default=2,
                     help="скільком верхнім одиницям задавати питання")
+    ap.add_argument("--lenient", action="store_true",
+                    help="критерій воріт за ЗМІСТОМ, не за словами")
+    ap.add_argument("--slang", action="store_true",
+                    help="додати ОКРЕМУ лексичну гілку з термінами, у які "
+                         "модель перекладає невідомі корпусу слова")
     ap.add_argument("--rerank", type=int, default=0,
                     help="розмір пулу реранкера; 0 -- без реранкера. "
                          "Заміряно: пул 50 підняв правильну одиницю в топ-2 "
@@ -226,10 +249,19 @@ def main(argv=None):
                 docs = [d["id"] for d in res["documents"]]
                 sq = res["rest"] or q
             vec = str(encode(["query: " + sq])[0])
-            fused = SU.dedupe_by_text(
-                cur, SU.rrf_merge(SU.lexical(cur, sq, docs=docs),
-                                  SU.semantic(cur, vec, docs=docs)),
-                SU.canon_map(cur))
+            branches = [SU.lexical(cur, sq, docs=docs),
+                        SU.semantic(cur, vec, docs=docs)]
+            if args.slang:
+                import expand_slang as ES
+                terms, _d = ES.expand(cur, sq)
+                if terms:
+                    # ОКРЕМА гілка, не дописування в запит: `ts_rank` винагороджує
+                    # за кількість збігів із запитом, тому додані слова обганяють
+                    # оригінальне розрізнювальне (заміряно: «пароль» упав з 1 на 52).
+                    branches.append(SU.lexical(cur, " ".join(terms), docs=docs))
+                    print(f"  [сленг -> {terms}]")
+            fused = SU.dedupe_by_text(cur, SU.rrf_merge(*branches),
+                                      SU.canon_map(cur))
             if rescore and fused:
                 pool = fused[:args.rerank]
                 texts = [SU.quote_of(cur, d, b)[0][:RERANK_CHARS]
@@ -247,8 +279,9 @@ def main(argv=None):
             for (doc_id, base), meta in fused[:args.top]:
                 title, ident = SU.identity(cur, doc_id, cache)
                 body, was_split, trimmed = SU.quote_of(cur, doc_id, base)
-                data, usage, dt, raw, truncated = ask(q, title[:70], ident,
-                                                      base[:60], body)
+                data, usage, dt, raw, truncated = ask(
+                    q, title[:70], ident, base[:60], body,
+                    criterion=LENIENT if args.lenient else STRICT)
                 cost["calls"] += 1
                 cost["s"] += dt
                 cost["in"] += usage.get("prompt_tokens", 0)
