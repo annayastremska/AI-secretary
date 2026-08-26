@@ -83,6 +83,20 @@ SQL_DOCS_PENDING = ("SELECT COUNT(DISTINCT rq.document_id) AS n "
                     "WHERE rq.resolved_at IS NULL "
                     "  AND rq.document_id IS NOT NULL")
 
+#: Те саме, але БЕЗ старих відміток «нове прізвище».
+#:
+#: Заміряно 26.08: документів у черзі 142, а якщо не рахувати `new_person` --
+#: 28. Різниця не косметична: 133 відмітки «нове прізвище» створені 24.08, коли
+#: штатки в базі ще не було, і після її заливки ті особи з нею зійшлися. Тобто
+#: 142 -- це переважно журнал старого моменту, а 28 -- документи, у яких справді
+#: є що дивитися людині. Показуємо обидва числа: одне без другого вводить в
+#: оману в обидві сторони.
+SQL_DOCS_PENDING_SUBSTANTIVE = ("SELECT COUNT(DISTINCT rq.document_id) AS n "
+                                "FROM review_queue rq "
+                                "WHERE rq.resolved_at IS NULL "
+                                "  AND rq.document_id IS NOT NULL "
+                                "  AND rq.queue_type <> 'new_person'")
+
 # Підписи станів і черг українською. Код лишається кодом (він у базі), але на
 # сторінці людина мусить читати слова, а не `unknown_type`.
 DOC_STATUS_LABELS = {
@@ -205,6 +219,7 @@ def db_counters(query=None):
         review = ask(SQL_REVIEW_OPEN, "queue_type")
         unmatched = ask(SQL_PEOPLE_UNMATCHED)
         docs_pending = ask(SQL_DOCS_PENDING)
+        docs_pending_sub = ask(SQL_DOCS_PENDING_SUBSTANTIVE)
     except Exception as exc:                       # noqa: BLE001
         # Найчастіша причина -- база просто не піднята (ConnectionTimeout) або
         # немає read-only пароля в .env. Обидві -- «недоступна», не «нуль».
@@ -238,6 +253,7 @@ def db_counters(query=None):
             # Скільком ДОКУМЕНТІВ чекає людини. Це не те саме, що кількість
             # завдань: на один документ їх буває кілька.
             "documents_pending": docs_pending,
+            "documents_pending_substantive": docs_pending_sub,
         },
     }, None
 
