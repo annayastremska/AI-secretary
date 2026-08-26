@@ -368,11 +368,48 @@ def diag_unconfirmed(records, ctx):
             sorted(per_doc.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
+# ── Дані ПОЗА пайплайном (штатка) ────────────────────────────────────────────
+#
+# 25.08 Андрій залив штатку: у базі з'явився документ «Штатна книжка»
+# (domain='staffing'), 300 осіб зі service_id і ~714 фактів про них. Наш вихід
+# (.md-файли) цього не містить і не може містити -- це інше джерело.
+#
+# Через це прилад показав 5 «розбіжностей», яких насправді немає: він
+# порівнював «база» з «наш вихід» і будував на припущенні, що це те саме.
+# Припущення перестало бути правдою.
+#
+# Тому очікуване коригується ЯВНО і з бази, а не константою в коді: скільком
+# документів/осіб/фактів прийшло не від нас. Якщо штатку переллють іншою --
+# корекція поїде за нею.
+OUTSIDE_SQL = """
+SELECT
+  (SELECT count(*) FROM documents WHERE domain = 'staffing')      AS docs,
+  (SELECT count(DISTINCT f.object_id) FROM facts f
+     JOIN documents d ON d.id = f.source_doc_id
+    WHERE d.domain = 'staffing')                                  AS people,
+  (SELECT count(*) FROM facts f
+     JOIN documents d ON d.id = f.source_doc_id
+    WHERE d.domain = 'staffing')                                  AS facts
+"""
+
+
+def outside_pipeline():
+    """-> {'docs': n, 'people': n, 'facts': n} або нулі, якщо не прочиталось."""
+    try:
+        row = run_sql(OUTSIDE_SQL, {})[0]
+        return {k: int(row[k] or 0) for k in ("docs", "people", "facts")}
+    except Exception:
+        return {"docs": 0, "people": 0, "facts": 0}
+
+
 def exp_documents_count(records, ctx):
     counts = {}
     for r in records:
         key = r.domain or "(без домену)"
         counts[key] = counts.get(key, 0) + 1
+    # штатка -- не наш вихід, але вона в базі є (див. OUTSIDE_SQL)
+    if ctx.get("outside", {}).get("docs"):
+        counts["staffing"] = ctx["outside"]["docs"]
     return counts
 
 
@@ -381,6 +418,8 @@ def exp_count_by_doc_type(records, ctx):
     for r in records:
         key = TEMPLATE_TO_DOC_TYPE_NAME.get(r.template, NO_TYPE)
         counts[key] = counts.get(key, 0) + 1
+    if ctx.get("outside", {}).get("docs"):
+        counts["Штатна книжка"] = ctx["outside"]["docs"]
     return counts
 
 
@@ -463,7 +502,7 @@ def exp_failed(records, ctx):
     failed = sum(1 for r in records if r.status == "unresolved")
     unknown = sum(1 for r in records if r.queue_type() == "unknown_type")
     return {"failed": failed, "unknown_type_docs": unknown,
-            "total": len(records)}
+            "total": len(records) + ctx.get("outside", {}).get("docs", 0)}
 
 
 # ── Корекція очікуваного на зведення дублікатів (review_log) ────────────────
@@ -792,6 +831,15 @@ def main():
         "doc_number": pick_doc_number(records) or "",
         "query": args.query,
     }
+    # Дані поза пайплайном (штатка Андрія) -- читаємо з бази ДО побудови
+    # перевірок: без цієї корекції прилад показував 5 «розбіжностей», яких
+    # немає, бо порівнював базу з нашим виходом як із тим самим джерелом.
+    ctx["outside"] = ({"docs": 0, "people": 0, "facts": 0}
+                      if args.expected_only else outside_pipeline())
+    if ctx["outside"]["docs"]:
+        print(f"поза пайплайном (штатка): документів {ctx['outside']['docs']}, "
+              f"осіб {ctx['outside']['people']}, фактів "
+              f"{ctx['outside']['facts']} -- очікувані числа скориговані")
     checks = build_checks(ctx)
 
     print(f"записів у {args.output_dir}: {len(records)} "
