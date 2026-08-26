@@ -73,3 +73,22 @@ def test_absent_answer_refuses_unknown_subdivision(monkeypatch):
     _known(monkeypatch)
     out = app.answer_absent("2026-08-28", "5 рота")
     assert "штатці немає" in out
+
+
+def test_returning_zero_says_data_is_missing(monkeypatch):
+    """Нуль поза покриттям мусить називати межі даних.
+
+    Питання Ані 26.08: «Хто повертається 2026-05-09?» давало чистий нуль, і з
+    нього неможливо було зрозуміти, що травня в базі немає взагалі. Сусідній
+    шаблон («хто був у відпустці 5 травня») це вже казав -- тобто одна дорога
+    мала попередження, а друга ні."""
+    monkeypatch.setattr(app.db, "returning_on_date", lambda *a, **k: [])
+    monkeypatch.setattr(app.db, "coverage_note",
+                        lambda *a, **k: "За цю дату в базі даних НЕМАЄ: "
+                                        "документи покривають 2026-06-02 — "
+                                        "2026-10-10.")
+    monkeypatch.setattr(app.db, "unconfirmed_absences_on_date",
+                        lambda *a, **k: 0)
+    monkeypatch.setattr(app.db, "people_total", lambda: 303)
+    out = app.answer_returning("2026-05-09", None)
+    assert "покривають" in out

@@ -71,6 +71,18 @@ SQL_REVIEW_OPEN = ("SELECT rq.queue_type, COUNT(*) AS n FROM review_queue rq "
 SQL_PEOPLE_UNMATCHED = ("SELECT COUNT(*) AS n FROM people "
                         "WHERE service_id IS NULL")
 
+#: Скільком ДОКУМЕНТІВ чекає ручної перевірки.
+#:
+#: Питання Ані 26.08: «цифри не сходяться, або немає каунтера документів на
+#: ручну перевірку». Другого не було: сторінка показувала 162 ЗАВДАННЯ, а
+#: завдань на один документ буває кілька (нове прізвище + непевне поле), і
+#: 133 із них узагалі створені до появи штатки. Тобто з журналу завдань
+#: неможливо було зрозуміти головне: скільком папок людині відкрити.
+SQL_DOCS_PENDING = ("SELECT COUNT(DISTINCT rq.document_id) AS n "
+                    "FROM review_queue rq "
+                    "WHERE rq.resolved_at IS NULL "
+                    "  AND rq.document_id IS NOT NULL")
+
 # Підписи станів і черг українською. Код лишається кодом (він у базі), але на
 # сторінці людина мусить читати слова, а не `unknown_type`.
 DOC_STATUS_LABELS = {
@@ -192,6 +204,7 @@ def db_counters(query=None):
         people = ask(SQL_PEOPLE)
         review = ask(SQL_REVIEW_OPEN, "queue_type")
         unmatched = ask(SQL_PEOPLE_UNMATCHED)
+        docs_pending = ask(SQL_DOCS_PENDING)
     except Exception as exc:                       # noqa: BLE001
         # Найчастіша причина -- база просто не піднята (ConnectionTimeout) або
         # немає read-only пароля в .env. Обидві -- «недоступна», не «нуль».
@@ -222,6 +235,9 @@ def db_counters(query=None):
             # означає «справді невідомі», а `open_total` -- журнал завдань,
             # більшість яких створена до появи штатки.
             "people_unmatched": unmatched,
+            # Скільком ДОКУМЕНТІВ чекає людини. Це не те саме, що кількість
+            # завдань: на один документ їх буває кілька.
+            "documents_pending": docs_pending,
         },
     }, None
 

@@ -171,7 +171,8 @@ def find_people(subdivision=None, name=None):
     вимір `subdivision`. Доти повертав [] і чат казав «база цього не знає».
     """
     sql = ("SELECT o.id AS object_id, o.canonical_name, p.service_id, "
-           "rank_f.value AS rank_code "
+           "rank_f.value AS rank_code, pos_f.value AS position_val, "
+           "sub_f.value AS subdivision_val "
            "FROM objects o "
            "JOIN object_kinds k ON k.id = o.kind_id AND k.code = 'person' "
            "LEFT JOIN people p ON p.object_id = o.id "
@@ -181,6 +182,21 @@ def find_people(subdivision=None, name=None):
            "  WHERE f.object_id = o.id AND d.code = 'rank' "
            "    AND f.status = 'confirmed' "
            "  ORDER BY f.valid_from DESC NULLS LAST LIMIT 1) rank_f ON true "
+           # Посада й підрозділ -- окремі виміри зі штатки. Доти вони не
+           # витягались, і картка особи складалася з ПІБ і звання: на питання
+           # «що відомо про Усика» це майже нічого (питання Ані 26.08).
+           "LEFT JOIN LATERAL ("
+           "  SELECT f.value FROM facts f "
+           "  JOIN dimensions d ON d.id = f.dimension_id "
+           "  WHERE f.object_id = o.id AND d.code = 'position' "
+           "    AND f.status = 'confirmed' "
+           "  ORDER BY f.valid_from DESC NULLS LAST LIMIT 1) pos_f ON true "
+           "LEFT JOIN LATERAL ("
+           "  SELECT f.value FROM facts f "
+           "  JOIN dimensions d ON d.id = f.dimension_id "
+           "  WHERE f.object_id = o.id AND d.code = 'subdivision' "
+           "    AND f.status = 'confirmed' "
+           "  ORDER BY f.valid_from DESC NULLS LAST LIMIT 1) sub_f ON true "
            "WHERE 1=1")
     params = {}
     if name:
@@ -203,11 +219,8 @@ def find_people(subdivision=None, name=None):
         "in_roster": bool(r["service_id"]),
         "full_name": r["canonical_name"],
         "rank": _rank_label(r["rank_code"]),
-        "position_title": "",   # окремого підтвердженого виміру посади чат не тягне
-        # підрозділ у картці лишається порожнім: він окремим фактом у
-        # вимірі `subdivision`, і тягнути його сюди -- окремий запит на
-        # кожну особу. Фільтрувати ПО підрозділу функція вже вміє.
-        "subdivision": "",
+        "position_title": r["position_val"] or "",
+        "subdivision": r["subdivision_val"] or "",
         "phone": "",            # телефонів у схемі немає
     } for r in rows]
 
