@@ -76,3 +76,21 @@ def test_no_control_bytes_in_chat_sources():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_day_is_taken_only_before_the_month_name():
+    """«Хто відсутній у 2 роті 28 серпня 2026?» -- день 28, не 2.
+
+    Знайдено живим прогоном 26.08. Регекс дня брав першу пару «цифра +
+    слово» по всьому питанню, тому номер підрозділу ставав днем: чат упевнено
+    відповідав про 2 серпня -- інша дата, інші люди, вигляд правильної
+    відповіді. Тепер день читається лише безпосередньо перед назвою місяця.
+    """
+    cases = [
+        ("Хто відсутній у 2 роті 28 серпня 2026?", datetime.date(2026, 8, 28)),
+        ("Скільки у 3 роті у відпустці 6 травня 2026?", datetime.date(2026, 5, 6)),
+        ("Скільком у відпустці 1 січня 1990?", datetime.date(1990, 1, 1)),
+    ]
+    for question, expected in cases:
+        on_date, _, _ = chat_app.tier_chat.extract_dates(question)
+        assert on_date == expected, f"{question}: {on_date}"

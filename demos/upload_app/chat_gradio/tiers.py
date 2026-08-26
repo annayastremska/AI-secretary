@@ -396,6 +396,18 @@ def _month_from(text):
     return None
 
 
+def _month_span(text):
+    """-> (номер місяця, позиція його назви) або (None, None).
+
+    Позиція потрібна, щоб узяти день, який стоїть саме ПЕРЕД місяцем."""
+    low = text.lower()
+    for stem, num in MONTHS.items():
+        at = low.find(stem)
+        if at >= 0:
+            return num, at
+    return None, None
+
+
 def extract_dates(question):
     """-> (on_date, date_from, date_to) як date або None.
 
@@ -415,7 +427,7 @@ def extract_dates(question):
         d = datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
         return d, None, None
 
-    month = _month_from(low)
+    month, month_at = _month_span(low)
     # Рік -- ЧОТИРИ цифри, будь-які, а не лише «20xx».
     #
     # Було `\b(20\d{2})\b`, і на «1 січня 1990» цей регекс року просто НЕ
@@ -427,7 +439,15 @@ def extract_dates(question):
     year_m = re.search(r"\b(1[89]\d{2}|20\d{2}|21\d{2})\b", question)
     year = int(year_m.group(1)) if year_m else today.year
     if month:
-        day_m = re.search(r"\b(\d{1,2})(?:-?го)?\s+[а-яіїєґ]*", low)
+        # День -- ЛИШЕ той, що стоїть безпосередньо перед назвою місяця.
+        #
+        # Було `\b(\d{1,2})(?:-?го)?\s+[а-яіїєґ]*` по всьому питанню, тобто
+        # перша ж пара «цифра + слово». На «Хто відсутній у 2 роті 28 серпня
+        # 2026?» днем ставало **2** (з «2 роті»), і чат упевнено відповідав
+        # про 2 серпня -- інша дата, інші люди, з виглядом правильної
+        # відповіді. Знайдено живим прогоном 26.08, коли стара дорога
+        # навчилась підрозділам.
+        day_m = re.search(r"(\d{1,2})(?:-?го)?\s+$", low[:month_at])
         day = None
         if day_m and 1 <= int(day_m.group(1)) <= 31:
             day = int(day_m.group(1))
