@@ -385,6 +385,17 @@ STATIC_FILES = {
                  "image/svg+xml"),
 }
 
+# Шрифти обличчя v2 -- у підпапці, і маршрут статики їх спершу НЕ віддавав
+# (перелік плоский, підпапки в ньому немає -> 404, а сторінка тихо падала на
+# системний шрифт). Додаємо їх у той самий білий перелік, а не відкриваємо
+# видачу файлів за шляхом: перелік -- це і є захист від «/static/../.env».
+for _f in sorted(os.listdir(os.path.join(APP_DIR, "static", "fonts"))
+                 if os.path.isdir(os.path.join(APP_DIR, "static", "fonts"))
+                 else []):
+    if _f.endswith(".woff2"):
+        STATIC_FILES["fonts/" + _f] = (
+            os.path.join(APP_DIR, "static", "fonts", _f), "font/woff2")
+
 
 #: Яку версію обличчя віддавати: v1 (як було) або v2 («строга» база, олива,
 #: IBM Plex, дві теми). Рішення Ані 27.08: стару НЕ видаляти, дати порівняти.
@@ -414,7 +425,7 @@ def skin_css():
                     headers={"Cache-Control": "no-store"})
 
 
-@app.get("/static/{name}")
+@app.get("/static/{name:path}")
 def static_file(name: str):
     entry = STATIC_FILES.get(name)
     if entry is None:
