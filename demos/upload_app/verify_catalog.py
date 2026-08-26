@@ -808,6 +808,14 @@ def build_checks(ctx):
             kind="execute",
             params={"dims": ["leave", "deployment_location"],
                     "on_date": "2026-08-28"}),
+        # «Хто у 2 роті» -- перелік. Теж виконанням і з тієї ж причини:
+        # прізвища беруться з документів, а належність до роти -- зі штатки,
+        # і .md-файли пайплайна другої половини не містять.
+        "list_by_state_in_subdivision": dict(
+            kind="execute",
+            params={"dims": ["leave", "deployment_location"],
+                    "on_date": "2026-08-28",
+                    "subdivision": "%2%рота%"}),
         # розмовний маршрут (етап 3.5): SQL немає за задумом, як у
         # subdivision_unknown -- перевіряється blocked + refusal
         "smalltalk": dict(kind="blocked", params={}),

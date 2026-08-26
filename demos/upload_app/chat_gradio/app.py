@@ -1260,6 +1260,7 @@ _STATE_TEMPLATES = {
     # стара дорога про підрозділи не знає нічого (у `people` такої колонки
     # немає -- зв'язок лежить окремим виміром `subdivision`).
     "count_by_state_in_subdivision",
+    "list_by_state_in_subdivision",
     "subdivision_breakdown",
     "subdivision_unknown",
 }
