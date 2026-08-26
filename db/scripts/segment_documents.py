@@ -66,6 +66,19 @@ import re
 # з повного тексту), тому це була деградація, а не втрата, але непотрібна.
 MAX_UNIT = 2000
 MIN_UNIT = 80          # коротше -- як правило, залишок службового рядка
+
+# Перекриття між частинами однієї розрізаної одиниці. Було у вікнах (200), я
+# його при переході на одиниці прибрав -- це була регресія. Потрібне не для
+# вигляду, а для ЗНАХОДЖЕННЯ: якщо відповідь лежить рівно на стику, без
+# перекриття жодна частина не містить її цілком, і векторний збіг просідає
+# в обох одразу.
+OVERLAP = 200
+
+# Межі, за якими можна різати, від найкращої до найгіршої. Раніше ланцюжок
+# закінчувався на переносі рядка -- а в цьому корпусі переносів у потрібному
+# діапазоні часто немає, і тоді розріз падав рівно на MAX_UNIT, тобто посеред
+# речення. Кінець речення додано саме тому.
+SENT_END = re.compile(r"[.;:!?]\s")
 # Ознака того, що одиницю породило ОБРІЗАННЯ ЗА ДОВЖИНОЮ, а не структура.
 # Потрібна однозначна: складена мітка «Додаток 1 / 2.» уже містить слеш.
 SPLIT_MARK = "~частина "
@@ -231,8 +244,20 @@ def boundaries(text, rule="union"):
     return out
 
 
+def _cut_point(body, lo, hi):
+    """Найкраща межа розрізу в [lo, hi): абзац > рядок > кінець речення > hi."""
+    for sep in ("\n\n", "\n"):
+        p = body.rfind(sep, lo, hi)
+        if p > lo:
+            return p + len(sep)
+    best = -1
+    for m in SENT_END.finditer(body, lo, hi):
+        best = m.end()
+    return best if best > lo else hi
+
+
 def split_long(text, start, end, label):
-    """Задовгу одиницю ріжемо по абзацах, зберігаючи ім'я -- з суфіксом /N."""
+    """Задовгу одиницю ріжемо на частини з перекриттям, по межах речень."""
     body = text[start:end]
     if len(body) <= MAX_UNIT:
         return [(start, end, label)]
@@ -240,16 +265,28 @@ def split_long(text, start, end, label):
     while pos < len(body):
         cut = min(pos + MAX_UNIT, len(body))
         if cut < len(body):
-            br = body.rfind("\n\n", pos + MAX_UNIT // 2, cut)
-            if br < 0:
-                br = body.rfind("\n", pos + MAX_UNIT // 2, cut)
-            if br > pos:
-                cut = br
+            cut = _cut_point(body, pos + MAX_UNIT // 2, cut)
         # Суфікс саме такий, а не `label/N`: складена мітка вже містить « / »
         # (контейнер + пункт), і я на цьому сам себе обманув -- шукав `/` як
         # ознаку обрізання за довжиною й порахував префікси контейнерів.
         out.append((start + pos, start + cut, f"{label} {SPLIT_MARK}{part}"))
-        pos, part = cut, part + 1
+        if cut >= len(body):
+            break
+        # Наступна частина починається РАНІШЕ за кінець попередньої, щоб стик
+        # був покритий двічі. Але початок мусить бути СПРАВЖНЬОЮ межею
+        # речення, інакше перекриття саме породжує обрізок із середини --
+        # перша версія цього коду брала просто `cut - OVERLAP` і залишила ті
+        # самі 31% частин, що починаються з малої літери.
+        # УВАГА на систему координат: pos/cut/nxt -- ВІДНОСНІ зсуви в body, а
+        # out[-1][0] -- АБСОЛЮТНИЙ. Перша версія порівнювала абсолютну позицію
+        # з відносною, умова ніколи не виконувалась, і перекриття тихо не
+        # застосовувалось узагалі -- частини стикувались упритул, як і до
+        # «виправлення».
+        lo = max(pos + 1, cut - 2 * OVERLAP)
+        hi = max(lo + 1, cut - OVERLAP // 2)
+        nxt = _cut_point(body, lo, hi)
+        pos = nxt if pos < nxt < cut else cut
+        part += 1
     return out
 
 
@@ -264,30 +301,44 @@ def segment(text, rule="union"):
         # ~2100 символів, а решта була б невидима семантичній гілці зовсім.
         # Це друга поява того самого недогляду -- перша була з преамбулою.
         return "без маркерів", [
-            dict(label=lbl, parent=None, char_start=s, char_end=e, text=text[s:e])
+            dict(label=lbl, base_label="весь документ", parent=None,
+                 char_start=s, char_end=e, text=text[s:e])
             for s, e, lbl in split_long(text, 0, len(text), "весь документ")]
 
-    pieces = []          # (start, end, label, parent)
-    # Преамбула ТЕЖ іде через split_long. Без цього в документі 207 виходила
-    # одиниця на 53901 символ: перша межа там аж на позиції 53901.
-    if bounds[0][0] > MIN_UNIT:
-        for s, e, lbl in split_long(text, 0, bounds[0][0], "преамбула"):
-            pieces.append((s, e, lbl, None))
+    # 1. Сегменти між межами, ДО будь-якого різання за довжиною.
+    segs = []            # [start, end, label, parent]
+    if bounds[0][0] > 0:
+        segs.append([0, bounds[0][0], "преамбула", None])
 
     container = None
     for i, (pos, kind, label) in enumerate(bounds):
         end = bounds[i + 1][0] if i + 1 < len(bounds) else len(text)
         if kind in CONTAINERS:
             container = label
-            full, parent = label, None
+            segs.append([pos, end, label, None])
         else:
             full = f"{container} / {label}" if container else label
-            parent = container
-        for s, e, lbl in split_long(text, pos, end, full):
-            pieces.append((s, e, lbl, parent))
+            segs.append([pos, end, full, container])
 
-    units = [dict(label=lbl, parent=par, char_start=s, char_end=e,
-                  text=text[s:e]) for s, e, lbl, par in pieces]
+    # 2. Дрібні сегменти зливаємо з ПОПЕРЕДНІМ. Це елементи переліків на
+    # 20-40 символів: окремо вони не цитата, а їхній вектор розмитий, бо
+    # контексту в них немає. Мітка лишається батьківська -- «4) членів
+    # добровольчих формувань» справді належить пункту, який його вводить.
+    # Робиться ДО різання за довжиною, інакше злиття може дати завелику
+    # одиницю, яку вже ніхто не поріже.
+    merged = []
+    for seg in segs:
+        if merged and (seg[1] - seg[0]) < MIN_UNIT and merged[-1][3] == seg[3]:
+            merged[-1][1] = seg[1]
+        else:
+            merged.append(seg)
+
+    # 3. І лише тепер різання за довжиною.
+    units = []
+    for start, end, label, parent in merged:
+        for s, e, lbl in split_long(text, start, end, label):
+            units.append(dict(label=lbl, base_label=label, parent=parent,
+                              char_start=s, char_end=e, text=text[s:e]))
     return "+".join(sorted({k for _, k, _ in bounds})), units
 
 
@@ -302,13 +353,30 @@ def check(name, text, family, units):
     if bad:
         problems.append(f"зсуви брешуть у {len(bad)}: {bad[:2]}")
 
+    # Перекриття тепер ДОЗВОЛЕНЕ, але лише між сусідніми частинами ОДНІЄЇ
+    # одиниці й не глибше за 2*OVERLAP -- саме стільку може дати split_long,
+    # коли підтягує початок частини назад до межі речення. Перекриття між
+    # РІЗНИМИ одиницями -- усе ще помилка.
     ordered = sorted(units, key=lambda u: u["char_start"])
-    over = [(a["label"], b["label"]) for a, b in zip(ordered, ordered[1:])
-            if a["char_end"] > b["char_start"]]
+    over = []
+    for a, b in zip(ordered, ordered[1:]):
+        if a["char_end"] <= b["char_start"]:
+            continue
+        same = a.get("base_label") == b.get("base_label")
+        depth = a["char_end"] - b["char_start"]
+        if not same or depth > 2 * OVERLAP + 2:
+            over.append((a["label"], b["label"], depth))
     if over:
-        problems.append(f"перекриття {len(over)}, напр. {over[0]}")
+        problems.append(f"негодяще перекриття {len(over)}, напр. {over[0]}")
 
-    covered = sum(u["char_end"] - u["char_start"] for u in units)
+    # Покриття -- по ОБ'ЄДНАННЮ проміжків, а не по сумі довжин: із перекриттям
+    # сума завжди більша за текст, і порівнювати її з len(text) безглуздо.
+    covered, cursor = 0, 0
+    for u in ordered:
+        s, e = max(u["char_start"], cursor), u["char_end"]
+        if e > s:
+            covered += e - s
+            cursor = e
     lost = len(text) - covered
     if lost != 0:
         problems.append(f"покриття розійшлось на {lost} симв.")
