@@ -42,6 +42,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "db", "scripts"))
 
 import search_units_test as SU  # noqa: E402
+import resolve_identifier as R  # noqa: E402
 import extract_document_identity as E  # noqa: E402
 
 LLM = os.environ.get("LLM_URL", "http://127.0.0.1:8081/v1/chat/completions")
@@ -213,9 +214,21 @@ def main(argv=None):
 
     with psycopg.connect(dsn()) as conn, conn.cursor() as cur:
         for q in questions:
-            vec = str(encode(["query: " + q])[0])
+            # Номер вирішується ДО пошуку: він каже ДЕ шукати, решта -- ЩО.
+            res = R.resolve(cur, q)
+            docs, sq = None, q
+            if res["status"] == "absent":
+                print(f"\n{'=' * 78}\nПИТАННЯ: {q}")
+                print(f"  ЗА НОМЕРОМ {res['missing']} документа в корпусі НЕМА "
+                      "-- ворота не потрібні")
+                continue
+            if res["status"] == "resolved":
+                docs = [d["id"] for d in res["documents"]]
+                sq = res["rest"] or q
+            vec = str(encode(["query: " + sq])[0])
             fused = SU.dedupe_by_text(
-                cur, SU.rrf_merge(SU.lexical(cur, q), SU.semantic(cur, vec)),
+                cur, SU.rrf_merge(SU.lexical(cur, sq, docs=docs),
+                                  SU.semantic(cur, vec, docs=docs)),
                 SU.canon_map(cur))
             if rescore and fused:
                 pool = fused[:args.rerank]

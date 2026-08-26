@@ -35,6 +35,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "db", "scripts"))
 
 import extract_document_identity as E  # noqa: E402
+import resolve_identifier as R  # noqa: E402
 
 # Таблиці задаються повними іменами через середовище: після міграції одиниці
 # живуть у постійній схемі (`document_units`), а тестова лишається для
@@ -47,28 +48,44 @@ QUOTE_CAP = 3000
 QUERY_PREFIX = "query: "
 
 
-def lexical(cur, query, limit=CANDIDATES):
+def only_docs(cur, doc_ids):
+    """Обмежує пошук переліком документів -- для запиту з номером.
+
+    Резолвер і пошук мусять СКЛАДАТИСЯ, а не конкурувати: на «що каже
+    НД ТЗІ 2.5-004-99 про паролі» номер визначає ДЕ шукати, а решта запиту --
+    ЩО шукати. Без цього обмеження пошук іде по всьому корпусу й приводить
+    документи, які лише цитують цей номер (саме так стрес-тест і провалився).
+    """
+    return doc_ids
+
+
+def lexical(cur, query, limit=CANDIDATES, docs=None):
     # АБО, не І: на дрібних одиницях вимога «усі слова в одному куску» дає нуль
     # кандидатів -- це вже було виміряно на фрагментах.
     tsq = ("replace(websearch_to_tsquery('ukrainian', %(q)s)::text,"
            " ' & ', ' | ')::tsquery")
+    # Обмеження по документах збирається ЗМІННОЮ, а не заглушкою в тексті:
+    # запит -- f-рядок, тому `{doc_filter}` у ньому Python обчислює одразу.
+    dfilter = "AND u.document_id = ANY(%(docs)s)" if docs else ""
     cur.execute(f"""
         SELECT u.id, u.document_id, u.base_label, ts_rank(u.tsv, {tsq}) AS score
           FROM {UNITS} u
           JOIN documents d ON d.id = u.document_id
          WHERE u.tsv @@ {tsq}
            AND d.validity = 'current'
+           {dfilter}
          ORDER BY score DESC LIMIT %(lim)s
-    """, {"q": query, "lim": limit})
+    """, {"q": query, "lim": limit, "docs": docs})
     return cur.fetchall()
 
 
-def semantic(cur, vec, limit=CANDIDATES):
+def semantic(cur, vec, limit=CANDIDATES, docs=None):
     # HNSW за замовчуванням обходить лише ~40 вузлів (`hnsw.ef_search`), і при
     # фільтрі по чинності частина з них відпадає ПІСЛЯ індексу -- тому запит на
     # 70 кандидатів віддавав 20-52. Піднімаємо обхід: він мусить бути більшим
     # за потрібну кількість із запасом на фільтр.
     cur.execute("SET LOCAL hnsw.ef_search = 200")
+    dfilter = "AND u.document_id = ANY(%(docs)s)" if docs else ""
     cur.execute(f"""
         SELECT u.id, u.document_id, u.base_label,
                1 - (u.embedding <=> %(v)s::public.vector) AS score
@@ -76,8 +93,9 @@ def semantic(cur, vec, limit=CANDIDATES):
           JOIN documents d ON d.id = u.document_id
          WHERE u.embedding IS NOT NULL
            AND d.validity = 'current'
+           {dfilter}
          ORDER BY u.embedding <=> %(v)s::public.vector LIMIT %(lim)s
-    """, {"v": vec, "lim": limit})
+    """, {"v": vec, "lim": limit, "docs": docs})
     return cur.fetchall()
 
 
@@ -160,12 +178,34 @@ def identity(cur, doc_id, cache):
 
 
 def answer(cur, encode, question, top=3, chars=420):
-    vec = str(encode([QUERY_PREFIX + question])[0])
-    lex = lexical(cur, question)
-    sem = semantic(cur, vec)
+    print(f"\n{'='*78}\nПИТАННЯ: {question}")
+
+    # Крок 0: номер у запиті вирішується ДО пошуку. Резолвер і пошук
+    # складаються: номер каже ДЕ шукати, решта запиту -- ЩО шукати. Без цього
+    # запит за номером іде по всьому корпусу й приводить документи, які лише
+    # ЦИТУЮТЬ цей номер -- саме так стрес-тест і провалився.
+    res = R.resolve(cur, question)
+    docs, search_q = None, question
+    if res["status"] == "absent":
+        print(f"  ЗА НОМЕРОМ {res['missing']} документа в корпусі НЕМА.")
+        print("  (це окрема відповідь, не «не знайшлось»: документ не завантажений)")
+        return []
+    if res["status"] == "resolved":
+        docs = [d["id"] for d in res["documents"]]
+        for d in res["documents"]:
+            print(f"  ЗА НОМЕРОМ: {d['identifier']} -> "
+                  f"{(d['title'] or '')[:52]} [{d['validity']}] id={d['id']}")
+        if not res["rest"]:
+            print("  (у запиті лише номер -- це картка документа, шукати нічого)")
+            return [(d["id"], None, 1.0) for d in res["documents"]]
+        search_q = res["rest"]
+        print(f"  шукаю ВСЕРЕДИНІ нього: {search_q!r}")
+
+    vec = str(encode([QUERY_PREFIX + search_q])[0])
+    lex = lexical(cur, search_q, docs=docs)
+    sem = semantic(cur, vec, docs=docs)
     fused = dedupe_by_text(cur, rrf_merge(lex, sem), canon_map(cur))
 
-    print(f"\n{'='*78}\nПИТАННЯ: {question}")
     print(f"  кандидатів: лексика {len(lex)}, семантика {len(sem)}, "
           f"логічних одиниць після склеювання {len(fused)}")
     if not fused:
