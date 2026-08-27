@@ -42,6 +42,8 @@ import os
 import re
 import threading
 
+import psycopg
+
 log = logging.getLogger("chat.normative")
 
 #: Скільком кандидатам дає оцінку реранкер. 50 -- заміряне Андрієм значення:
@@ -338,7 +340,16 @@ def answer(question):
         import tiers as _t
 
     vec = str(_STATE["encode"]([QUERY_PREFIX + question])[0])
-    with _t._connect() as conn, conn.cursor() as cur:
+    # З'ЄДНАННЯ З КОРТЕЖНИМИ РЯДКАМИ, а не словниковими.
+    #
+    # Чат усюди читає базу словниками (`row_factory=dict_row`) -- так зручніше
+    # в шаблонах. Але функції пошуку по одиницях написані під КОРТЕЖІ:
+    # `for a, b in cur.fetchall()` і розпакування `u.id, u.document_id, ...`.
+    # На словниках такий цикл перебирає КЛЮЧІ, тобто далі йде рядок
+    # «document_id» замість числа -- і база відповідає «invalid input syntax
+    # for type bigint». Перевірено живим прогоном 27.08: саме це й сталося.
+    # Тому тут окреме з'єднання з типовою фабрикою рядків, і причина названа.
+    with psycopg.connect(_t._dsn(), autocommit=True) as conn,             conn.cursor() as cur:
         fused = su.dedupe_by_text(
             cur, su.rrf_merge(su.lexical(cur, question),
                               su.semantic(cur, vec)), su.canon_map(cur))
