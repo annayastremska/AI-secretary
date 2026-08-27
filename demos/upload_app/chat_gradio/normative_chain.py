@@ -28,7 +28,7 @@
 
 ## Деградація замість поломки
 
-Ланцюгу потрібні: схема `andriy_test` (одиниці й вектори), доступ до неї
+Ланцюгу потрібні: одиниці з векторами в `public` (доступ у ролі вже є)
 readonly-користувачу, torch і дві моделі на карті. Якщо чогось із цього немає,
 `answer()` повертає None, і чат тихо лишається на поточному пошуку по
 фрагментах. Причина пишеться в журнал ОДИН раз -- щоб було видно, чому ланцюг
@@ -56,6 +56,16 @@ MIN_OVERLAP = 0.5
 RERANK_CHARS = 1800
 #: Скільки символів тексту одиниці кладемо у ворота.
 GATE_CHARS = 4000
+
+#: Де живуть одиниці нормативних документів. Відповідь Андрія 27.08: після
+#: міграції -- у ПОСТІЙНІЙ схемі, і роль readonly їх уже бачить. Ми просили
+#: доступ до його експериментальної `andriy_test`, а потрібна була не зміна
+#: прав, а зміна назви. У постійній схемі є міграція, коментарі й тригери; в
+#: експериментальній лежала чернетка.
+UNITS_SCHEMA = os.environ.get("CHAT_UNITS_SCHEMA", "public").strip()
+#: Таблиця груп дублікатів у постійній схемі зветься інакше, ніж в
+#: експериментальній (`document_groups` проти `doc_groups`).
+GROUPS_TABLE = os.environ.get("CHAT_UNITS_GROUPS", "document_groups").strip()
 
 ENABLED = os.environ.get("CHAT_NORMATIVE_CHAIN", "1").strip().lower() not in (
     "0", "false", "no", "off")
@@ -137,8 +147,20 @@ def _prepare():
                              f"{type(exc).__name__}: {exc}")
         return False, _STATE["reason"]
 
-    # Доступ до схеми одиниць -- окремо від коду: readonly-користувачу права
-    # видає Андрій, і без них ланцюг просто не наш.
+    # Схема одиниць -- ПОСТІЙНА (`public`), а не експериментальна.
+    #
+    # Модуль пошуку лежить у теці Андрія, і ми його не правимо: папка -- одна
+    # зона відповідальності. Тому перевизначаємо з НАШОГО боку. Схема в його
+    # модулі -- глобальна змінна, а SQL збирається на кожен виклик (f-рядки
+    # всередині функцій), тому перевизначення діє.
+    su.SCHEMA = UNITS_SCHEMA
+    # Таблиця груп дублікатів у постійній схемі зветься інакше. Його
+    # `canon_map` на невідомій таблиці глушить виняток і повертає порожній
+    # словник -- тобто зведення дублікатів ТИХО не працювало б, а «тихо не
+    # працює» гірше за падіння. Тому не покладаємось на глушник, а даємо
+    # правильний запит.
+    su.canon_map = _canon_map
+
     try:
         from . import tiers as _t
     except ImportError:
@@ -148,7 +170,7 @@ def _prepare():
             f"SELECT 1 FROM {su.SCHEMA}.document_units LIMIT 1", {})
     except Exception as exc:
         _STATE.update(ready=False,
-                      reason=f"немає доступу до схеми {su.SCHEMA}: "
+                      reason=f"немає доступу до {su.SCHEMA}.document_units: "
                              f"{type(exc).__name__}")
         return False, _STATE["reason"]
 
@@ -162,6 +184,18 @@ def _prepare():
         return False, _STATE["reason"]
     _STATE.update(ready=True, reason="", su=su)
     return True, ""
+
+
+def _canon_map(cur):
+    """document_id -> канонічний документ групи дублікатів.
+
+    Наша версія замість тієї, що в модулі Андрія: там ім'я таблиці --
+    `doc_groups` з експериментальної схеми, у постійній вона `document_groups`.
+    Колонки ті самі (перевірено живою базою 27.08).
+    """
+    cur.execute(f"SELECT document_id, canonical_id "
+                f"FROM {UNITS_SCHEMA}.{GROUPS_TABLE}")
+    return {a: b for a, b in cur.fetchall()}
 
 
 def available():
