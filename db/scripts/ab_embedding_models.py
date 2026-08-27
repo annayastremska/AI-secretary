@@ -181,9 +181,39 @@ def read_truth(path):
 
 
 def correct_units(cur, doc_id, needle):
-    cur.execute("""SELECT id FROM public.document_units
-                    WHERE document_id = %s AND text ILIKE %s""",
-                (doc_id, f"%{needle}%"))
+    """Правильні одиниці шукаються по ВСІЙ ГРУПІ ДУБЛІКАТІВ і БЕЗ огляду на
+    пробіли.
+
+    Друга умова -- не дрібниця: у копіях того самого закону OCR дає подвійні
+    пробіли («залізничних  станціях»), тому дослівний підрядок, узятий з однієї
+    копії, у другій не знаходиться. Я на цьому вже попався: вирішив, що зведення
+    дублікатів ГУБИТЬ статтю, тоді як стаття була на місці, а не збігався мій
+    власний підрядок.
+
+    Про групу дублікатів: не в одному
+    документі. У корпусі той самий закон трапляється двічі (наприклад
+    № 550-XIV -- документи 201 і 224), а видача зводить дублікати до
+    канонічного. Якби істина була прив'язана до одного document_id, правильна
+    одиниця, знайдена в копії, читалась би як «не знайдено» -- і прилад
+    показував би поломку пошуку там, де поломка в ньому самому.
+    """
+    cur.execute(f"""
+        WITH мій AS (
+            SELECT coalesce((SELECT canonical_id FROM {SU.GROUPS}
+                              WHERE document_id = %(d)s), %(d)s) AS canon
+        ),
+        родина AS (
+            SELECT %(d)s AS id
+            UNION
+            SELECT g.document_id FROM {SU.GROUPS} g, мій
+             WHERE g.canonical_id = мій.canon
+            UNION
+            SELECT мій.canon FROM мій
+        )
+        SELECT u.id FROM public.document_units u
+          JOIN родина r ON r.id = u.document_id
+         WHERE regexp_replace(u.text, E'\s+', ' ', 'g') ILIKE %(n)s
+    """, {"d": doc_id, "n": "%" + " ".join(needle.split()) + "%"})
     return {r[0] for r in cur.fetchall()}
 
 
@@ -201,11 +231,24 @@ def rank_fused(fused, ids):
     return None
 
 
-def measure(dsn, truth_path, keys):
+def measure(dsn, truth_path, keys, rerank=0):
+    """Три зрізи, і третій вирішальний.
+
+    Векторна гілка показує саму модель. Після RRF видно, чи різниця доживає до
+    склейки. Після РЕРАНКЕРА видно те, що дістається воротам, -- і рішення про
+    заміну моделі має ухвалюватись саме тут: виграш, який гине до воріт,
+    продуктом не є, а програш, який реранкер виправляє, не є підставою
+    відмовлятись.
+    """
     truth = read_truth(truth_path)
-    print(f"набір істини: {len(truth)} питань\n")
+    print(f"набір істини: {len(truth)} питань"
+          + (f", реранкер пул {rerank}" if rerank else ""))
     encoders = {k: load_encoder(k) for k in keys}
-    stats = {k: {"sem": [], "rrf": [], "s": 0.0} for k in keys}
+    rescore = None
+    if rerank:
+        from measure_rerank_lift import load_reranker
+        rescore = load_reranker()
+    stats = {k: {"sem": [], "rrf": [], "rr": [], "s": 0.0} for k in keys}
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         for q, doc_id, needle in truth:
@@ -225,8 +268,19 @@ def measure(dsn, truth_path, keys):
                 r_s, r_f = rank_of(sem, ids), rank_fused(fused, ids)
                 stats[k]["sem"].append(r_s)
                 stats[k]["rrf"].append(r_f)
-                print(f"     {k:<10} вектор ранг {str(r_s or '-'):>4}   "
-                      f"після RRF {str(r_f or '-'):>4}")
+                r_r = None
+                if rescore and fused:
+                    from measure_rerank_lift import RERANK_CHARS
+                    pool = fused[:rerank]
+                    texts = [SU.quote_of(cur, d, b)[0][:RERANK_CHARS]
+                             for (d, b), _m in pool]
+                    sc = rescore(q, texts)
+                    order = sorted(range(len(sc)), key=lambda j: -sc[j])
+                    r_r = rank_fused([pool[j] for j in order] + fused[rerank:], ids)
+                stats[k]["rr"].append(r_r)
+                print(f"     {k:<10} вектор {str(r_s or '-'):>4}   "
+                      f"RRF {str(r_f or '-'):>4}"
+                      + (f"   реранкер {str(r_r or '-'):>4}" if rescore else ""))
 
     def hit(ranks, n):
         return sum(1 for r in ranks if r is not None and r <= n)
@@ -250,6 +304,16 @@ def measure(dsn, truth_path, keys):
         print(f"{k:<12}{hit(r,1):>6}{hit(r,2):>6}{hit(r,5):>6}"
               f"{sum(1 for x in r if x is None):>12}"
               f"{(sum(found)/len(found) if found else 0):>11.1f}")
+    if any(any(x is not None for x in stats[k]["rr"]) for k in keys):
+        print()
+        print(f"{'модель':<12}{'@1':>6}{'@2':>6}{'@5':>6}{'не знайшла':>12}"
+              f"{'сер. ранг':>11}   (ПІСЛЯ РЕРАНКЕРА -- це бачать ворота)")
+        for k in keys:
+            r = stats[k]["rr"]
+            found = [x for x in r if x is not None]
+            print(f"{k:<12}{hit(r,1):>6}{hit(r,2):>6}{hit(r,5):>6}"
+                  f"{sum(1 for x in r if x is None):>12}"
+                  f"{(sum(found)/len(found) if found else 0):>11.1f}")
     print(f"\nусього питань у заміру: {total}")
     print("Рішення про заміну -- лише якщо виграш доживає до колонки «після RRF»:\n"
           "видача віддає в реранкер саме її, тому виграш у чистій векторній\n"
@@ -321,6 +385,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--build", choices=sorted(MODELS))
     ap.add_argument("--measure", action="store_true")
+    ap.add_argument("--rerank", type=int, default=0,
+                    help="пул реранкера в --measure; 0 -- без нього")
     ap.add_argument("--sweep-k", default="",
                     help="перебрати RRF_K, напр. 1,5,10,20,40,60")
     ap.add_argument("--models", default="e5-small,bge-m3",
@@ -338,7 +404,7 @@ def main(argv=None):
         bad = [k for k in keys if k not in MODELS]
         if bad:
             raise SystemExit(f"невідомі моделі: {bad}")
-        measure(dsn, args.truth, keys)
+        measure(dsn, args.truth, keys, args.rerank)
     if args.sweep_k:
         keys = [k.strip() for k in args.models.split(',') if k.strip()]
         ks = [int(x) for x in args.sweep_k.split(',') if x.strip()]
