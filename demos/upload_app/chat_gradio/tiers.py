@@ -1141,6 +1141,101 @@ def _doc_ref(r):
     return f"запис №{rec} у базі (номер документа не витягнуто)"
 
 
+#: Скільком документів називаємо. Шість — стільки, скільки людина прочитає
+#: очима; решта згортається в «і ще N документів». Перелік на пів екрана в
+#: блоці «джерело» ніхто не читає, а отже він не допомагає перевірити цифру.
+SOURCE_DOCS_SHOWN = 6
+
+#: Провенанс: із яких ДОКУМЕНТІВ складено відповідь.
+#:
+#: Один запит на всю родину шаблонів про стан. Вікно дати підставляється
+#: рядком `_window`, а не конкатенацією значень: значення завжди йдуть
+#: параметрами, у рядок склеюється лише вибір між двома готовими умовами.
+_SOURCE_DOCS_SQL = """
+SELECT d.id                                        AS doc_id,
+       coalesce(dt.name, '(тип не визначено)')      AS doc_type,
+       coalesce(max(num.value), d.doc_identifier)   AS doc_number,
+       coalesce(max(dat.value), d.issue_date::text) AS doc_date,
+       count(DISTINCT f.id)                         AS facts
+  FROM facts f
+  JOIN dimensions dm ON dm.id = f.dimension_id
+  JOIN documents d ON d.id = f.source_doc_id
+  LEFT JOIN document_types dt ON dt.id = d.type_id
+  LEFT JOIN facts num ON num.source_doc_id = d.id
+       AND num.dimension_id = (SELECT id FROM dimensions
+                                WHERE code = 'document_number')
+  LEFT JOIN facts dat ON dat.source_doc_id = d.id
+       AND dat.dimension_id = (SELECT id FROM dimensions
+                                WHERE code = 'document_date')
+ WHERE dm.code = ANY(%(dims)s)
+   AND f.status = 'confirmed'
+   {window}
+ GROUP BY d.id, dt.name, d.doc_identifier, d.issue_date
+ ORDER BY doc_date DESC NULLS LAST, d.id DESC
+"""
+
+#: Дві форми вікна — на дату й за період. Значення в обох ідуть параметрами.
+_WINDOW_ON_DATE = """
+   AND f.valid_from IS NOT NULL
+   AND f.valid_from <= %(on_date)s
+   AND (f.valid_to IS NULL OR f.valid_to >= %(on_date)s)
+"""
+_WINDOW_PERIOD = """
+   AND f.valid_from IS NOT NULL
+   AND f.valid_from <= %(date_to)s
+   AND (f.valid_to IS NULL OR f.valid_to >= %(date_from)s)
+"""
+
+
+def _source_documents(sql_params):
+    """-> (перелік документів, скільком їх усього) або ([], None).
+
+    ([], None) означає «не змогли назвати документи» — і тоді блок «джерело»
+    просто не має цих рядків. Провенанс не має права забрати з собою
+    відповідь: людина спитала не про нього.
+    """
+    dims = (sql_params or {}).get("dims")
+    if not dims:
+        return [], None
+    if sql_params.get("on_date"):
+        window = _WINDOW_ON_DATE
+    elif sql_params.get("date_from") and sql_params.get("date_to"):
+        window = _WINDOW_PERIOD
+    else:
+        return [], None
+    params = {k: v for k, v in sql_params.items()
+              if k in ("dims", "on_date", "date_from", "date_to")}
+    try:
+        rows = _run_template_sql(_SOURCE_DOCS_SQL.format(window=window),
+                                 params)
+    except psycopg.Error:
+        return [], None
+    return rows[:SOURCE_DOCS_SHOWN], len(rows)
+
+
+def _source_doc_lines(sql_params):
+    """Рядки блоку «джерело» про документи. Порожній список, якщо не вийшло."""
+    rows, total = _source_documents(sql_params)
+    if not rows:
+        return []
+    out = [f"документів-джерел: {total}"]
+    for r in rows:
+        num = (str(r.get("doc_number") or "")).strip().lstrip("№").strip()
+        date = (str(r.get("doc_date") or "")).strip()
+        head = _esc(str(r.get("doc_type") or "документ"))
+        if num:
+            head += f" №{_esc(num)}"
+        if date:
+            head += f" від {_esc(date)}"
+        # Скільком полів цього документа увійшло у відповідь: без цього
+        # незрозуміло, чи документ дав одне значення, чи весь запис.
+        out.append(f"  · {head} — полів у відповіді: {r.get('facts')} "
+                   f"(запис №{r.get('doc_id')} у базі)")
+    if total > len(rows):
+        out.append(f"  · … і ще {total - len(rows)} документів")
+    return out
+
+
 def _fmt_period(r):
     a, b = r.get("valid_from"), r.get("valid_to")
     if a and b:
@@ -1609,8 +1704,18 @@ def run_template(template_id, params):
             lines.append("Увага: у вибірку входять і непідтверджені записи "
                          "(чернетки) — цей шаблон їх не відділяє.")
 
-    source = [f"шаблон каталогу: {template_id} ({t['title']})",
-              "SQL шаблону:", t["sql"].strip()]
+    # Порядок рядків тут — це рішення про АДРЕСАТА блоку.
+    #
+    # Було: назва шаблону, потім SQL. Для інженера цього досить, для офіцера —
+    # ні: перевірити цифру він може, лише піднявши сам документ, а щоб його
+    # підняти, потрібні тип, номер і дата (запит Ані 27.08). Тому спершу
+    # документи, потім шаблон, і лише потім запит — під власним підписом
+    # «технічний».
+    #
+    # SQL не прибираємо: прозорість не зменшується, вона перестає бути першою.
+    source = _source_doc_lines(sql_params)
+    source.append(f"шаблон каталогу: {t['title']} ({template_id})")
+    source += ["технічний запит шаблону:", t["sql"].strip()]
     return "\n".join(lines), source
 
 
