@@ -1,0 +1,39 @@
+# HELD-OUT траси: питання взяті ДОСЛІВНО зі звіту «Що показав чат» (27.08.2026,
+# три прогони, ~80 питань). Формулювання не мої й не автора приладу -- це
+# єдина властивість, через яку набір і цінний.
+#
+# Навіщо окремо від followups.tsv. Той набір я вже двічі підганяв: правив
+# заголовки каталогу й формулювання промпту, дивлячись на його ж провали. Кожен
+# наступний бал на ньому -- підгонка, не якість. Тут питання, яких я не бачив,
+# коли щось налаштовував.
+#
+# ЩО Я ТУТ УСЕ Ж ВИРІШУВАВ САМ, і це межа набору: очікуваний шаблон і
+# параметри. Питання чужі, розмітка моя. Там, де каталог не має шаблона під
+# питання (порівняння двох дат, широкий звіт), стоїть kind=disputed -- такі
+# ходи в підсумок не входять, бо це рішення продукту, а не факт.
+#
+# Посилання «§N» -- номер пункту у звіті, щоб було з чим звіряти.
+#
+# trace	turn	kind	utterance	template	params
+H01	1	-	Скільки осіб у відпустці 2026-10-10?	count_by_state_on_date	state=leave;on_date=2026-10-10
+H01	2	успадкувати дату	А у відрядженні?	count_by_state_on_date	state=deployment;on_date=2026-10-10
+H02	1	-	Скільки осіб у відпустці 2026-09-02?	count_by_state_on_date	state=leave;on_date=2026-09-02
+H02	2	успадкувати дату	А скільки відсутніх разом?	count_by_state_on_date	state=absent;on_date=2026-09-02
+H03	1	-	Скільки осіб у відпустці 2026-09-01?	count_by_state_on_date	state=leave;on_date=2026-09-01
+H03	2	лише нова дата	2026-09-02	count_by_state_on_date	state=leave;on_date=2026-09-02
+H04	1	-	Хто у відпустці в 3 роті	list_by_state_in_subdivision	state=leave;subdivision=+
+H04	2	новий підрозділ і дата	А у взводі забезпечення на 2026-09-02?	list_by_state_in_subdivision	state=leave;on_date=2026-09-02;subdivision=+
+H05	1	-	Покажи відсутніх по підрозділах на 2026-09-02	subdivision_breakdown	state=absent;on_date=2026-09-02
+H05	2	звуження до підрозділу	Тільки перша рота	list_by_state_in_subdivision	state=absent;on_date=2026-09-02;subdivision=+
+H06	1	-	Хто у відпустці або у відрядженні на 2026-10-10?	list_by_state	state=absent;date_from=2026-10-10;date_to=2026-10-10
+H06	2	провенанс, не відмова	Звідки ти це знаєш?	!відмова
+H07	1	-	Хто був у відрядженні з 2026-05-10 по 2026-10-10?	list_by_state	state=deployment;date_from=2026-05-10;date_to=2026-10-10
+H07	2	самодостатнє, не успадковувати	Хто з 3-ї механізованої роти був у відпустці протягом серпня 2026?	!count_by_state_on_date	state=leave;subdivision=+
+H08	1	-	Скільки осіб у відпустці 2026-10-10?	count_by_state_on_date	state=leave;on_date=2026-10-10
+H08	2	зміна теми	Скільки днів відпустки покладено?	normative_search	!on_date;!state
+H09	1	-	Хто у відпустці в 3 роті	list_by_state_in_subdivision	state=leave;subdivision=+
+H09	2	одруківка в підрозділі	Хто у відпустці в 3 ротті	list_by_state_in_subdivision	state=leave;subdivision=+
+H10	1	-	Скільки осіб у відпустці 2026-09-01?	count_by_state_on_date	state=leave;on_date=2026-09-01
+H10	2	disputed	Порівняй, скільки осіб у відпустці 2026-09-01 і 2026-09-02	вільний_sql
+H11	1	-	У кого більше у відпустці на 2026-08-27	count_by_state_on_date	state=leave;on_date=2026-08-27
+H11	2	disputed	Дай повний звіт по частині на сьогодні	вільний_sql
