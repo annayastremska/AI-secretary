@@ -1294,6 +1294,16 @@ thead th {
  */
 @media (max-width: 640px) {
     .access-badge--bar {
+        /* НА ВСЮ ШИРИНУ. Півсвітла-півзелена смуга виходила тому, що
+           позначка -- елемент flex усередині смуги навігації, а елемент flex
+           за замовчуванням завширшки зі свій вміст. Тло малювалось лише під
+           текстом, а праворуч лишалась брендова зелень -- на око це
+           читалось як недомальований блок.
+           `flex-basis: 100%` замість `width`: у контейнері flex саме основа
+           вирішує ширину, і `width` вона перебиває. */
+        flex: 1 0 100% !important;
+        width: 100% !important;
+        box-sizing: border-box;
         background: var(--c-bg) !important;
         border-bottom: 1px solid var(--c-border);
         padding: var(--s-2) var(--s-4) !important;
