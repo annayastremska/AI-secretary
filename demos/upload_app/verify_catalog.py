@@ -491,6 +491,61 @@ def outside_person_facts(surname):
 OUTSIDE_KEYS = ("docs", "people", "facts", "staffing_docs", "normative_docs")
 
 
+#: ПІБ осіб, яких немає у штатці. `people.service_id IS NULL` -- та сама
+#: ознака, за якою це визначає чат (chat_gradio/tiers.py), щоб два місця не
+#: розійшлися.
+UNMATCHED_SQL = """
+SELECT o.canonical_name AS name
+  FROM objects o
+  JOIN object_kinds k ON k.id = o.kind_id AND k.code = 'person'
+  JOIN people p ON p.object_id = o.id
+ WHERE p.service_id IS NULL
+"""
+
+
+def unmatched_people():
+    """-> множина ПІБ без відповідника у штатці; порожня, якщо не прочиталось
+    (тоді правило просто не застосується, і це буде видно в розбіжностях)."""
+    try:
+        return {r["name"] for r in run_sql(UNMATCHED_SQL, {}) if r["name"]}
+    except Exception:
+        return set()
+
+
+def apply_roster_rule(records, unmatched):
+    """Очікуваний статус для осіб ПОЗА штаткою -- чернетка. -> рядки для друку.
+
+    Правило зробив Андрій 26.08 на моє прохання: немає відповідника у штатці
+    -> факти непевні, доки людина не підтвердить, що це за особа. Прилад мусить
+    очікувати те саме, інакше запрошена зміна читається як дефект.
+
+    Застосовується ОДИН раз, тут, і друкується. Не в кожній перевірці окремо:
+    їх понад двадцять, і двадцять копій одного правила розійшлися б.
+    """
+    if not unmatched:
+        return []
+    touched_docs = 0
+    touched_facts = 0
+    names = set()
+    for r in records:
+        if not r.person or r.person not in unmatched:
+            continue
+        changed = 0
+        for f in r.facts:
+            if f.get("status") == "confirmed":
+                f["status"] = "unconfirmed"
+                changed += 1
+        if changed:
+            touched_docs += 1
+            touched_facts += changed
+            names.add(r.person)
+    if not touched_facts:
+        return []
+    return [f"правило штатки: осіб поза штаткою {len(names)} "
+            f"({', '.join(sorted(names))}); їхні факти очікуються ЧЕРНЕТКАМИ "
+            f"-- скориговано {touched_facts} фактів у {touched_docs} документах"]
+
+
 def outside_pipeline(records=None):
     """Що в базі є ПОЗА нашим виходом. -> словник із OUTSIDE_KEYS, або нулі.
 
@@ -983,6 +1038,12 @@ def main():
     ctx["outside_person"] = (0 if args.expected_only
                              else outside_person_facts(ctx["surname"]))
     # Завдання, закриті людиною: очікуване по .md знає лише про створені.
+    # Правило штатки: очікуваний статус залежить не лише від .md (див.
+    # apply_roster_rule). Застосовуємо ДО побудови перевірок -- вони всі
+    # читають r.facts, тому правило мусить бути в записах, а не в кожній.
+    ctx["unmatched"] = (set() if args.expected_only else unmatched_people())
+    for line in apply_roster_rule(records, ctx["unmatched"]):
+        print(line)
     ctx["resolved_queue"] = ({} if args.expected_only else resolved_queue())
     if ctx["resolved_queue"]:
         total = sum(n for n, _r in ctx["resolved_queue"].values())
