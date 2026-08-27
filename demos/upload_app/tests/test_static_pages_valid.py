@@ -9,8 +9,13 @@
 Знайшла це не я і не тест, а Аня, відкривши сторінку. Тобто дірка була рівно
 там, куди тести не дивились: HTML і JS у нас не перевірялись нічим.
 
-Що перевіряємо (дешево, без браузера й без node):
-  * баланс дужок у кожному `<script>` -- рівно ця помилка;
+Що перевіряємо (дешево, без браузера):
+  * баланс дужок у кожному inline-`<script>` -- рівно ця помилка;
+  * РОЗБІР кожного окремого `static/*.js` рушієм JavaScript (`node --check`).
+    Додано 27.08 за аудитом: сторож дивився лише на inline-скрипти двох
+    сторінок і не бачив 22 КБ у файлах, а `theme-toggle.js` стоїть у <head>
+    БЕЗ `defer` -- помилка там дасть рівно ту саму порожню сторінку;
+  * що сторінка не посилається на скрипт, якого немає;
   * баланс дужок у CSS;
   * усі `id`, до яких скрипт звертається через `$("...")`, справді є в розмітці
     -- друга половина того самого класу поломок: прибрали блок, а звертання
@@ -22,6 +27,8 @@
 """
 import io
 import os
+import shutil
+import subprocess
 import re
 
 import pytest
@@ -30,6 +37,11 @@ STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
                       "static")
 PAGES = sorted(f for f in os.listdir(STATIC) if f.endswith(".html"))
 STYLES = sorted(f for f in os.listdir(STATIC) if f.endswith(".css"))
+#: ОКРЕМІ файли скриптів. Додано 27.08 за аудитом: сторож дивився лише на
+#: inline-скрипти двох сторінок і не бачив 22 КБ у `static/*.js`. А
+#: `theme-toggle.js` стоїть у <head> БЕЗ `defer` -- помилка синтаксису там
+#: дасть рівно ту порожню сторінку, від якої цей файл і народився.
+SCRIPTS = sorted(f for f in os.listdir(STATIC) if f.endswith(".js"))
 
 
 def _read(name, folder=STATIC):
@@ -92,6 +104,55 @@ def test_no_external_requests(page):
     html = _read(page)
     for bad in ("http://", "https://", "fonts.googleapis", "cdn."):
         assert bad not in html, f"{page}: зовнішнє посилання «{bad}»"
+
+
+# ── Окремі файли скриптів ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("script", SCRIPTS)
+def test_script_file_parses(script):
+    """Кожен `static/*.js` мусить РОЗБИРАТИСЬ.
+
+    Найсильніша перевірка, яку тут можна зробити дешево: віддати файл самому
+    рушію JavaScript (`node --check`). Це не підрахунок дужок, а справжній
+    розбір -- він ловить і незакриту дужку, і зайву кому, і `return` поза
+    функцією.
+
+    Якщо `node` у системі немає, падаємо назад на підрахунок дужок: гірше,
+    ніж розбір, але краще, ніж нічого. Пропускати перевірку зовсім не можна --
+    саме «пропустити, якщо чогось немає» і зробило беззубими два інші файли
+    тестів (див. test_theme_switch: `if css is None: return`).
+    """
+    path = os.path.join(STATIC, script)
+    node = shutil.which("node")
+    if node:
+        done = subprocess.run([node, "--check", path],
+                              capture_output=True, text=True)
+        assert done.returncode == 0, (
+            f"{script}: рушій JavaScript не розбирає файл: "
+            + (done.stderr or done.stdout))
+        return
+    code = _strip_strings_and_comments(io.open(path, encoding="utf-8").read())
+    for opener, closer, what in (("{", "}", "фігурні"),
+                                 ("(", ")", "круглі"),
+                                 ("[", "]", "квадратні")):
+        assert code.count(opener) == code.count(closer), (
+            f"{script}: {what} дужки не збалансовані "
+            f"({code.count(opener)} проти {code.count(closer)})")
+
+
+@pytest.mark.parametrize("page", PAGES)
+def test_pages_only_reference_scripts_that_exist(page):
+    """Сторінка не має посилатись на скрипт, якого немає.
+
+    Друга половина того самого класу поломок: файл перейменували, посилання
+    лишилось -- і скрипт мовчки не виконується. У випадку `theme-toggle.js`
+    (він у <head> без defer) це не мовчки, а порожня сторінка.
+    """
+    html = _read(page)
+    for src in re.findall(r'<script[^>]+src="/static/([^"]+)"', html):
+        assert os.path.exists(os.path.join(STATIC, src)), \
+            f"{page} посилається на /static/{src}, якого немає"
 
 
 if __name__ == "__main__":

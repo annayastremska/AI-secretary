@@ -33,33 +33,57 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ── Фікстура бази ───────────────────────────────────────────────────────────
 
 def fake_query(rows_by_sql):
-    """Підключення-макет: відповідає за фрагментом SQL, а не за порядком
-    викликів -- інакше тест ламався б від будь-якої перестановки в collect()."""
+    """Підключення-макет: відповідає за КОНСТАНТОЮ запиту, а не за підрядком.
+
+    Було: зіставлення підрядком (`if needle in sql`). Аудит показав, чому це
+    не працює: ключ «FROM review_queue» збігається з ТРЬОМА різними запитами
+    -- розкладкою черги за типом, «скільком документів чекає людини» і тим
+    самим із фільтром. Через це обидва лічильники документів читали рядки
+    групування черги й давали 120 -- число, яке до них не стосується. І
+    невідомий запит не падав, а мовчки позичав чужі рядки, хоч коментар тут
+    обіцяв рівно протилежне.
+
+    Це третій випадок того самого класу: валідатор SQL шукав підрядок
+    `confirmed`, сторож дужок вирізав `//` перед рядками, тепер фікстура.
+    Зіставлення підрядком у перевірці -- не перевірка, а її подоба.
+
+    Тепер ключ -- сама константа зі `stats.py`, тобто той самий об'єкт, який
+    код і виконує. Розійтись вони не можуть за побудовою: перейменують
+    константу -- тест упаде на імпорті, а не тихо почне міряти інше.
+    """
     def query(sql, params=None):
-        for needle, rows in rows_by_sql.items():
-            if needle in sql:
+        norm = " ".join(sql.split())
+        for key, rows in rows_by_sql.items():
+            if " ".join(key.split()) == norm:
                 return rows
-        raise AssertionError(f"неочікуваний SQL у тесті: {sql}")
+        raise AssertionError(
+            "макет не знає цього запиту -- додай його у LIVE, інакше тест "
+            "міряє не те, що код виконує:\n" + norm)
     return query
 
 
+#: Ключі -- КОНСТАНТИ зі `stats.py`, не тексти. Тоді макет і код фізично не
+#: можуть розійтися: перейменують константу -- тест упаде на імпорті.
 LIVE = {
-    "FROM documents GROUP BY status": [{"status": "confirmed", "n": 150},
-                                       {"status": "needs_review", "n": 46},
-                                       {"status": "failed", "n": 2}],
-    "FROM documents GROUP BY domain": [{"domain": "leave", "n": 120},
-                                       {"domain": "deployment", "n": 37},
-                                       {"domain": "normative", "n": 41}],
-    "FROM facts GROUP BY status": [{"status": "confirmed", "n": 1100},
-                                  {"status": "unconfirmed", "n": 178}],
-    "FROM objects o": [{"n": 133}],
-    "FROM review_queue": [{"queue_type": "new_person", "n": 120},
-                          {"queue_type": "unknown_type", "n": 41}],
-    # Скільком осіб немає відповідника у штатці. Додано 26.08 разом із
-    # плиткою: макет мусить знати КОЖЕН запит, інакше db_counters віддає
-    # помилку і сторінка «недоступна» -- саме так цей тест і впав, коли я
-    # додала запит у код і забула тут.
-    "FROM people": [{"n": 3}],
+    stats.SQL_DOCS_BY_STATUS: [{"status": "confirmed", "n": 150},
+                               {"status": "needs_review", "n": 46},
+                               {"status": "failed", "n": 2}],
+    stats.SQL_DOCS_BY_DOMAIN: [{"domain": "leave", "n": 120},
+                               {"domain": "deployment", "n": 37},
+                               {"domain": "normative", "n": 41}],
+    stats.SQL_FACTS_BY_STATUS: [{"status": "confirmed", "n": 1100},
+                                {"status": "unconfirmed", "n": 178}],
+    stats.SQL_PEOPLE: [{"n": 133}],
+    stats.SQL_REVIEW_OPEN: [{"queue_type": "new_person", "n": 120},
+                            {"queue_type": "unknown_type", "n": 41}],
+    # Скільком осіб немає відповідника у штатці.
+    stats.SQL_PEOPLE_UNMATCHED: [{"n": 3}],
+    # ТРИ РІЗНІ ЧИСЛА, які до цієї правки читали рядки черги вище й давали
+    # 120 кожне. Тепер у кожного свій рядок, і різниця між ними видна в тесті
+    # так само, як у коді: «скільком документів чекає людини» проти «того
+    # самого без завдань про нову особу».
+    stats.SQL_DOCS_PENDING: [{"n": 31}],
+    stats.SQL_DOCS_PENDING_SUBSTANTIVE: [{"n": 28}],
 }
 
 
@@ -111,8 +135,12 @@ def test_labels_cover_every_returned_code():
 
 
 def test_empty_and_null_values_are_visible_not_hidden():
-    rows = dict(LIVE, **{"FROM documents GROUP BY domain":
-                         [{"domain": None, "n": 5}]})
+    # Ключ -- константа, а не текст: із текстовим ключем ця підміна просто
+    # ДОДАВАЛА б нову пару, а справжній запит і далі віддавав би рядки з LIVE.
+    # Саме так і сталось при переході на точне зіставлення -- тест упав і
+    # показав, що підміна не діяла.
+    rows = dict(LIVE)
+    rows[stats.SQL_DOCS_BY_DOMAIN] = [{"domain": None, "n": 5}]
     out = _collect(rows)
     assert out["documents"]["by_domain"] == {"(не вказано)": 5}
 
