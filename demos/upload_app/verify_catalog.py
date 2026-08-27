@@ -532,6 +532,10 @@ def exp_count_by_doc_type(records, ctx):
     out = ctx.get("outside", {})
     if out.get("staffing_docs"):
         counts["Штатна книжка"] = out["staffing_docs"]
+    # Нормативні документи типу не мають -- вони йдуть у «(без типу)», і чужі
+    # так само, як наші.
+    if out.get("normative_docs"):
+        counts[NO_TYPE] = counts.get(NO_TYPE, 0) + out["normative_docs"]
     return counts
 
 
@@ -607,7 +611,12 @@ def exp_provenance(records, ctx):
 
 
 def exp_normative_list(records, ctx):
-    return sum(1 for r in records if r.domain == "normative")
+    # Нормативний корпус вантажить Андрій СВОЇМ скриптом
+    # (db/scripts/load_normative_corpus.py), тому частина цих документів у
+    # базі є, а в нашому виході -- нема. Це друге джерело, не розбіжність:
+    # рахуємо наші плюс чужі (за контрольною сумою, див. OUTSIDE_SQL).
+    return (sum(1 for r in records if r.domain == "normative")
+            + ctx.get("outside", {}).get("normative_docs", 0))
 
 
 def exp_failed(records, ctx):
