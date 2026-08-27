@@ -407,6 +407,10 @@ STATIC_FILES = {
     # чата й іконка сторінки (favicon).
     "mark-avatar.svg": (os.path.join(APP_DIR, "chat_gradio", "assets",
                                      "mark-avatar.svg"), "image/svg+xml"),
+    # Перемикач світлої/темної теми. Один файл на всі три екрани; лежить
+    # локально, як і все інше -- зі сторінок назовні не йде жодного запиту.
+    "theme-toggle.js": (os.path.join(APP_DIR, "static", "theme-toggle.js"),
+                        "application/javascript"),
 }
 
 # Шрифти обличчя v2 -- у підпапці, і маршрут статики їх спершу НЕ віддавав

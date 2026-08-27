@@ -14,6 +14,10 @@
      сервер за APP_THEME (v1 -- як було, v2 -- строга база). -->
 <link rel="icon" href="/static/mark-avatar.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/skin.css">
+<!-- Перемикач теми ставить data-theme ДО першого малювання, тому скрипт стоїть
+     у <head> і БЕЗ defer: інакше сторінка блимнула б світлою й перефарбувалась
+     у темну, а ця мить читається як поломка. -->
+<script src="/static/theme-toggle.js"></script>
 </head>
 <body>
 <!-- Шапка -- та сама на всіх трьох екранах (/, /stats, /chat): один продукт
@@ -32,6 +36,9 @@
     <a href="/stats">Статистика</a>
     <a href="/chat">Чат</a>
   </nav>
+  <!-- Перемикач стоїть у брендовій смузі, а не в підвалі: це налаштування
+       вигляду, і шукають його там, де вигляд і живе. -->
+  <button type="button" class="theme-toggle" data-mode="system">Тема</button>
 </header>
 
 <main>

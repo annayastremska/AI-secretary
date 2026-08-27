@@ -663,13 +663,8 @@ details.src > *:not(summary) {
 
 /* ===== ШАР НАБОРУ v3 для чата ============================================ */
 .gradio-container { background: var(--c-bg) }
-.gradio-container .message.user, .gradio-container .user .message {
-    background: var(--c-accent) !important; color: var(--c-on-accent) !important;
-    border: 0 !important; border-radius: var(--r-md) !important }
-.gradio-container .message.bot, .gradio-container .bot .message {
-    background: var(--c-canvas) !important; border: 1px solid var(--c-border) !important;
-    border-left: 3px solid var(--c-accent) !important;
-    border-radius: var(--r-md) !important; box-shadow: var(--shadow-sm) }
+/* Правила на самі повідомлення стоять НИЖЧЕ, у блоці «ОДНА рамка», і
+   тримаються на нашому id #chat-area: два місця на один блок розійшлися б. */
 .gradio-container button { border-radius: var(--r-md) !important;
     transition: background-color var(--dur) var(--ease),
                 transform 80ms var(--ease), box-shadow var(--dur) var(--ease) }
@@ -792,28 +787,61 @@ details.src > *:not(summary) {
  * !important вони просто перекривають наші.
  */
 
-/* 1. ОДНА рамка на відповідь, а не дві.
- *    Було: наша рамка з зеленою лівою межею -- і всередині ще одна, від
- *    обгортки Gradio (.message-content / .md). Дві рамки на одному блоці
- *    читаються як помилка розмітки. Тут усі внутрішні межі й фони
- *    знімаються, а потім окремо повертається лише блок «Джерело». */
-.gradio-container .message.bot *,
-.gradio-container .bot .message * {
+/* 1. ОДНА рамка на відповідь, а не дві. ДРУГА СПРОБА.
+ *
+ *    Перша спроба знімала внутрішні межі селектором
+ *    `.gradio-container .message.bot *` і не подіяла. Причина не в тому, що
+ *    правило неправильне, а в ВАЗІ: у Gradio власні правила на внутрішні
+ *    обгортки (`.prose`, `.md`, `.message-content`) теж стоять із
+ *    !important і з трьома класами, тобто важать більше за наші два.
+ *    `!important` не робить правило сильнішим за інше `!important` — далі
+ *    рахується специфічність, і ми її просто програвали.
+ *
+ *    Тому тут в основі селектора стоїть НАШ id `#chat-area` (elem_id стрічки).
+ *    Ідентифікатор важить більше за будь-яку кількість класів, тож ці правила
+ *    вже нічим не перебити знизу.
+ *
+ *    Рамку тримає рівно один елемент — сама відповідь. Усе, що всередині,
+ *    прозоре й без меж, крім блоку «Джерело», який далі отримує свій тонкий
+ *    верхній розділювач.
+ */
+#chat-area .message.bot,
+.gradio-container #chat-area .message.bot {
+    background: var(--c-canvas) !important;
+    border: 1px solid var(--c-border) !important;
+    border-left: 3px solid var(--c-accent) !important;
+    border-radius: var(--r-md) !important;
+    box-shadow: var(--shadow-sm) !important;
+    padding: var(--s-3) var(--s-4) !important;
+}
+#chat-area .message.bot *,
+.gradio-container #chat-area .message.bot *,
+.gradio-container #chat-area .message.bot .message-content,
+.gradio-container #chat-area .message.bot .prose,
+.gradio-container #chat-area .message.bot .md {
     border: 0 !important;
+    outline: 0 !important;
     background: transparent !important;
+    background-color: transparent !important;
     box-shadow: none !important;
 }
-.gradio-container .message.bot details,
-.gradio-container .bot .message details {
-    background: var(--c-surface) !important;
-    border: 1px solid var(--c-border) !important;
-    border-radius: var(--r-sm) !important;
-    padding: var(--s-2) var(--s-3) !important;
-    margin-top: var(--s-3) !important;
+/* Повідомлення людини: заливка акцентом і жодної межі. Колір тексту
+   задається і на самому блоці, і на внутрішніх вузлах: Gradio фарбує саме
+   внутрішні, і без цього темний текст лягав на темну оливу. */
+#chat-area .message.user,
+.gradio-container #chat-area .message.user {
+    background: var(--c-accent) !important;
+    border: 0 !important;
+    border-radius: var(--r-md) !important;
+    box-shadow: none !important;
 }
-.gradio-container .message.bot,
-.gradio-container .bot .message {
-    padding: var(--s-3) var(--s-4) !important;
+#chat-area .message.user,
+#chat-area .message.user *,
+.gradio-container #chat-area .message.user *,
+.gradio-container #chat-area .message.user .message-content {
+    color: var(--c-on-accent) !important;
+    background: transparent !important;
+    border: 0 !important;
 }
 
 /* 2. Знак у стрічці: Gradio ріже аватар у круг і додає свою межу.
@@ -945,8 +973,7 @@ details.src > *:not(summary) {
  *    «Джерело» -- тонкий рядок, який розкривається, а не постійна панель. */
 #chat-area .message-row { margin-bottom: var(--s-2) !important }
 #chat-area .message { line-height: 1.5 }
-.gradio-container .message.bot details,
-.gradio-container .bot .message details {
+.gradio-container #chat-area .message.bot details {
     background: transparent !important;
     border: 0 !important;
     border-top: 1px solid var(--c-hairline) !important;
@@ -969,3 +996,51 @@ details.src > *:not(summary) {
     color: var(--c-muted) !important;
 }
 .gradio-container details[open] > summary { font-family: var(--font) !important }
+
+/* 8. «Очистити чат» -- головна дія бічної панелі, тому вона зелена.
+ *    Було: прозора кнопка з сірою межею, така сама, як переходи на інші
+ *    сторінки. Панель виходила рівним сірим списком без жодної точки
+ *    контрасту, а сторінці саме контрасту й бракувало (запит Ані 27.08).
+ *    Назву теж змінено: кнопка не створює другий діалог (історія одна), вона
+ *    стирає поточний, і «Новий чат» описував не ту дію.
+ */
+#new-chat {
+    background: var(--c-accent) !important;
+    border: 1px solid var(--c-accent) !important;
+    color: var(--c-on-accent) !important;
+    justify-content: center !important;
+    font-weight: 600 !important;
+    font-size: 14.5px !important;
+    min-height: 44px !important;
+    border-radius: var(--r-md) !important;
+    box-shadow: var(--shadow-sm) !important;
+    transition: background-color var(--dur) var(--ease),
+                box-shadow var(--dur) var(--ease) !important;
+}
+#new-chat:hover {
+    background: var(--c-accent-600) !important;
+    border-color: var(--c-accent-600) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+#new-chat:active {
+    background: var(--c-accent-700) !important;
+    border-color: var(--c-accent-700) !important;
+    box-shadow: none !important;
+}
+
+/* 9. Перемикач теми в бічній панелі чата: під переходами на інші сторінки,
+ *    дрібним. Це налаштування, а не дія, тому він тихіший за все інше.
+ */
+#theme-switch { margin-top: var(--s-3) !important }
+#theme-switch .theme-toggle {
+    width: 100% !important;
+    justify-content: center;
+    min-height: 34px !important;
+    border-color: var(--c-border) !important;
+    color: var(--c-muted) !important;
+}
+#theme-switch .theme-toggle:hover {
+    background: var(--c-accent-100, var(--c-accent-soft)) !important;
+    border-color: var(--c-accent-200, var(--c-accent-line)) !important;
+    color: var(--c-text) !important;
+}

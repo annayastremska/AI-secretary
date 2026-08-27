@@ -690,3 +690,44 @@ img, svg { display: block; max-width: 100% }
     .pathbar li { padding: 0 8px; font-size: 12.5px }
     .pathbar li span.pathbar-n { width: 19px; height: 19px }
 }
+
+
+/* ===== ПЕРЕМИКАЧ ТЕМИ ====================================================
+ * Три стани, не два: «як у системі» це окремий і найчастіше правильний стан
+ * (телефон сам темніє ввечері). Кнопка називає ПОТОЧНИЙ стан, підказка при
+ * наведенні -- наступний.
+ * Стилі спільні для сторінок і для чата, бо кнопка одна й та сама.
+ */
+.theme-toggle {
+    background: transparent;
+    border: 1px solid var(--c-divider);
+    border-radius: var(--r-pill, 999px);
+    color: inherit;
+    font-family: var(--font);
+    font-size: 12.5px;
+    font-weight: 600;
+    min-height: 30px;
+    padding: 0 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    opacity: .85;
+    transition: opacity 140ms ease, border-color 140ms ease,
+                background-color 140ms ease;
+}
+.theme-toggle:hover { opacity: 1; background: var(--c-accent-soft) }
+
+/* У брендовій смузі кнопка сидить у правому куті першого рядка. Смуга --
+ * position: sticky з двома рядками (бренд і переходи), тому абсолют
+ * прив'язується до неї, а не до сторінки. */
+.appbar { position: sticky }
+.appbar .theme-toggle {
+    position: absolute;
+    top: 14px;
+    right: var(--s-4, 16px);
+    border-color: color-mix(in srgb, var(--c-brand-text) 38%, transparent);
+    color: var(--c-brand-text);
+}
+.appbar .theme-toggle:hover { background: rgba(255, 255, 255, .10) }
+@media (max-width: 640px) {
+    .appbar .theme-toggle { top: 10px; font-size: 11.5px; padding: 0 9px }
+}

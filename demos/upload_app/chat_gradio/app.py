@@ -1801,6 +1801,9 @@ TOKENS_CSS = {
     "v2": [os.path.join(_STATIC, "theme-tokens-v2.css")],
 }.get(_THEME_VERSION, [os.path.join(_STATIC, "theme-tokens.css")])
 
+#: Перемикач світлої/темної теми -- один файл на всі три екрани апки.
+TOGGLE_JS = os.path.join(_STATIC, "theme-toggle.js")
+
 TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
 
 
@@ -1889,7 +1892,15 @@ def make_head_css():
     for path in list(TOKENS_CSS) + [THEME_CSS]:
         with open(path, encoding="utf-8") as fh:
             parts.append(fh.read())
-    return "<style>" + "\n".join(parts) + "</style>"
+    with open(TOGGLE_JS, encoding="utf-8") as fh:
+        toggle = fh.read()
+    # Скрипт перемикача теми -- тим самим способом, що CSS: інлайном, а
+    # не <script src>. Причина та сама, що в коментарі вище: head
+    # віддається до монтування, і відносний шлях під root_path=/chat не
+    # резолвиться. Плюс інлайн ставить data-theme до першого малювання,
+    # тобто без блимання світлою темою.
+    return ("<style>" + "\n".join(parts) + "</style>"
+            + "<script>" + toggle + "</script>")
 
 
 #: Запасні приклади -- без дат і номерів, бо саме вони й «псуються» при зміні
@@ -2022,10 +2033,17 @@ def build_blocks():
                     f'<div><div class="brand-name">AI-секретар</div>'
                     f'<div class="brand-sub">облік особового складу</div>'
                     f'</div></div>')
-                new_chat = gr.Button("＋  Новий чат", elem_id="new-chat")
+                new_chat = gr.Button("Очистити чат", elem_id="new-chat")
                 # Переходи між сторінками апки -- ті самі три, що в шапці
                 # звичайних сторінок (/ і /stats): один продукт означає, що
                 # набір переходів не змінюється від екрана до екрана.
+                # Перемикач теми -- той самий, що на звичайних сторінках
+                # (клас .theme-toggle, скрипт /static/theme-toggle.js
+                # підключений через head). Кнопка проста, бо весь стан живе у
+                # скрипті: у чаті вона лише інша за розташуванням.
+                gr.HTML('<button type="button" class="theme-toggle" '
+                        'data-mode="system">Тема</button>',
+                        elem_id="theme-switch")
                 gr.HTML('<a href="/" class="page-link">⬆&nbsp; Завантажити '
                         'документ</a>'
                         '<a href="/stats" class="page-link">▤&nbsp; '
