@@ -1317,15 +1317,22 @@ details.src > *:not(summary) {
     border-top: 1px solid var(--c-hairline) !important;
     z-index: 4;
 }
-#hint {
+/* Підказка -- ПІД полем вводу, як і було. Позиціонуємо БЛОК (#hint-block), а
+   не внутрішній div: id="hint" сидить усередині, і коли позиційованим був
+   він, обгортка Gradio лишалась у потоці й тягла підказку вгору, під шапку
+   (зауваження Ані). Позиціонувати треба те, що бібліотека ставить у потік. */
+#hint-block {
     position: absolute !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
     width: auto !important;
+    padding: 0 !important;
+    border: 0 !important;
     background: var(--c-bg) !important;
     z-index: 4;
 }
+#hint { position: static !important; background: transparent !important }
 /* «Спробувати ще» з'являється лише після збою -- кладемо його над полем, щоб
    воно не стрибало. */
 #retry-btn {
@@ -1467,9 +1474,11 @@ details.src > *:not(summary) {
         min-width: 44px !important;
         height: 44px !important;
     }
-    #hint { padding: 0 var(--s-3) var(--s-2) !important; font-size: 10.5px }
-    /* Підказка про клавіші на телефоні безглузда: клавіш немає. */
-    #hint .keys { display: none }
+    /* Підказка на телефоні НЕ ПОТРІБНА (Аня): клавіш немає, а «джерело під
+       кожною відповіддю» і так видно під кожною відповіддю. Місце цінніше.
+       Разом із нею --hint-h стає нулем, тому поле вводу сідає на самий низ. */
+    #hint-block { display: none !important }
+    :root { --hint-h: 0px }
 
     /* QR гостьового входу на телефоні не потрібен: людина вже зайшла з
        телефона, показувати їй код для входу -- безглуздо. */

@@ -55,15 +55,23 @@
     var map = {
       "--topbar-h": document.getElementById("topbar"),
       "--composer-h": document.getElementById("composer"),
-      "--hint-h": document.getElementById("hint"),
+      "--hint-h": document.getElementById("hint-block"),
     };
     for (var name in map) {
       if (!Object.prototype.hasOwnProperty.call(map, name)) { continue; }
       var el = map[name];
       if (!el) { continue; }
+      /* Схований елемент (на телефоні підказки немає) -- це справжній нуль,
+         і його треба поставити: інакше стрічка лишила б під собою пусте
+         місце під підказку, якої немає. Відрізняємо схований від «ще не
+         намалювався» за offsetParent. */
+      if (el.offsetParent === null && el.getClientRects().length === 0) {
+        root.style.setProperty(name, "0px");
+        continue;
+      }
       var h = Math.round(el.getBoundingClientRect().height);
-      /* Нуль означає «елемент ще не намалювався» -- запасне значення з CSS
-         кращe за нуль: нуль зробив би стрічку на весь екран і сховав поле. */
+      /* Нуль тут означає «елемент ще не намалювався» -- запасне значення з
+         CSS краще за нуль: нуль зробив би стрічку на весь екран. */
       if (h > 0) { root.style.setProperty(name, h + "px"); }
     }
   }
@@ -72,7 +80,7 @@
     heights();
     if (!window.ResizeObserver) { return; }
     var ro = new ResizeObserver(heights);
-    ["topbar", "composer", "hint"].forEach(function (id) {
+    ["topbar", "composer", "hint-block"].forEach(function (id) {
       var el = document.getElementById(id);
       if (el && !el.dataset.roWired) {
         el.dataset.roWired = "1";

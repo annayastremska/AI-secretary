@@ -2158,7 +2158,13 @@ def build_blocks():
                         '<span class="keys"><span class="kbd">Enter</span> '
                         'надіслати · <span class="kbd">Shift</span>+'
                         '<span class="kbd">Enter</span> новий рядок</span>'
-                        '</div>')
+                        '</div>',
+                        # Власний elem_id БЛОКУ, а не лише внутрішнього div.
+                        # Без нього позиційованим виявлявся внутрішній div, а
+                        # обгортка Gradio лишалась у потоці -- і підказка
+                        # від'їжджала вгору, під шапку. Позиціонувати треба
+                        # те, що бібліотека справді ставить у потік.
+                        elem_id="hint-block")
 
         outs = [box, chat, hero, retry, last_q]
         box.submit(respond, [box, chat], outs)
