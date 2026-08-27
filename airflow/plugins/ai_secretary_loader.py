@@ -252,7 +252,21 @@ def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, sourc
     AI-secretary) спершу закриває попередній відкритий факт (valid_to IS
     NULL) з ІНШИМ значенням -- інакше на одного об'єкта накопичувались би
     кілька "чинних" фактів того самого виміру одночасно, і жодного способу
-    визначити, який саме зараз дійсний."""
+    визначити, який саме зараз дійсний.
+
+    Витіснення НЕ припускає, що новий факт хронологічно новіший: дати двох
+    фактів порівнюються, і випадків три.
+
+    1. новий пізніший  -> закривається наявний, його датою (звичайний хід);
+    2. новий РАНІШИЙ   -> це історія, не заміна: закривається НОВИЙ на даті
+                          початку наявного, наявний лишається чинним;
+    3. дати рівні або хоч одна відсутня -> впорядкувати неможливо, тому не
+                          витісняємо нічого, а новий факт лишається
+                          чернеткою (unconfirmed) -- у підрахунки не входить,
+                          але видний людині.
+
+    Кожен із випадків 2 і 3 пише рядок у review_log, бо це рішення системи
+    про хронологію, а не переказ документа."""
     # Захист від CHECK-краху (facts_check: valid_to >= valid_from). AI-secretary
     # СВІДОМО лишає суперечливі дати у виході (date_range_error непорожній),
     # щоб людина це побачила -- завантажувач не має валитись через це: не
@@ -277,25 +291,59 @@ def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, sourc
     cur.execute("SELECT validity_model FROM dimensions WHERE id = %s", (dimension_id,))
     validity_model = cur.fetchone()[0]
 
+    # Рішення про витіснення ухвалюється ДО вставки, а в журнал пишеться після:
+    # у двох випадках із трьох журнальний рядок стосується НОВОГО факту, id
+    # якого на момент рішення ще не існує.
+    post_log = None
     if validity_model == "current_state":
+        # ORDER BY ... LIMIT 1 -- не косметика. Умова добирає й unconfirmed
+        # факти, тому відкритих може бути кілька (див. випадок 3 нижче), і
+        # без упорядкування fetchone() брав би довільний: той самий документ
+        # давав би різний результат при повторному завантаженні.
         cur.execute(
             """
-            SELECT id, value FROM facts
+            SELECT id, value, valid_from FROM facts
             WHERE object_id = %s AND dimension_id = %s AND valid_to IS NULL AND status != 'rejected'
+            ORDER BY valid_from DESC NULLS LAST, id DESC
+            LIMIT 1
             """,
             (object_id, dimension_id),
         )
         open_fact = cur.fetchone()
         if open_fact and open_fact[1] != value:
-            old_fact_id, old_value = open_fact
-            cur.execute("UPDATE facts SET valid_to = %s WHERE id = %s", (valid_from, old_fact_id))
-            cur.execute(
-                """
-                INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (old_fact_id, "ai_secretary_loader", old_value, value, "superseded_by_newer_fact"),
-            )
+            old_fact_id, old_value, old_from = open_fact
+            # Порівнюємо через str() тим самим способом, що й захист від
+            # facts_check вище: ISO-дата як рядок упорядковується правильно, і
+            # це не падає, коли одна дата прийшла об'єктом, а друга рядком.
+            if valid_from is None or old_from is None or str(valid_from) == str(old_from):
+                # 3. ВПОРЯДКУВАТИ НЕМОЖЛИВО: або дата відсутня, або вони рівні.
+                # Не витісняємо (витіснення за невідомим порядком -- це
+                # вигадування хронології) і не приховуємо значення. Натомість
+                # факт лишається чернеткою: у підрахунки він не входить, зате
+                # видний людині в unconfirmed_count і drafts_list.
+                # Саме тут був тихий дефект: при valid_from = NULL старий код
+                # виконував UPDATE ... SET valid_to = NULL, тобто НЕ закривав
+                # нічого, і в об'єкта ставало два чинних факти одного виміру.
+                confirmed = False
+                post_log = (old_value, value, "ambiguous_order_left_unconfirmed")
+            elif str(valid_from) > str(old_from):
+                # 1. Новий факт справді новіший -- закриваємо старий його датою.
+                cur.execute("UPDATE facts SET valid_to = %s WHERE id = %s", (valid_from, old_fact_id))
+                cur.execute(
+                    """
+                    INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (old_fact_id, "ai_secretary_loader", old_value, value, "superseded_by_newer_fact"),
+                )
+            else:
+                # 2. Новий факт СТАРІШИЙ за відкритий, тобто це історія, а не
+                # заміна. Закривається НОВИЙ (він скінчився там, де почався
+                # наявний), а відкритий лишається чинним. Старий код закривав
+                # тут наявний факт датою з минулого й падав на facts_check
+                # (valid_to >= valid_from) -- саме це ловила заливка штатки.
+                valid_to = old_from
+                post_log = (old_value, value, "inserted_as_historical")
 
     cur.execute(
         """
@@ -311,6 +359,17 @@ def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, sourc
     )
     fact_id = cur.fetchone()[0]
     add_fact_source(cur, fact_id, source_doc_id, is_primary=True)
+    if post_log is not None:
+        old_value, new_value, action = post_log
+        cur.execute(
+            """
+            INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (fact_id, "ai_secretary_loader", old_value, new_value, action),
+        )
+        print(f"[хронологія] факт {fact_id}: {action} "
+              f"(відкритий факт мав '{old_value}', новий '{new_value}')")
     return fact_id
 
 
