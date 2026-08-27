@@ -66,18 +66,45 @@
     return wrap;
   }
 
+  /* Стан запиту -- ОКРЕМОЮ змінною, а не «чи є вже позначка в розмітці».
+   *
+   * Причина -- живий дефект: при оновленні сторінки позначка іноді
+   * виводилась ТРИ рази. Це гонка, і вона була в цій функції. `show()`
+   * кличеться і з DOMContentLoaded, і зі спостерігача за деревом (Gradio
+   * будує панель не одразу, тому спостерігач зривається кілька разів). А
+   * перевірка стояла на РЕЗУЛЬТАТ -- «чи є вже позначка», -- і результат
+   * з'являється лише після відповіді сервера. Отже три виклики встигали
+   * пройти перевірку до першої відповіді, кожен посилав свій запит, і кожен
+   * домальовував свою позначку.
+   *
+   * Правило, яке з цього варто запам'ятати: прапорець мусить ставитись
+   * СИНХРОННО, у ту саму мить, коли починається асинхронна робота. Перевірка
+   * «чи вже зроблено» ловить лише те, що вже завершилось, а не те, що вже
+   * почалось.
+   */
+  var state = "idle";   // idle -> loading -> done
+
   function show() {
-    if (document.querySelector(".access-badge")) { return; }
+    if (state !== "idle") { return; }
+    state = "loading";
     var req = new XMLHttpRequest();
     req.open("GET", "/api/whoami", true);
     req.onload = function () {
-      if (req.status !== 200) { return; }
+      /* Невдача повертає стан у `idle`: спостерігач спробує ще раз, коли
+         дерево зміниться. Інакше один невдалий запит назавжди лишив би
+         людину без позначки рівня. */
+      if (req.status !== 200) { state = "idle"; return; }
       var info;
-      try { info = JSON.parse(req.responseText); } catch (err) { return; }
-      if (!info || !info.level) { return; }
+      try { info = JSON.parse(req.responseText); } catch (err) {
+        state = "idle";
+        return;
+      }
+      if (!info || !info.level) { state = "idle"; return; }
+      state = "done";
       place(build(info));
       markCommit(info);
     };
+    req.onerror = function () { state = "idle"; };
     req.send();
   }
 
@@ -107,7 +134,9 @@
       if (document.getElementById("page-links")
           || document.querySelector(".appbar")) {
         show();
-        if (document.querySelector(".access-badge")) { obs.disconnect(); }
+        /* Знімаємось за СТАНОМ, а не за наявністю позначки в розмітці: та
+           сама причина, що вище -- розмітка з'являється пізніше за рішення. */
+        if (state === "done") { obs.disconnect(); }
       }
     });
     obs.observe(document.documentElement, { childList: true, subtree: true });
