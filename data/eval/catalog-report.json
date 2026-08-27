@@ -1,9 +1,12 @@
 {
   "checks": 34,
+  "checks_compare": 25,
+  "checks_execute": 6,
+  "checks_blocked": 3,
   "matched": 34,
   "failures": 0,
   "templates": 28,
   "as_of": "2026-08-27",
-  "measured_at": "2026-08-27T10:17:57",
+  "measured_at": "2026-08-27T16:15:55",
   "note": null
 }
