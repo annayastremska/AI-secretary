@@ -1606,3 +1606,84 @@ details.src > *:not(summary) {
     color: var(--c-muted);
     user-select: all;   /* щоб номер можна було виділити одним дотиком */
 }
+
+/* 24. ТЕЛЕФОН, ТРЕТІЙ ЗАХІД. Дві поломки, одна причина в кожній -- і обидві
+ *     мої власні рішення, а не дрібниці.
+ *
+ *     A. КНОПКА МЕНЮ накривала шапку й не працювала.
+ *        Я поставила її АБСОЛЮТОМ у шапці (`top: 8px; left: 6px; z-index: 6`).
+ *        Абсолют у чужій розкладці -- завжди здогад: я не знаю ні справжніх
+ *        відступів обгорток Gradio, ні їхнього порядку накладання, тому кнопка
+ *        лягла поверх назви, а натиск ішов у той елемент, який виявився вище.
+ *        Тепер шапка -- звичайний РЯДОК, а кнопка в ньому звичайний елемент.
+ *        Накрити щось вона більше не може за побудовою, і натиск потрапляє
+ *        туди, куди видно.
+ *
+ *     B. ПОЛЕ ВВОДУ ВІДЛІТАЛО ВГОРУ, і чат зникав.
+ *        Причина не в полі, а в тому, що САМА СТОРІНКА лишалась прокручуваною.
+ *        Коли з'являється клавіатура, Safari прокручує вікно, щоб показати
+ *        поле, -- і забирає з очей усе інше. Змінні висоти тут не допомагають:
+ *        браузер зсуває не наш блок, а весь документ.
+ *        Тому на телефоні тіло сторінки ФІКСУЄТЬСЯ: прокручувати нема чого,
+ *        і Safari нічого не зсуває. Єдине, що прокручується, -- стрічка.
+ *        Висота береться з `--vvh` (видима частина екрана), тому поле стоїть
+ *        рівно над клавіатурою.
+ */
+@media (max-width: 860px) {
+    /* B. Нічого не прокручується, крім стрічки. */
+    html, body {
+        position: fixed !important;
+        inset: 0 !important;
+        height: 100% !important;
+        width: 100% !important;
+        overflow: hidden !important;
+        overscroll-behavior: none;
+    }
+    .gradio-container, .gradio-container > .main, .gradio-container .contain {
+        height: 100% !important;
+        max-height: 100% !important;
+        overflow: hidden !important;
+    }
+    #main-col {
+        height: var(--vvh, 100%) !important;
+        max-height: var(--vvh, 100%) !important;
+    }
+
+    /* A. Шапка -- рядок: кнопка, назва, перемикач. Жодних абсолютів. */
+    #topbar {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: var(--s-2) !important;
+        padding: var(--s-2) var(--s-3) !important;
+        border-bottom: 1px solid var(--c-border) !important;
+    }
+    #topbar > * {
+        padding: 0 !important;
+        margin: 0 !important;
+        max-width: none !important;
+        border: 0 !important;
+    }
+    #nav-toggle-block {
+        position: static !important;
+        flex: 0 0 auto !important;
+        order: -1;
+        width: 44px !important;
+        min-width: 44px !important;
+    }
+    #topbar-title {
+        flex: 1 1 auto !important;
+        min-width: 0;
+        /* Межа тепер на самій шапці: назва більше не єдиний елемент рядка, і
+           лінія під нею одною виглядала б як підкреслення тексту. */
+        border-bottom: 0 !important;
+        padding: 0 !important;
+    }
+    #theme-switch {
+        position: static !important;
+        flex: 0 0 auto !important;
+        top: auto !important;
+        right: auto !important;
+        transform: none !important;
+    }
+}

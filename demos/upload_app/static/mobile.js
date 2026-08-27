@@ -40,6 +40,40 @@
     measure();
   }
 
+  /* Стрічка мусить сама доїхати до низу, коли з'являється клавіатура.
+   *
+   * Інакше виходить те, що видно на скріншоті: висота стала меншою, поле
+   * стоїть над клавіатурою -- а стрічка лишилась прокрученою туди, де була, і
+   * останньої відповіді не видно. Людина читає це як «чат зник».
+   *
+   * Чому із затримкою: клавіатура з'являється з анімацією, і висота
+   * змінюється кілька разів. Прокрутка до кінцевої висоти -- та, що потрібна;
+   * тому чекаємо, поки зміни припиняться.
+   */
+  var scrollTimer = null;
+
+  function chatToBottom() {
+    var area = document.getElementById("chat-area");
+    if (!area) { return; }
+    area.scrollTop = area.scrollHeight;
+    var wrap = area.querySelector(".bubble-wrap");
+    if (wrap) { wrap.scrollTop = wrap.scrollHeight; }
+  }
+
+  function scheduleBottom() {
+    if (scrollTimer) { window.clearTimeout(scrollTimer); }
+    scrollTimer = window.setTimeout(chatToBottom, 260);
+  }
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", scheduleBottom);
+  }
+  /* Натиск у поле -- найнадійніший сигнал «зараз буде клавіатура»: подія
+     фокуса приходить ДО того, як браузер почне змінювати висоту. */
+  document.addEventListener("focusin", function (ev) {
+    if (ev.target && ev.target.tagName === "TEXTAREA") { scheduleBottom(); }
+  });
+
   /* ── 1b. Висоти шапки, поля вводу й підказки ──────────────────────────
    *
    * Розкладка чата виймає стрічку, поле й підказку з потоку (див. правило 18
