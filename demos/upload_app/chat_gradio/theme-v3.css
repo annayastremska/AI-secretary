@@ -1274,3 +1274,48 @@ details.src > *:not(summary) {
     background: var(--c-bg) !important;
     border-top: 1px solid var(--c-hairline) !important;
 }
+
+/* 16. Бічна панель: ніжна рамка праворуч і початок від самої стелі.
+ *
+ *     Рамка (`border-right`) була прописана ще в правилі 54 -- і її не було
+ *     видно. Причина та сама, що з полем вводу: не в самій панелі, а в
+ *     ОБГОРТКАХ над нею. Gradio дає рядку й колонкам власні відступи й
+ *     проміжок, тому між панеллю й стрічкою лежала смуга тла сторінки: рамка
+ *     малювалась, але стояла не на межі, а посеред порожнього місця, і на
+ *     око читалась як його частина. Той самий відступ зверху відсував панель
+ *     від стелі -- звідси «починається трохи нижче за стелю».
+ *
+ *     Тому правило накриває ВСІХ предків панелі (`*:has(#sidebar)`), а не
+ *     вгадує глибину: відступи й проміжок знімаються, колонки тягнуться на
+ *     повну висоту. Вгадувати кількість шарів Gradio не треба, і оновлення
+ *     бібліотеки цього не зламає.
+ */
+.gradio-container *:has(#sidebar) {
+    padding: 0 !important;
+    margin: 0 !important;
+    gap: 0 !important;
+    align-items: stretch !important;
+    max-width: none !important;
+}
+#sidebar {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    margin: 0 !important;
+    /* Ніжна межа: волосяна лінія плюс дуже м'яка тінь на кілька пікселів.
+       Одна лінія на межі двох тонів читається різко; лінія з ледь помітною
+       тінню читається як край поверхні, а не як накреслена риска. */
+    border-right: 1px solid var(--c-border) !important;
+    box-shadow: 6px 0 14px -12px rgba(17, 19, 18, .28) !important;
+    /* Власні відступи панелі -- явно, з !important. Правило вище їх не
+       знімає (`:has` вибирає тих, хто МІСТИТЬ панель, а не саму панель), але
+       Gradio ставить свої з !important, і без цього рядка вони перемагають. */
+    padding: var(--s-4) var(--s-3) !important;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) #sidebar {
+        box-shadow: 6px 0 14px -12px rgba(0, 0, 0, .6) !important;
+    }
+}
+:root[data-theme="dark"] #sidebar {
+    box-shadow: 6px 0 14px -12px rgba(0, 0, 0, .6) !important;
+}
