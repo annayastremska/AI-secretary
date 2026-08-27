@@ -920,8 +920,20 @@ tbody tr:hover { background: var(--c-accent-soft) }
 .theme-toggle {
     display: inline-grid;
     place-items: center;
+    /* Розмір заданий ЧОТИРМА властивостями, і це не перестраховка.
+       Кнопка виходила овальною, бо загальне правило на елемент `button`
+       ставить min-height 48px, а `height: 34px` його не перебиває: у CSS
+       min-height сильніша за height незалежно від специфічності. Тобто
+       коробка була 34px завширшки й 48px заввишки -- овал.
+       aspect-ratio лишається останнім рубежем: якщо колись хтось знову
+       додасть відступ, кнопка залишиться круглою, а не поїде в овал. */
     width: 34px;
     height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    aspect-ratio: 1 / 1;
+    flex: none;
     padding: 0;
     background: transparent;
     border: 1px solid var(--c-divider);
@@ -960,4 +972,152 @@ tbody tr:hover { background: var(--c-accent-soft) }
 .appbar .theme-toggle:hover { background: rgba(255, 255, 255, .12) }
 @media (max-width: 640px) {
     .appbar .theme-toggle { top: 10px; width: 32px; height: 32px }
+}
+
+
+/* ===== НАПРЯМ B+A: ТЕХНІЧНИЙ САН І ВОЛОСЯНІ РОЗДІЛЮВАЧІ ===================
+ * Обране Анею 27.08 за карткою «Чотири напрями». Токени (нуль радіуса,
+ * креслярське тло, роль --font-data) уже змінені; тут -- компоненти.
+ *
+ * Головна думка напряму: ДАНІ І ТЕКСТ ВИГЛЯДАЮТЬ ПО-РІЗНОМУ. Число, дата,
+ * номер звернення, код шаблону -- моноширинним; речення -- звичайним. Це
+ * не оздоба: у моноширинному цифри однакової ширини, тому стовпчик стоїть
+ * рівно, а око одразу бачить, де в тексті значення, а де пояснення.
+ */
+
+/* Числа -- моноширинним і табличними цифрами (дрібниця 5). У пропорційному
+   наборі «1» вужча за «8», і стовпчик чисел дрібно «дихає» при кожному
+   оновленні. Для живого лічильника, який оновлюється сам, це найпомітніше. */
+.tile-num, .display, .kv dd, td, th,
+.mono, .num, .stat-num {
+    font-variant-numeric: tabular-nums;
+}
+.tile-num, .display {
+    font-family: var(--font-data, var(--font-mono));
+    letter-spacing: -0.03em;
+}
+
+/* Капітельні рубрики -- теж службове, теж моноширинним. */
+.kicker, h2, .tile-label, .box > .t {
+    font-family: var(--font-data, var(--font-mono));
+}
+.tile-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em }
+
+/* Волосяні розділювачі замість рамки на кожній картці (дрібниця 1 + напрям A).
+   Було: у кожної плитки власна межа й фон, тому смуга чисел читалась як сітка
+   з клітинками, а не як одна панель. Стало: одна панель, розділена
+   волосяними лініями. Око йде по числах, а не по лініях. */
+.tiles {
+    gap: 0;
+    border-top: 1px solid var(--c-hairline);
+    border-bottom: 1px solid var(--c-hairline);
+}
+.tiles .tile {
+    border: 0;
+    border-right: 1px solid var(--c-hairline);
+    background: transparent;
+    padding: var(--s-4) var(--s-4);
+}
+.tiles .tile:last-child { border-right: 0 }
+/* Роль плитки лишається видною -- але лівою рискою, а не рамкою й фоном:
+   риска не робить із плитки окрему коробку. */
+.tiles .tile--ok      { box-shadow: inset 2px 0 0 var(--c-success) }
+.tiles .tile--draft   { box-shadow: inset 2px 0 0 var(--c-warn) }
+.tiles .tile--pending { box-shadow: inset 2px 0 0 var(--c-pending) }
+
+/* Таблиці: розділювач волосяний, шапка без заливки -- лише рубрика. */
+table { border-collapse: collapse }
+th, td { border-bottom: 1px solid var(--c-hairline) }
+thead th {
+    background: transparent;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-size: 10.5px;
+    color: var(--c-muted);
+    border-bottom: 1px solid var(--c-border);
+}
+
+/* Одна насичена кнопка на екран (дрібниця 2). Коли всі кнопки зелені, жодна
+   не головна. Насичений зелений лишається за ГОЛОВНОЮ дією екрана, решта
+   переходить у світлий щабель -- та сама фарба, інша роль. */
+.btn--soft, .pick:not(.pick--camera) {
+    background: var(--c-accent-100, var(--c-surface));
+    color: var(--c-accent-700, var(--c-text));
+    border: 1px solid var(--c-accent-200, var(--c-border));
+}
+.btn--soft:hover, .pick:not(.pick--camera):hover {
+    background: var(--c-accent-200, var(--c-surface));
+    color: var(--c-accent-700, var(--c-text));
+}
+
+/* Пігулка стану з точкою (дрібниця 3). Точка -- другий, НЕКОЛЬОРОВИЙ сигнал:
+   її видно на друку, на проєкторі й людині, яка не розрізняє зелений і
+   коричневий. Правило «чернетка ≠ факт» читається формою, не лише кольором. */
+.pill { display: inline-flex; align-items: center; gap: 6px }
+.pill::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+}
+
+/* Скелет замість «завантаження…» (дрібниця 6). Сірі смужки на місці
+   майбутніх чисел показують, СКІЛЬКИ буде даних і де вони стануть, тому
+   поява перестає бути стрибком. Слово «завантаження» не каже нічого. */
+.skel {
+    height: 12px;
+    margin: 8px 0;
+    background: linear-gradient(90deg, var(--c-surface) 0%,
+                var(--c-hairline) 50%, var(--c-surface) 100%);
+    background-size: 200% 100%;
+    animation: skel-slide 1.4s linear infinite;
+}
+.skel--num { height: 30px; width: 42%; margin-bottom: 14px }
+.skel--w1 { width: 62% } .skel--w2 { width: 88% } .skel--w3 { width: 45% }
+@keyframes skel-slide {
+    from { background-position: 100% 0 }
+    to   { background-position: -100% 0 }
+}
+@media (prefers-reduced-motion: reduce) {
+    .skel { animation: none }
+}
+
+/* Порожній стан, який каже, що робити (дрібниця 7). Прочерк без пояснення --
+   тупик: людина не знає, це поломка чи просто немає даних. Той самий підхід,
+   що в правилі «відмова краща за вигадку»: не вдавати число, але й не
+   залишати людину без наступного кроку. */
+.empty {
+    padding: var(--s-4);
+    border: 1px dashed var(--c-border);
+    color: var(--c-muted);
+    font-size: 13.5px;
+    line-height: 1.5;
+}
+.empty b {
+    display: block;
+    color: var(--c-text);
+    font-size: 14.5px;
+    margin-bottom: 4px;
+}
+
+/* Крихітний графік біля живого числа (дрібниця 4). */
+.spark { display: block; width: 100%; height: 30px; margin-top: var(--s-2) }
+
+/* Названі клавіші (дрібниця 8). */
+.kbd {
+    font-family: var(--font-data, var(--font-mono));
+    font-size: 11.5px;
+    padding: 1px 5px;
+    border: 1px solid var(--c-divider);
+    border-bottom-width: 2px;
+    color: var(--c-muted);
+}
+
+@media (max-width: 640px) {
+    /* На телефоні панель чисел стає сіткою 2x2, тому права риска потрібна
+       лише в лівій колонці, а нижня -- між рядами. */
+    .tiles .tile { border-right: 0; border-bottom: 1px solid var(--c-hairline) }
+    .tiles .tile:nth-child(odd) { border-right: 1px solid var(--c-hairline) }
 }

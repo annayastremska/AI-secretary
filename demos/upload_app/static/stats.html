@@ -59,7 +59,6 @@
     <div class="tiles" id="chat-live-tiles"></div>
     <p class="hint" id="chat-live-note"></p>
     <div class="tiles" id="chat-quality-tiles"></div>
-    <p class="hint" id="chat-quality-note"></p>
   </section>
 
   <section id="quality-sec">
@@ -154,25 +153,72 @@ function renderChatLive(m) {
   const host = $("chat-live-tiles");
   host.textContent = "";
   if (!m || !m.n) {
-    $("chat-live-note").textContent =
-      "Питань чату ще не ставили з моменту запуску сервісу — міряти нічого.";
+    /* Порожній стан, який КАЖЕ, ЩО РОБИТИ (дрібниця 7). Прочерк без
+       пояснення -- тупик: людина не знає, це поломка чи просто немає даних. */
+    $("chat-live-note").textContent = "";
+    const box = document.createElement("div");
+    box.className = "empty";
+    const b = document.createElement("b");
+    b.textContent = "Ще не міряли";
+    box.appendChild(b);
+    box.appendChild(document.createTextNode(
+      "Лічильник заповнюється з першого питання в чаті "
+      + "і рахує з моменту запуску сервісу."));
+    host.appendChild(box);
     return;
   }
   /* Медіана, а не середнє: правила відповідають за 0.04 с, модель за 3-45 с,
      і одна довга відповідь задирає середнє так, що воно перестає описувати
      хоч що-небудь. Найгірші 10% -- окремим числом, поруч. */
+  const hero = heroTile(m.median_s + " с", "медіана часу відповіді",
+                        "половина відповідей швидше, половина довше");
+  /* Крихітний графік (дрібниця 4): одне число каже «зараз», графік -- «і так
+     було весь час». Дані вже є, лічильник тримає останні ходи. */
+  const spark = sparkline(m.series);
+  if (spark) { hero.appendChild(spark); }
   host.append(
-    heroTile(m.median_s + " с", "медіана часу відповіді",
-             "типовий хід: половина швидше, половина довше"),
+    hero,
     tile(m.p90_s + " с", "найгірші 10%", "9 з 10 відповідей швидші за це"),
     tile(m.total, "питань з запуску сервісу"));
   const roads = Object.entries(m.by_road || {})
     .sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + v);
   $("chat-live-note").textContent =
-    "Живі числа: рахуються на справжніх ходах чата з " +
-    (m.since || "?").replace("T", " ") + " (з моменту запуску сервісу; " +
-    "медіана — по останніх " + m.window + " ходах)." +
-    (roads.length ? " Дороги: " + roads.join(" · ") + "." : "");
+    roads.length ? "Дороги: " + roads.join(" · ") + "." : "";
+}
+
+/* Спарклайн без жодної бібліотеки: точок мало, а зовнішніх запитів зі
+   сторінок у нас не буває взагалі. Малюємо в координатах viewBox і тягнемо
+   на всю ширину -- тому preserveAspectRatio="none".
+   Шкала ЛОГАРИФМІЧНА: 0.04 с і 45 с на лінійній шкалі дають лінію по нулю з
+   одним шпилем, тобто графік, який нічого не показує. */
+function sparkline(series) {
+  if (!series || series.length < 3) { return null; }
+  const W = 200, H = 30, PAD = 3;
+  const ys = series.map((v) => Math.log10(Math.max(v, 0.01)));
+  const lo = Math.min.apply(null, ys), hi = Math.max.apply(null, ys);
+  const span = (hi - lo) || 1;
+  const pts = ys.map((y, i) => {
+    const x = (i / (ys.length - 1)) * W;
+    return [x, H - PAD - ((y - lo) / span) * (H - PAD * 2)];
+  });
+  const d = pts.map((pt, i) => (i ? "L" : "M")
+    + pt[0].toFixed(1) + " " + pt[1].toFixed(1)).join(" ");
+  const last = pts[pts.length - 1];
+  /* Збираємо розміткою, а не createElementNS. Причина не в стилі: для
+     createElementNS потрібен рядок із адресою простору імен SVG, а такий
+     рядок на нашій сторінці зайвий -- перевірка «нічого з CDN» шукає адреси
+     в тексті сторінки й не може відрізнити простір імен від запиту. Не
+     послаблювати перевірку заради зручності: браузер розбирає svg у
+     innerHTML із правильним простором імен сам. */
+  const wrap = document.createElement("div");
+  wrap.innerHTML = '<svg class="spark" viewBox="0 0 ' + W + " " + H
+    + '" preserveAspectRatio="none" aria-hidden="true">'
+    + '<path d="' + d + '" fill="none" stroke="var(--c-accent)"'
+    + ' stroke-width="1.4" vector-effect="non-scaling-stroke" />'
+    + '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1)
+    + '" r="2.2" fill="var(--c-accent)" />'
+    + "</svg>";
+  return wrap.firstChild;
 }
 
 /* СТАЛІ числа: внутрішній замір приладами на фіксованому тест-сеті, без
@@ -209,25 +255,12 @@ function renderChatQuality(cq) {
      підписі плитки, а не в документації. */
   host.appendChild(tile("—", "підходящих цитат із норм-актів",
                         "ще не міряємо", "tile--draft"));
-  const bits = [];
-  if (c && c.measured_at) {
-    bits.push("звірка каталогу " + c.measured_at.replace("T", " "));
-  }
-  /* Причина відомих розбіжностей іде ПЕРШОЮ, поперед дат заміру: це єдине
-     в цьому підписі, що людина мусить прочитати, а не проглянути. */
-  if (c && c.note) { bits.unshift(c.note); }
-  if (r && r.measured_at) {
-    bits.push("маршрутизація " + r.measured_at.replace("T", " ") +
-              " (" + r.encoder + ", поріг " + r.threshold + ")");
-  }
-  if (!c && !r) {
-    bits.push("замірів ще немає: verify_catalog --json і " +
-              "measure_router --gate --json не запускали");
-  }
-  if (cq.quotes && cq.quotes.blocked) { bits.push(cq.quotes.blocked); }
-  $("chat-quality-note").textContent =
-    "Сталі числа внутрішнього заміру (без участі користувачів): " +
-    bits.join("; ") + ".";
+  /* Службового рядка під сталими числами тут БІЛЬШЕ НЕМА (Аня 27.08:
+     «прибери це все з сайту»). У ньому злиплись чотири різні речі: причина
+     розбіжностей, дві дати заміру, назва encoder-а й заблокований доступ до
+     чужої схеми. Це записи для команди, а не для людини, яка дивиться цифри.
+     Живуть вони там, де їм і місце: у файлах заміру data/eval/*.json, у
+     docs/tasks і в комітах. Плитки говорять самі за себе. */
 }
 
 function block(title, node) {
@@ -254,7 +287,30 @@ async function pollLive() {
   }
 }
 
+/* Скелет (дрібниця 6). Сторінка до відповіді сервера була порожня, потім
+   стрибком заповнювалась. Смужки на місці майбутніх чисел показують, СКІЛЬКИ
+   буде даних і де вони стануть, тому поява перестає бути стрибком. */
+function skeleton() {
+  for (const id of ["db-tiles", "chat-live-tiles", "chat-quality-tiles",
+                    "quality-tiles"]) {
+    const host = $(id);
+    if (!host) { continue; }
+    host.textContent = "";
+    for (let i = 0; i < 3; i += 1) {
+      const cell = document.createElement("div");
+      cell.className = "tile";
+      const n = document.createElement("div");
+      n.className = "skel skel--num";
+      const l = document.createElement("div");
+      l.className = "skel skel--w2";
+      cell.append(n, l);
+      host.appendChild(cell);
+    }
+  }
+}
+
 async function load() {
+  skeleton();
   let data;
   try {
     const resp = await fetch("/api/stats");

@@ -587,8 +587,20 @@ pre.log {
 .theme-toggle {
     display: inline-grid;
     place-items: center;
+    /* Розмір заданий ЧОТИРМА властивостями, і це не перестраховка.
+       Кнопка виходила овальною, бо загальне правило на елемент `button`
+       ставить min-height 48px, а `height: 34px` його не перебиває: у CSS
+       min-height сильніша за height незалежно від специфічності. Тобто
+       коробка була 34px завширшки й 48px заввишки -- овал.
+       aspect-ratio лишається останнім рубежем: якщо колись хтось знову
+       додасть відступ, кнопка залишиться круглою, а не поїде в овал. */
     width: 34px;
     height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    aspect-ratio: 1 / 1;
+    flex: none;
     padding: 0;
     background: transparent;
     border: 1px solid var(--c-divider);

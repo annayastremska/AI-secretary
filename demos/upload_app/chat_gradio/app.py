@@ -2096,8 +2096,15 @@ def build_blocks():
                     send = gr.Button("➤", elem_id="send-btn")
                 retry = gr.Button("Спробувати ще", elem_id="retry-btn",
                                   visible=False)
+                # Названі клавіші (дрібниця 8): Enter надсилає вже
+                # зараз, але про це ніде не було сказано, і люди шукали
+                # кнопку. Нової поведінки не додається -- лише названа наявна.
                 gr.HTML('<div id="hint">Відповідь формується з документів; '
-                        'джерело — під кожною відповіддю.</div>')
+                        'джерело — під кожною відповіддю.'
+                        '<span class="keys"><span class="kbd">Enter</span> '
+                        'надіслати · <span class="kbd">Shift</span>+'
+                        '<span class="kbd">Enter</span> новий рядок</span>'
+                        '</div>')
 
         outs = [box, chat, hero, retry, last_q]
         box.submit(respond, [box, chat], outs)

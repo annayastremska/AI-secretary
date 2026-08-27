@@ -82,6 +82,13 @@ def _sec(value):
     return round(value, 2) if value < 1 else round(value, 1)
 
 
+#: Скільком точок має сенс малювати. 60 на 200 пікселів -- приблизно три
+#: пікселі на точку: видно і форму, і окремий шпиль.
+def _thin(values, limit):
+    tail = values[-limit:]
+    return [round(v, 3) for v in tail]
+
+
 def snapshot():
     """Стан лічильника для сторінки статистики.
 
@@ -100,6 +107,11 @@ def snapshot():
         "median_s": _sec(median),
         "p90_s": _sec(p90),
         "slowest_s": None if not values else _sec(max(values)),
+        # Ряд для крихітного графіка на сторінці. Не весь буфер: 500 точок
+        # на 200 пікселів -- це шум, у якому не видно нічого. Беремо рівно
+        # стільку, скільки пікселів має сенс, підряд із кінця (останні ходи
+        # цікавіші за перші) і у природному порядку часу.
+        "series": _thin(values, 60),
         "by_road": roads,
         "since": time.strftime("%Y-%m-%dT%H:%M:%S",
                                time.localtime(_started_at)),

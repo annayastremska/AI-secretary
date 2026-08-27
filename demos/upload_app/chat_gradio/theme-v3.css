@@ -1047,11 +1047,43 @@ details.src > *:not(summary) {
     z-index: 3;
 }
 #theme-switch .theme-toggle {
-    border-color: var(--c-border) !important;
+    /* Gradio ставить свої розміри кнопок із !important, тому тут потрібна
+       вага id: у чаті перемикач виходив прямокутним саме через це. */
+    display: inline-grid !important;
+    place-items: center !important;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
+    max-height: 34px !important;
+    aspect-ratio: 1 / 1;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    border: 1px solid var(--c-border) !important;
+    background: transparent !important;
     color: var(--c-muted) !important;
+    box-shadow: none !important;
 }
+#theme-switch .theme-toggle svg { display: block }
 #theme-switch .theme-toggle:hover {
     background: var(--c-accent-100, var(--c-accent-soft)) !important;
     border-color: var(--c-accent-200, var(--c-accent-line)) !important;
     color: var(--c-text) !important;
+}
+
+/* 10. Названі клавіші під полем вводу (дрібниця 8 з картки пропозицій).
+ *     Enter надсилав питання й раніше, але про це ніде не було сказано, і
+ *     люди шукали кнопку. Підказка стоїть праворуч у тому самому рядку, що
+ *     й пояснення про джерело: два дрібні службові написи, один рядок.
+ */
+#hint { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4);
+        align-items: baseline; justify-content: space-between }
+#hint .keys { color: var(--c-muted); white-space: nowrap }
+#hint .kbd {
+    font-family: var(--font-data, var(--font-mono));
+    font-size: 11px;
+    padding: 1px 5px;
+    border: 1px solid var(--c-divider);
+    border-bottom-width: 2px;
+    color: var(--c-muted);
 }

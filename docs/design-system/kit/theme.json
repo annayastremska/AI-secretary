@@ -3,9 +3,9 @@
   "palette": {
     "band": "light",
     "scheme": "mono",
-    "bg": "#f7f6f4",
-    "surface": "#efedea",
-    "text": "#1c1b19",
+    "bg": "#fbfbfa",
+    "surface": "#f2f2f0",
+    "text": "#111312",
     "accent": "#46682f",
     "accent2": "#35472c"
   },
