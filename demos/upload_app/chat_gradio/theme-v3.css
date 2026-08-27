@@ -1098,3 +1098,49 @@ details.src > *:not(summary) {
  */
 #theme-switch { pointer-events: none !important }
 #theme-switch .theme-toggle { pointer-events: auto !important }
+
+/* 12. Поле вводу з'їжджало за екран і обрізалось.
+ *
+ *     Причина -- МАГІЧНЕ ЧИСЛО. Висота стрічки рахувалась як
+ *     `100dvh - --header-h - --composer-h`, де `--composer-h` це літерал
+ *     104px. Поки поле було одного рядка, число сходилось. Далі воно
+ *     підросло (вище поле, підказка про клавіші під ним, кнопка «спробувати
+ *     ще»), сума перевищила висоту вікна -- і низ поїхав за екран. На повному
+ *     екрані так само: справа не в розмірі вікна, а в тому, що два числа
+ *     мусили збігатись, а збігатись їм нічого не змушувало.
+ *
+ *     Тому число прибрано зовсім: колонка чата -- це висота вікна, шапка,
+ *     поле й підказка займають, скільком їм потрібно, а стрічка забирає
+ *     решту. Тепер жодна майбутня правка поля не може обрізати екран, бо
+ *     висоту стрічки ніхто не називає числом -- вона те, що лишилось.
+ *
+ *     `:has` тут не про красу: Gradio може обгорнути стрічку у власний блок,
+ *     і тоді розтягуватись мусить обгортка, а не сама стрічка.
+ */
+#main-col {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    gap: 0 !important;
+}
+#main-col > * { flex: 0 0 auto }
+#main-col > *:has(#chat-area) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+#chat-area {
+    flex: 1 1 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+}
+/* Прокручується САМА стрічка, а не колонка: інакше поле вводу їхало б угору
+   разом із повідомленнями. */
+#chat-area, #chat-area .bubble-wrap { overflow-y: auto !important }
+/* Екран вітання займає вільне місце так само, як стрічка: без цього він
+   тулився до шапки, а поле вводу лишалось унизу з великою дірою. */
+#main-col > *:has(#hero) { flex: 1 1 auto; min-height: 0 }
