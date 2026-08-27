@@ -384,7 +384,10 @@ def _commit_job(job_id):
 
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(APP_DIR, "static", "index.html"))
+    # no-store -- та сама причина, що в маршруті статики: у демо правка
+    # тексту мусить доїжджати до людини без очищення кеша браузера.
+    return FileResponse(os.path.join(APP_DIR, "static", "index.html"),
+                        headers={"Cache-Control": "no-store"})
 
 
 # ── Статичні файли обличчя ──────────────────────────────────────────────────
@@ -399,6 +402,11 @@ STATIC_FILES = {
     "pages.css": (os.path.join(APP_DIR, "static", "pages.css"), "text/css"),
     "mark.svg": (os.path.join(APP_DIR, "chat_gradio", "assets", "mark.svg"),
                  "image/svg+xml"),
+    # Той самий шолом, але з ЯВНИМ кольором: <img> -- окремий документ, у
+    # якому currentColor нічого не наслідує. Ним живуть аватар у стрічці
+    # чата й іконка сторінки (favicon).
+    "mark-avatar.svg": (os.path.join(APP_DIR, "chat_gradio", "assets",
+                                     "mark-avatar.svg"), "image/svg+xml"),
 }
 
 # Шрифти обличчя v2 -- у підпапці, і маршрут статики їх спершу НЕ віддавав
@@ -451,7 +459,12 @@ def static_file(name: str):
     if entry is None:
         return JSONResponse(status_code=404, content={"error": "немає такого файлу"})
     path, media = entry
-    return FileResponse(path, media_type=media)
+    # no-store: демо живе на одному сервері, файли крихітні, а ціна кеша
+    # висока. 27.08 Аня двічі дивилась на ВЖЕ скорочені тексти в старій
+    # редакції -- сторінка лежала в кеші браузера, і жодна правка до неї
+    # не доїжджала. Для демо передбачуваність важливіша за економію байтів.
+    return FileResponse(path, media_type=media,
+                        headers={"Cache-Control": "no-store"})
 
 
 # ── Сторінка «Статистика» (задача B2) ───────────────────────────────────────
@@ -469,7 +482,8 @@ from demos.upload_app import stats as stats_mod  # noqa: E402
 
 @app.get("/stats")
 def stats_page():
-    return FileResponse(os.path.join(APP_DIR, "static", "stats.html"))
+    return FileResponse(os.path.join(APP_DIR, "static", "stats.html"),
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/stats")

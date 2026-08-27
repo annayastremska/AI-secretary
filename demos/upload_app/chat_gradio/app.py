@@ -347,7 +347,7 @@ def extract_date(text):
         if mon:
             # РІК, НАЗВАНИЙ ЛЮДИНОЮ, важливіший за нашу константу.
             #
-            # Знайдено адверсарним проходом 25.08: на «Скільком у відпустці
+            # Знайдено адверсарним проходом 25.08: на «Скільки у відпустці
             # 1 січня 1990?» чат відповідав «0 -- на 2026-01-01…», тобто ТИХО
             # підмінював рік і відповідав на інше питання. Це гірше за
             # відмову: людина бачить впевнену відповідь про дату, якої не
@@ -1757,6 +1757,9 @@ def answer(question, history=None):
 
 ASSETS = os.path.join(HERE, "assets")
 MARK = os.path.join(ASSETS, "mark.svg")
+#: Аватар у стрічці -- <img>, тобто окремий документ: currentColor у ньому
+#: нічого не наслідує і знак виходив сірою плямою. Тут колір явний.
+MARK_IMG = os.path.join(ASSETS, "mark-avatar.svg")
 #: Версія обличчя -- та сама змінна, що на сторінках (див. app.APP_THEME).
 #: Стара тема лишається на місці: перемикання й відкат -- одна змінна.
 _THEME_VERSION = os.environ.get("APP_THEME", "v1").strip().lower()
@@ -1781,6 +1784,32 @@ def _note(kind, text):
     return f'<div class="note note--{kind}">{text}</div>'
 
 
+#: Рядки відповіді побудовані однаково: «підпис: значення» («Доповідаю: …»,
+#: «Зріз: …», «Чернетки (не в підрахунку): …»). Підпис -- це те, за чим людина
+#: веде оком, тому він жирний (запит Ані 27.08).
+#: Чому не правимо сам текст answer(): відповідь читають ще прилади
+#: (measure_chat, verify_catalog) і журнал, а зірочки markdown там -- сміття.
+#: Жирність -- справа ПОДАННЯ, і живе тільки тут.
+#: Підпис -- від початку рядка до першої двокрапки, не довший за 45 символів,
+#: із великої літери. Рядки переліку (-, •, |, >), розмітку (<) і блоки коду
+#: не чіпаємо: там двокрапка означає інше.
+_LABEL = re.compile(r"^([А-ЯЁЇІЄҐA-Z][^:<>]{0,44}):(?=\s|$)")
+
+
+def _bold_labels(text):
+    out, in_code = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_code = not in_code
+            out.append(line)
+            continue
+        if in_code or line[:1] in (" ", "\t", "-", "*", ">", "|", "<", "•"):
+            out.append(line)
+            continue
+        out.append(_LABEL.sub(lambda m: "**" + m.group(1) + ":**", line, 1))
+    return "\n".join(out)
+
+
 def render_reply(text):
     """Той самий текст answer(), розкладений на блоки.
 
@@ -1801,7 +1830,7 @@ def render_reply(text):
             notes.append(("warn", stripped.lstrip("⚠️").strip()))
         else:
             body.append(line)
-    out = "\n".join(body).strip()
+    out = _bold_labels("\n".join(body).strip())
     for kind, msg in notes:
         out += "\n\n" + _note(kind, msg)
     return out
@@ -1842,7 +1871,7 @@ def make_head_css():
 #: Запасні приклади -- без дат і номерів, бо саме вони й «псуються» при зміні
 #: корпусу. Використовуються, лише коли база недоступна.
 _EXAMPLES_FALLBACK = [
-    "Скільком зараз у відпустці?",
+    "Скільки зараз у відпустці?",
     "Хто зараз у відрядженні?",
     "Покажи відсутніх по підрозділах",
     "Скільки непідтверджених фактів?",
@@ -1875,7 +1904,7 @@ def example_questions():
         return examples
     if d_to:
         # середина покриття -- день, у якому дані точно є
-        examples[0] = f"Скільком у відпустці {d_to}?"
+        examples[0] = f"Скільки у відпустці {d_to}?"
         examples[2] = f"Покажи відсутніх по підрозділах на {d_to}"
     if rows and rows[0]["num"]:
         examples[3] = f"Покажи документ №{rows[0]['num']}"
@@ -2012,7 +2041,7 @@ def build_blocks():
                     show_label=False,
                     elem_id="chat-area",
                     elem_classes="chatbot",
-                    avatar_images=(None, MARK),
+                    avatar_images=(None, MARK_IMG),
                     buttons=["copy"],
                     height="100%",
                 )

@@ -8,12 +8,13 @@
      зовнішнього шрифта чи аналітики (перевірка №7 у README апки). -->
 <!-- Обличчя одним посиланням: яку версію віддати, вирішує
      сервер за APP_THEME (v1 -- як було, v2 -- строга база). -->
+<link rel="icon" href="/static/mark-avatar.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/skin.css">
 </head>
 <body>
 <header class="appbar">
   <a class="brand" href="/">
-    <img src="/static/mark.svg" alt="">
+    <img src="/static/mark-avatar.svg" alt="">
     <span>
       <span class="brand-name">AI-секретар</span><br>
       <span class="brand-sub">облік особового складу</span>
@@ -184,10 +185,10 @@ function render(data) {
       tile(qm.normative_ok + "/" + qm.normative_total, "нормативних розпізнано"),
       /* Було «299 / 300 · падає 0, очікуваних провалів 1» -- і Аня
          справедливо спитала «як це». Тепер підпис читається як речення:
-         скільком проходить, скільком падає і що таке той один. */
+         скільки проходить, скільки падає і що таке той один. */
       tile(qm.tests_passed + " з " + qm.tests_total, "тестів пайплайна проходить",
            "падає " + qm.tests_failed + " · " + qm.tests_xfailed +
-           " написаний на те, чого ще немає"));
+           " відкладений: вердикт «наш бланк» поки лише так/ні"));
     $("quality-note").textContent =
       "Заміряно " + (qm.measured_at || "?").replace("T", " ") +
       ": кожне поле звірене з відомою правильною відповіддю.";

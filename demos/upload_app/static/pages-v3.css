@@ -768,3 +768,30 @@ button:disabled { opacity: .45; transform: none; box-shadow: none }
         grid-template-columns: 1fr 1fr; gap: var(--s-2) }
     table { display: block; overflow-x: auto; white-space: nowrap }
 }
+
+/* ===== ПРАВКИ ПО ЖИВОМУ ОГЛЯДУ 27.08 =====================================
+ * Шар вище складається зі набору дизайн-системи (build_kit.py). Цей шар --
+ * ручний, і в ньому лежить рівно те, що знайшлось на живих сторінках очима.
+ * Тримається окремо й останнім, щоб перезбірка набору його не з'їдала.
+ */
+
+/* Підпис «облік особового складу» на темній смузі був майже не читний:
+ * opacity .72 на дрібному 12px тексті дає контраст близько 2.5:1 (норма
+ * WCAG для дрібного тексту -- 4.5:1). Прозорість замінено на власний
+ * колір: розмір і вага ті самі, читність інша.  */
+.appbar .brand-sub {
+    opacity: 1;
+    color: color-mix(in srgb, var(--c-brand-text) 86%, transparent);
+    font-size: 12.5px;
+    letter-spacing: .01em;
+}
+.appbar .brand-name { color: var(--c-brand-text) }
+/* Тонка світло-зелена межа під смугою: смуга перестає «зливатися» з
+ * полотном і читається як шапка продукту, а не як чорний прямокутник. */
+.appbar { border-bottom: 3px solid var(--c-accent) }
+
+/* Світлі щаблі зеленого -- там, де великі площі. Це і є «сучасний
+ * контраст»: площі світло-зелені, дія -- насичена. */
+thead th, .tile--ok { background: var(--c-accent-100) }
+tbody tr:hover { background: var(--c-accent-soft) }
+.dropzone { border-color: var(--c-accent-200) }

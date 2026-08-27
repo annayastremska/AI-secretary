@@ -56,7 +56,7 @@ SQL_REVIEW_OPEN = ("SELECT rq.queue_type, COUNT(*) AS n FROM review_queue rq "
                    "WHERE rq.resolved_at IS NULL "
                    "GROUP BY rq.queue_type ORDER BY rq.queue_type")
 
-#: Скільком осіб у реєстрі ще НЕ знайдено відповідника у штатці.
+#: Скільки осіб у реєстрі ще НЕ знайдено відповідника у штатці.
 #:
 #: Навіщо окремо. Аня 26.08: «134 «нова особа» на 300 осіб -- це багато,
 #: зʼясуй». Зʼясувалось: 133 із цих завдань створені 24.08, коли ми заливали
@@ -71,7 +71,7 @@ SQL_REVIEW_OPEN = ("SELECT rq.queue_type, COUNT(*) AS n FROM review_queue rq "
 SQL_PEOPLE_UNMATCHED = ("SELECT COUNT(*) AS n FROM people "
                         "WHERE service_id IS NULL")
 
-#: Скільком ДОКУМЕНТІВ чекає ручної перевірки.
+#: Скільки ДОКУМЕНТІВ чекає ручної перевірки.
 #:
 #: Питання Ані 26.08: «цифри не сходяться, або немає каунтера документів на
 #: ручну перевірку». Другого не було: сторінка показувала 162 ЗАВДАННЯ, а
@@ -246,11 +246,11 @@ def db_counters(query=None):
         "review_queue": {
             "open_total": sum(review.values()),
             "by_type": review,
-            # Скільком осіб ще немає відповідника у штатці. Саме це число
+            # Скільки осіб ще немає відповідника у штатці. Саме це число
             # означає «справді невідомі», а `open_total` -- журнал завдань,
             # більшість яких створена до появи штатки.
             "people_unmatched": unmatched,
-            # Скільком ДОКУМЕНТІВ чекає людини. Це не те саме, що кількість
+            # Скільки ДОКУМЕНТІВ чекає людини. Це не те саме, що кількість
             # завдань: на один документ їх буває кілька.
             "documents_pending": docs_pending,
             "documents_pending_substantive": docs_pending_sub,

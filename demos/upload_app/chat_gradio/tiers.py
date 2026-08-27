@@ -929,7 +929,7 @@ def _people_total():
         return None
 
 
-#: Скільком осіб у ЦІЙ відповіді немає відповідника у штатці.
+#: Скільки осіб у ЦІЙ відповіді немає відповідника у штатці.
 #:
 #: Питання Ані 26.08: «якщо людини немає у штатці, але по ній приходить
 #: документ -- це ж іде на розгляд людини?». Іде: завантажувач створює завдання
@@ -1220,7 +1220,7 @@ def run_template(template_id, params):
         u = unconfirmed[0]["n"] if unconfirmed else 0
         lines.append(f"{_people(n)} {state_lbl}{denom}.")
         lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
-        lines.append(f"Непідтверджених (чернетки, у підрахунок не входять): {u}.")
+        lines.append(f"Чернетки (не в підрахунку): {u}.")
         lines += _unmatched_note(params)
         lines += _zero_coverage_lines(n, params.get("on_date"))
 
@@ -1249,7 +1249,7 @@ def run_template(template_id, params):
         lines.append(f"{_people(n)} {state_lbl}{denom}.")
         lines.append(f"Зріз: період {params['date_from']} — {params['date_to']} "
                      "(за підтвердженими фактами).")
-        lines.append(f"Непідтверджених (у підрахунок не входять): {u}.")
+        lines.append(f"Чернетки (не в підрахунку): {u}.")
         lines += _unmatched_note(params)
         # межі перевіряємо по початку періоду: якщо він поза покриттям,
         # людині треба сказати саме це, а не показувати чистий нуль
@@ -1364,11 +1364,11 @@ def run_template(template_id, params):
                     src = r.get("all_sources")
                     if src and "," in str(src):
                         lines.append(f"  джерел у базі кілька: {_esc(src)}")
-            # Скільком із показаного -- чернетки. Правило продукту вимагає
+            # Скільки із показаного -- чернетки. Правило продукту вимагає
             # цього числа в кожній відповіді з фактами, і саме тут воно
             # особливо доречне: питали про доказ.
             drafts = sum(1 for r in rows if r["status"] != "confirmed")
-            lines.append(f"Непідтверджених (чернетки, у підрахунки не входять) "
+            lines.append(f"Чернетки (не в підрахунку) "
                          f"серед показаного: {drafts}.")
         lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
 
@@ -1447,7 +1447,7 @@ def run_template(template_id, params):
         if in_sub:
             lines.append(f"Склад підрозділу за штаткою: {_people(in_sub)}.")
         lines.append(f"Зріз: на {params['on_date']} (за підтвердженими фактами).")
-        lines.append(f"Непідтверджених (чернетки, у підрахунок не входять): {u}.")
+        lines.append(f"Чернетки (не в підрахунку): {u}.")
         lines += _zero_coverage_lines(n, params.get("on_date"))
 
     elif template_id == "list_by_state_in_subdivision":
@@ -1561,8 +1561,7 @@ def run_template(template_id, params):
         #     її відсутність.
         if unconfirmed is not None:
             u = unconfirmed[0].get("n") if unconfirmed else 0
-            lines.append(f"Непідтверджених (чернетки, у підрахунок не "
-                         f"входять): {u or 0}.")
+            lines.append(f"Чернетки (не в підрахунку): {u or 0}.")
         elif "status" in (t.get("sql") or ""):
             lines.append("Враховані лише підтверджені факти; чернетки в "
                          "підрахунок не входять.")

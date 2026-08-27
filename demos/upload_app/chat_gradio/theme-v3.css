@@ -784,3 +784,84 @@ details.src > *:not(summary) {
     #chat-area .message { animation: none }
     #chat-area { scroll-behavior: auto }
 }
+
+/* ===== ПРАВКИ ПО ЖИВОМУ ОГЛЯДУ ЧАТА 27.08 ================================
+ * Знайдено очима на робочому чаті, не в макеті. Кожне правило -- окремий
+ * дефект; !important тут не стиль, а необхідність: Gradio віддає власні
+ * правила з вищою вагою (свій `a`, свої обгортки повідомлення), і без
+ * !important вони просто перекривають наші.
+ */
+
+/* 1. ОДНА рамка на відповідь, а не дві.
+ *    Було: наша рамка з зеленою лівою межею -- і всередині ще одна, від
+ *    обгортки Gradio (.message-content / .md). Дві рамки на одному блоці
+ *    читаються як помилка розмітки. Тут усі внутрішні межі й фони
+ *    знімаються, а потім окремо повертається лише блок «Джерело». */
+.gradio-container .message.bot *,
+.gradio-container .bot .message * {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.gradio-container .message.bot details,
+.gradio-container .bot .message details {
+    background: var(--c-surface) !important;
+    border: 1px solid var(--c-border) !important;
+    border-radius: var(--r-sm) !important;
+    padding: var(--s-2) var(--s-3) !important;
+    margin-top: var(--s-3) !important;
+}
+.gradio-container .message.bot,
+.gradio-container .bot .message {
+    padding: var(--s-3) var(--s-4) !important;
+}
+
+/* 2. Знак у стрічці: Gradio ріже аватар у круг і додає свою межу.
+ *    Наш файл уже має власне світле коло, тому чужа межа зайва. */
+.gradio-container .avatar-container,
+.gradio-container .avatar-image {
+    border: 0 !important;
+    background: transparent !important;
+    width: 30px !important;
+    height: 30px !important;
+}
+
+/* 3. Переходи на інші сторінки були синіми й підкресленими: це типове
+ *    оформлення посилання від Gradio, яке перекривало наш .page-link.
+ *    Вони мусять виглядати як кнопки бічної панелі -- бо це вони і є. */
+.gradio-container a.page-link,
+.gradio-container a.page-link:link,
+.gradio-container a.page-link:visited {
+    display: flex !important;
+    align-items: center;
+    gap: var(--s-2);
+    color: var(--c-text) !important;
+    text-decoration: none !important;
+    background: transparent !important;
+    border: 1px solid var(--c-border) !important;
+    border-radius: var(--r-md) !important;
+    padding: 10px var(--s-3) !important;
+    margin-top: var(--s-2) !important;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color var(--dur) var(--ease),
+                border-color var(--dur) var(--ease);
+}
+.gradio-container a.page-link:hover {
+    background: var(--c-accent-100) !important;
+    border-color: var(--c-accent-200) !important;
+    color: var(--c-accent-700) !important;
+}
+
+/* 4. Жирні підписи у відповіді («Доповідаю:», «Зріз:», «Чернетки…»).
+ *    Жирність ставить render_reply(); тут лише щоб жирне не було чорнішим
+ *    за решту -- інакше воно стрибає в очі сильніше, ніж саме число. */
+.gradio-container .message.bot strong,
+.gradio-container .bot .message strong {
+    font-weight: 650;
+    color: var(--c-text);
+}
+
+/* 5. Підпис під назвою в бічній панелі -- світліше тло, тому контраст
+ *    беремо не прозорістю, а кольором. */
+#brand .brand-sub { color: var(--c-muted); font-size: 12.5px }
