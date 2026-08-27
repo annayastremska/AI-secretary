@@ -574,6 +574,33 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                     (document_id,),
                 )
 
+            # ЗІСТАВЛЕННЯ ЗІ ШТАТКОЮ -- УМОВА СТАТУСУ ФАКТУ.
+            #
+            # Прохання Ані (tasks_from_anya/2026-08-26_for-andriy-roster-matching.md)
+            # і наше ж правило продукту: чернетка != факт, запис із хоч одним
+            # непевним полем у підрахунки не входить, доки людина не
+            # підтвердить. Невідома особа -- це і є непевність.
+            #
+            # Було: завдання `new_person` створювалось, а факти все одно писались
+            # `confirmed`. Тобто непевність фіксувалась у черзі, але цифру не
+            # стримувала -- у «12 у відпустці» один із дванадцяти був людиною,
+            # якої система не знає. Заміряно: 3 особи без service_id, 20
+            # підтверджених фактів.
+            #
+            # Перевіряємо саме `service_id`, а НЕ `is_new_person`: ті три особи
+            # в `people` уже існують (створені з попередніх документів), тобто
+            # новими не є, а у штатці їх немає. Ознака «нова» і ознака «немає у
+            # штатці» -- різні речі, і плутати їх означало б пропустити рівно
+            # цей випадок.
+            cur.execute("SELECT service_id FROM people WHERE object_id = %s",
+                        (person_object_id,))
+            row = cur.fetchone()
+            in_roster = bool(row and row[0])
+            if not in_roster:
+                print(f"[штатка] особа {person_object_id} не зіставлена з "
+                      f"реєстром -- факти документа {document_id} пишемо "
+                      f"unconfirmed")
+
             field_provenance = meta.get("field_provenance") or {}
             # Реквізити цього документа -- ключ дедуплікації для всіх його
             # фактів (див. find_equivalent_fact).
@@ -598,7 +625,7 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                 fact_id = insert_fact(
                     cur, person_object_id, rank_dim_id, rank.get("code"),
                     meta["uploaded_at"], None, document_id,
-                    rank_provenance.get("resolved", True),
+                    rank_provenance.get("resolved", True) and in_roster,
                     confidence=rank_provenance.get("confidence"),
                     doc_number=doc_number, doc_date=doc_date,
                 )
@@ -613,7 +640,8 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                                                  fact.get("validity_model"))
                 fact_id = insert_fact(
                     cur, person_object_id, dim_id, fact.get("value_code"),
-                    fact.get("date_start"), fact.get("date_end"), document_id, fact.get("confirmed"),
+                    fact.get("date_start"), fact.get("date_end"), document_id,
+                    fact.get("confirmed") and in_roster,
                     additional_info=fact.get("additional_info"),
                     confidence=fact.get("confidence"),
                     source_field=fact.get("source_field"),
