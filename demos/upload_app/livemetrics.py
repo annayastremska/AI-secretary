@@ -69,6 +69,19 @@ def _percentile(values, share):
     return ordered[idx]
 
 
+def _sec(value):
+    """Секунди для показу людині.
+
+    Округлення до 0.1 с не годиться: правила відповідають за 0.04 с, і на
+    екрані виходило «0.0 с» -- людина читає це як зламаний лічильник, а не як
+    «швидко». Тому під секундою -- два знаки, над секундою -- один: там друга
+    цифра однаково нічого не значить (у заміру є черга Gradio і мережа).
+    """
+    if value is None:
+        return None
+    return round(value, 2) if value < 1 else round(value, 1)
+
+
 def snapshot():
     """Стан лічильника для сторінки статистики.
 
@@ -84,11 +97,9 @@ def snapshot():
     return {
         "n": len(values),
         "total": total,
-        # Округлення до 0.1 с: точніше показувати нечесно -- сам замір
-        # включає чергу Gradio і мережу.
-        "median_s": None if median is None else round(median, 1),
-        "p90_s": None if p90 is None else round(p90, 1),
-        "slowest_s": None if not values else round(max(values), 1),
+        "median_s": _sec(median),
+        "p90_s": _sec(p90),
+        "slowest_s": None if not values else _sec(max(values)),
         "by_road": roads,
         "since": time.strftime("%Y-%m-%dT%H:%M:%S",
                                time.localtime(_started_at)),

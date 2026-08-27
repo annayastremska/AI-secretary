@@ -29,7 +29,9 @@ def test_median_not_mean():
     for value in (0.04, 0.05, 0.06, 45.0):
         livemetrics.record(value, "правила")
     snap = livemetrics.snapshot()
-    assert snap["median_s"] == 0.1        # 0.05/0.06 -> округлення до 0.1
+    # Під секундою -- два знаки: округлення до 0.1 давало «0.0 с», і це
+    # читається як зламаний лічильник, а не як «швидко».
+    assert snap["median_s"] == 0.06
     assert snap["p90_s"] == 45.0          # найгірші 10% видно окремо
     assert snap["n"] == 4 and snap["total"] == 4
 
