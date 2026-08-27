@@ -1637,7 +1637,6 @@ details.src > *:not(summary) {
         height: 100% !important;
         width: 100% !important;
         overflow: hidden !important;
-        overscroll-behavior: none;
     }
     .gradio-container, .gradio-container > .main, .gradio-container .contain {
         height: 100% !important;
@@ -1763,4 +1762,32 @@ details.src > *:not(summary) {
     /* Блок «Джерело» й номер звернення -- ще тихіше: це службове. */
     #chat-area details { margin-top: var(--s-2) !important }
     #chat-area .req-id { font-size: 10px; margin-top: 6px }
+}
+
+/* 27. Три нюанси з живого телефона (Аня 27.08).
+ *
+ * A. Назва екрана стояла вище за центр кнопки меню. Причина: кнопка -- 44px
+ *    (дотикова цiль), а назва -- рядок тексту 11px зі своєю висотою рядка.
+ *    `align-items: center` центрує КОРОБКИ, а коробка назви менша, тому текст
+ *    сідав вище за оптичний центр іконки. Даємо назві ту саму висоту, що в
+ *    кнопки, і центруємо текст усередині неї.
+ *
+ * B. Прокрутку сторінки вниз (оновлення) на чаті вимкнено НЕ помилково, а як
+ *    наслідок: щоб клавіатура не ламала розкладку, тіло сторінки зафіксоване,
+ *    а зафіксоване тіло не має чого прокручувати -- отже й жесту оновлення
+ *    немає. Прибираю `overscroll-behavior: none`, який тут уже нічого не
+ *    додає, щоб не вимикати нічого ЗВЕРХУ до цього наслідку. Сам жест на
+ *    чаті не вернеться, поки поле вводу тримається над клавіатурою; рівна
+ *    заміна для нього -- кнопка «Очистити чат» у панелі.
+ */
+@media (max-width: 860px) {
+    #topbar-title {
+        display: flex !important;
+        align-items: center !important;
+        min-height: 44px !important;
+    }
+    html, body { overscroll-behavior: auto }
+    /* Стрічка своє гортання лишає при собі: інакше рух пальцем у ній тягне
+       за собою сторінку. */
+    #chat-area { overscroll-behavior: contain !important }
 }

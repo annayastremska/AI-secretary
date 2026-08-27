@@ -124,18 +124,28 @@
   }
 
   /* ── 2. Шухляда ───────────────────────────────────────────────────────── */
-  function main() {
-    return document.getElementById("main-col");
-  }
-
   function isOpen() {
     return root.getAttribute(OPEN) === "open";
   }
 
+  /* Що саме робимо недосяжним, поки шухляда відкрита.
+   *
+   * Було: `inert` на всю колонку чата -- і шухляду СТАВАЛО НЕМОЖЛИВО
+   * ЗАКРИТИ. Причина проста й повністю моя: кнопка меню й підкладка стоять
+   * у шапці, тобто ВСЕРЕДИНІ тієї самої колонки. Зробивши колонку
+   * недосяжною, я зробив недосяжними й обидва способи закрити шухляду.
+   *
+   * Тому недосяжним стає лише те, що справді мусить бути недосяжним:
+   * стрічка й поле вводу. Шапка лишається живою -- у ній кнопка, якою
+   * шухляда й закривається. */
+  var BLOCKED = ["chat-area", "composer", "hint-block"];
+
   function open() {
     root.setAttribute(OPEN, "open");
-    var m = main();
-    if (m) { m.setAttribute("inert", ""); }
+    BLOCKED.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.setAttribute("inert", ""); }
+    });
     /* Фокус -- у шухляду, на першу дію: інакше читач екрана лишається там,
        де був, і про відкриття не дізнається. */
     var first = document.querySelector("#sidebar button, #sidebar a");
@@ -145,8 +155,10 @@
 
   function close(returnFocus) {
     root.removeAttribute(OPEN);
-    var m = main();
-    if (m) { m.removeAttribute("inert"); }
+    BLOCKED.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.removeAttribute("inert"); }
+    });
     if (returnFocus) {
       var btn = document.getElementById("nav-toggle");
       if (btn) { btn.focus(); }
