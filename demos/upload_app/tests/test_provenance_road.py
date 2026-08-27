@@ -31,9 +31,25 @@ def known_name(monkeypatch):
     "Чим підтверджено, що Гавриш у відрядженні?",
 ])
 def test_evidence_questions_go_to_provenance(question):
+    """Дорога та сама; ФОРМАТ параметра імені змінився свідомо (28.08).
+
+    Було `%Гавриш%` -- підрядок для `ILIKE`. Саме він давав п. 6-7 звіту
+    Дениса: «Богодар» як підрядок ловив «Богодарович», тобто впевнену
+    відповідь про іншу людину. Тепер `name_pattern` -- регулярка по межі
+    слова, а шаблони порівнюють через `~*`.
+
+    Тому тест перевіряє ПОВЕДІНКУ, а не літерал: шаблон мусить ловити цю
+    людину й не мусить ловити довше слово. Так він лишається корисним і після
+    наступної зміни формату.
+    """
+    import re
+
     tid, params = tiers.rules_route(question)
     assert tid == "fact_provenance", (question, tid)
-    assert params["name_pattern"] == "%Гавриш%"
+    rx = params["name_pattern"]
+    assert re.search(rx, "Гавриш Адам Станіславович", re.IGNORECASE), rx
+    assert not re.search(rx, "Гавришенко Петро Іванович", re.IGNORECASE), (
+        "шаблон імені ловить довше прізвище -- це і є дефект п. 7")
 
 
 def test_normative_questions_still_work():

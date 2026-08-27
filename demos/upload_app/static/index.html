@@ -21,6 +21,10 @@
      у <head> і БЕЗ defer: інакше сторінка блимнула б світлою й перефарбувалась
      у темну, а ця мить читається як поломка. -->
 <script src="/static/theme-toggle.js"></script>
+<!-- Перемикач мови: та сама механіка, що в теми (data-lang на <html>,
+     localStorage, без defer). Переклад іде по DOM за словником, тому підписи
+     сторінки не переписані в 105 місцях -- розбір у самому файлі. -->
+<script src="/static/lang-toggle.js"></script>
 <!-- Рівень доступу: людина мусить бачити свою межу ДО того, як
      натисне кнопку, а не дізнатися про неї з відмови. -->
 <script src="/static/access.js" defer></script>
@@ -48,6 +52,8 @@
        налаштування вигляду, і шукають його там, де вигляд і живе. Порожня
        навмисно -- іконку й підписи ставить theme-toggle.js, щоб три сторінки
        не тримали три копії трьох SVG. -->
+  <button type="button" class="lang-toggle" data-lang-mode="uk"
+          aria-label="Мова">EN</button>
   <button type="button" class="theme-toggle" data-mode="system"
           aria-label="Тема"></button>
 </header>

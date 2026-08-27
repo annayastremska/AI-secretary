@@ -917,7 +917,8 @@ tbody tr:hover { background: var(--c-accent-soft) }
  * Три стани, не два: «як у системі» це окремий і найчастіше правильний стан
  * (телефон сам темніє ввечері). Знак кожного стану ставить theme-toggle.js.
  */
-.theme-toggle {
+.theme-toggle,
+.lang-toggle {
     display: inline-grid;
     place-items: center;
     /* Розмір заданий ЧОТИРМА властивостями, і це не перестраховка.
@@ -946,11 +947,35 @@ tbody tr:hover { background: var(--c-accent-soft) }
                 color 140ms ease;
 }
 .theme-toggle svg { display: block }
-.theme-toggle:hover {
+
+/* 32. ПЕРЕМИКАЧ МОВИ -- та сама кругла форма, що в теми.
+ *
+ * Форма й розмір беруться з ТОГО САМОГО правила: `.lang-toggle` дописана в
+ * селектори `.theme-toggle` вище, а не має власного набору. Спершу я написала
+ * окремий блок зі словом «успадковує» -- і це була б неправда: CSS так не
+ * успадковує, і кнопка вийшла б прямокутною, 48px заввишки. Дві кнопки поруч
+ * мусять бути однакові з точністю до пікселя, а два незалежні набори
+ * властивостей розійдуться на першій правці -- це вже сталося з іконками
+ * теми, тому вони й переїхали в JS.
+ */
+.lang-toggle {
+    /* Різниця з темою рівно одна: тут не знак, а дві-три літери, тому
+       потрібен розмір і вага тексту. Прапорця немає навмисно -- прапорець
+       позначає країну, а не мову, і для української це окрема чутлива
+       різниця. */
+    font: 600 11px/1 var(--font-ui, inherit);
+    letter-spacing: 0.04em;
+}
+/* Дві кнопки в смузі позиційовані АБСОЛЮТНО, тому другій потрібен свій зсув:
+   без нього вони лягли б одна на одну. 42px -- 34 ширини плюс 8 проміжку. */
+.appbar .lang-toggle { right: calc(var(--s-4, 16px) + 42px) }
+.theme-toggle:hover,
+.lang-toggle:hover {
     background: var(--c-accent-soft);
     border-color: var(--c-accent, var(--c-divider));
 }
-.theme-toggle:focus-visible {
+.theme-toggle:focus-visible,
+.lang-toggle:focus-visible {
     outline: 2px solid var(--c-accent);
     outline-offset: 2px;
 }
@@ -959,7 +984,8 @@ tbody tr:hover { background: var(--c-accent-soft) }
  * position: sticky, тобто вже позиційований предок, і абсолют прив'язується
  * до неї, а не до сторінки. */
 .appbar { position: sticky }
-.appbar .theme-toggle {
+.appbar .theme-toggle,
+.appbar .lang-toggle {
     position: absolute;
     top: 13px;
     right: var(--s-4, 16px);
@@ -969,9 +995,13 @@ tbody tr:hover { background: var(--c-accent-soft) }
                             transparent);
     color: var(--c-brand-text, var(--c-text));
 }
-.appbar .theme-toggle:hover { background: rgba(255, 255, 255, .12) }
+.appbar .theme-toggle:hover,
+.appbar .lang-toggle:hover { background: rgba(255, 255, 255, .12) }
 @media (max-width: 640px) {
-    .appbar .theme-toggle { top: 10px; width: 32px; height: 32px }
+    .appbar .theme-toggle,
+    .appbar .lang-toggle { top: 10px; width: 32px; height: 32px }
+    /* На телефоні смуга вужча -- зсув мовної кнопки теж менший. */
+    .appbar .lang-toggle { right: calc(var(--s-4, 16px) + 38px) }
 }
 
 
