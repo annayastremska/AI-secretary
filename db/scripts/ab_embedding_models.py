@@ -256,10 +256,73 @@ def measure(dsn, truth_path, keys):
           "гілці, що зникає після склейки, продуктом не є.")
 
 
+
+def sweep_k(dsn, truth_path, keys, ks):
+    """Чи виправляється потоплення унікальної правоти вектора параметром K.
+
+    RRF додає 1/(K+позиція) за кожну гілку, тому при великому K присутність у
+    ДВОХ гілках коштує дорожче за перше місце в одній: при K=60 одиниця на
+    60-х місцях обох гілок дає 2/120=0.0167 проти 1/61=0.0164 у переможця
+    однієї. Саме це й побачив замір: вектор ставить правильну одиницю першою,
+    а склейка -- на 26-ту. Малий K повертає вагу верхнім місцям.
+
+    Модель не викликається: вектори вже в базі, тому прогін коштує секунди.
+    """
+    truth = read_truth(truth_path)
+    encoders = {k: load_encoder(k) for k in keys}
+    orig = SU.RRF_K
+    print()
+    print("=" * 78)
+    print(f"RRF_K: як позиція правильної одиниці залежить від K "
+          f"(n={len(truth)}, це мало)")
+    print()
+    header = "модель       гілка" + "".join(f"{('K='+str(k)):>8}" for k in ks)
+    print(header)
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        for k in keys:
+            vec_ranks, per_k = [], {kk: [] for kk in ks}
+            for q, doc_id, needle in truth:
+                ids = correct_units(cur, doc_id, needle)
+                if not ids:
+                    continue
+                lex = SU.lexical(cur, q)
+                vec = str(encoders[k]([q], "q")[0])
+                sem = (SU.semantic(cur, vec) if MODELS[k]["table"] is None
+                       else semantic_side(cur, MODELS[k]["table"], vec))
+                vec_ranks.append(rank_of(sem, ids))
+                for kk in ks:
+                    SU.RRF_K = kk
+                    fused = SU.dedupe_by_text(cur, SU.rrf_merge(lex, sem),
+                                              SU.canon_map(cur))
+                    per_k[kk].append(rank_fused(fused, ids))
+            SU.RRF_K = orig
+
+            def summarize(rs):
+                found = [x for x in rs if x is not None]
+                return (sum(1 for x in rs if x is not None and x <= 2),
+                        sum(found)/len(found) if found else 0)
+
+            h2, m2 = summarize(vec_ranks)
+            print(f"{k:<13}{'вектор':<6}" + f"  @2={h2} сер={m2:.1f}")
+            row1 = f"{'':<13}{'@2':<6}"
+            row2 = f"{'':<13}{'сер':<6}"
+            for kk in ks:
+                h, m = summarize(per_k[kk])
+                row1 += f"{h:>8}"
+                row2 += f"{m:>8.1f}"
+            print(row1)
+            print(row2)
+    print()
+    print("@2 -- скільком питанням правильна одиниця дісталась у топ-2 "
+          "(це те, що бачать ворота);")
+    print("сер -- середня позиція серед знайдених. Менше -- краще.")
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--build", choices=sorted(MODELS))
     ap.add_argument("--measure", action="store_true")
+    ap.add_argument("--sweep-k", default="",
+                    help="перебрати RRF_K, напр. 1,5,10,20,40,60")
     ap.add_argument("--models", default="e5-small,bge-m3",
                     help="які моделі порівнювати в --measure")
     ap.add_argument("--truth", default=os.path.join(PROJECT_ROOT, "eval", "retrieval",
@@ -276,7 +339,11 @@ def main(argv=None):
         if bad:
             raise SystemExit(f"невідомі моделі: {bad}")
         measure(dsn, args.truth, keys)
-    if not args.build and not args.measure:
+    if args.sweep_k:
+        keys = [k.strip() for k in args.models.split(',') if k.strip()]
+        ks = [int(x) for x in args.sweep_k.split(',') if x.strip()]
+        sweep_k(dsn, args.truth, keys, ks)
+    if not args.build and not args.measure and not args.sweep_k:
         ap.print_help()
     return 0
 
