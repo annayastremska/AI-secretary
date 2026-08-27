@@ -161,21 +161,38 @@
     btn.setAttribute("aria-label", isOpen() ? "Закрити панель" : "Меню");
   }
 
+  /* ОБРОБНИК НА DOCUMENT, а не на кнопці.
+   *
+   * Кнопка натискалась і не робила нічого, і причина була в ЧАСІ: я чіплялa
+   * обробник, коли кнопка вже є, а спостерігач за деревом знімався за умовою
+   * «висоти є І (кнопки немає АБО вона підключена)». Якщо Gradio малював поле
+   * вводу раніше за шапку -- а він так і робить, -- то в мить перевірки
+   * кнопки ще не існувало, умова «кнопки немає» ставала істинною, спостерігач
+   * знімався, і кнопку вже ніхто не підключав. Тобто моя ж умова виходу з
+   * очікування й ламала очікування.
+   *
+   * Делегування знімає це питання цілком: обробник живе на документі й
+   * працює для кнопки, яка з'явиться колись потім. Час перестає мати
+   * значення -- а він і був єдиною причиною.
+   */
+  document.addEventListener("click", function (ev) {
+    var t = ev.target;
+    if (!t || !t.closest) { return; }
+    if (t.closest("#nav-toggle")) {
+      ev.preventDefault();
+      if (isOpen()) { close(true); } else { open(); }
+      return;
+    }
+    if (t.closest("#nav-backdrop")) { close(true); }
+  });
+
   function wire() {
     watchHeights();
     var btn = document.getElementById("nav-toggle");
     if (btn && !btn.dataset.wired) {
       btn.dataset.wired = "1";
       btn.setAttribute("aria-controls", "sidebar");
-      btn.addEventListener("click", function () {
-        if (isOpen()) { close(true); } else { open(); }
-      });
       sync();
-    }
-    var back = document.getElementById("nav-backdrop");
-    if (back && !back.dataset.wired) {
-      back.dataset.wired = "1";
-      back.addEventListener("click", function () { close(true); });
     }
     /* Перехід на іншу сторінку з шухляди -- закривати не треба (сторінка
        перезавантажиться), але натиск «Новий чат» лишає нас тут, і відкрита
@@ -213,11 +230,13 @@
     var obs = new MutationObserver(function () {
       wire();
       heights();
-      /* Знімаємось, коли є і висоти, і (якщо вона взагалі є) кнопка меню.
-         На широкому екрані кнопки немає, тому достатньо шапки. */
-      var haveHeights = !!document.getElementById("composer");
-      var btnEl = document.getElementById("nav-toggle");
-      if (haveHeights && (!btnEl || btnEl.dataset.wired)) {
+      /* Знімаємось, лише коли є І поле вводу, І кнопка меню -- обидва.
+         Попередня умова («кнопки немає» теж годиться) знімала спостерігача
+         до того, як Gradio намалював шапку. Тепер сам обробник натиску живе
+         на документі, тому навіть передчасне зняття нічого не зламає, але
+         умова однаково мусить бути правильною. */
+      if (document.getElementById("composer")
+          && document.getElementById("nav-toggle")) {
         obs.disconnect();
       }
     });

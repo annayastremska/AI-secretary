@@ -1687,3 +1687,71 @@ details.src > *:not(summary) {
         transform: none !important;
     }
 }
+
+/* 25. Порожнє місце між полем вводу й клавіатурою -- і чому воно з'явилось.
+ *
+ *     На скріншоті: поле стоїть над клавіатурою, під ним ~90px білого, а
+ *     шапки чата не видно зовсім. Обидва симптоми -- одна причина.
+ *
+ *     iOS, коли не може прокрутити документ (а я його зафіксувала), НЕ
+ *     здається: він зсуває саме ВИДИМЕ ВІКНО (visual viewport). Розкладка
+ *     лишається на місці, а вікно, через яке її видно, з'їжджає вниз. Тому
+ *     верх (шапка) виходить за екран, а внизу лишається смуга нашого ж тла.
+ *
+ *     Найдурніше в цьому те, що я цей зсув МІРЯЛА (`--vvtop` у mobile.js) --
+ *     і ніде не використовувала. Тобто знання було, а застосування не було.
+ *
+ *     Тепер контейнер апки прив'язується до ВИДИМОГО вікна: `top` -- зсув,
+ *     `height` -- видима висота. Тоді шапка знову зверху, а поле сідає на
+ *     нижню межу видимого, без смуги під ним.
+ */
+@media (max-width: 860px) {
+    .gradio-container {
+        position: fixed !important;
+        top: var(--vvtop, 0px) !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: auto !important;
+        height: var(--vvh, 100%) !important;
+        max-height: var(--vvh, 100%) !important;
+        overflow: hidden !important;
+    }
+    #main-col {
+        height: 100% !important;
+        max-height: 100% !important;
+    }
+    /* Шухляда прив'язується до того самого видимого вікна, інакше при
+       зсуненому вікні вона починалась би вище за екран. */
+    #sidebar {
+        top: var(--vvtop, 0px) !important;
+        height: var(--vvh, 100%) !important;
+    }
+}
+
+/* 26. Повідомлення були надто «жирні» при дрібному тексті (зауваження Ані).
+ *
+ *     Причина -- пропорція, а не колір: рамка, ліва риска 3px, тінь і
+ *     відступи 12px розраховані на широкий екран. На 390px, де сам текст
+ *     15px, ця обводка важить більше за зміст -- коробка читається раніше
+ *     за слова.
+ *
+ *     Тому на телефоні коробка стає тихішою: тінь геть, риска тонша, рамка
+ *     волосяна, відступи менші. Зміст лишається той самий, ваги в нього
+ *     більше.
+ */
+@media (max-width: 860px) {
+    #chat-area .message.bot,
+    .gradio-container #chat-area .message.bot {
+        padding: var(--s-2) var(--s-3) !important;
+        border: 1px solid var(--c-hairline) !important;
+        border-left: 2px solid var(--c-accent) !important;
+        box-shadow: none !important;
+    }
+    #chat-area .message.user,
+    .gradio-container #chat-area .message.user {
+        padding: var(--s-2) var(--s-3) !important;
+    }
+    /* Блок «Джерело» й номер звернення -- ще тихіше: це службове. */
+    #chat-area details { margin-top: var(--s-2) !important }
+    #chat-area .req-id { font-size: 10px; margin-top: 6px }
+}
