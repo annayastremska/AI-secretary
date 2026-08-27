@@ -24,15 +24,25 @@
   };
 
   function place(badge) {
-    /* Куди вставити. Порядок спроб — від найточнішого до запасного:
-       брендова смуга звичайних сторінок, бічна панель чата, початок body. */
+    /* Куди вставити: брендова смуга звичайних сторінок або бічна панель чата.
+       ЖОДНОГО запасного `document.body`.
+
+       Було з body -- і на телефоні позначка опинилась унизу сторінки злитим
+       рядком «гістьбез запису в базуувійти як оператор»: вона потрапила в
+       body, бо на той момент ні смуги, ні панелі ще не існувало (Gradio
+       будує їх пізніше), а в body для неї немає ні розкладки, ні проміжків.
+
+       Тепер, якщо місця ще немає, ми просто не вставляємо -- спостерігач за
+       деревом покличе ще раз, коли панель з'явиться. Не показати позначку
+       на секунду довше краще, ніж показати її в чужому місці зіпсованою. */
     var host = document.querySelector(".appbar")
-      || document.getElementById("page-links")
-      || document.body;
+      || document.getElementById("page-links");
+    if (!host) { return false; }
     if (host.classList && host.classList.contains("appbar")) {
       badge.classList.add("access-badge--bar");
     }
     host.appendChild(badge);
+    return true;
   }
 
   function build(info) {
@@ -100,8 +110,12 @@
         return;
       }
       if (!info || !info.level) { state = "idle"; return; }
+      if (!place(build(info))) {
+        /* Місця ще немає -- вертаємо стан, спостерігач покличе ще раз. */
+        state = "idle";
+        return;
+      }
       state = "done";
-      place(build(info));
       markCommit(info);
     };
     req.onerror = function () { state = "idle"; };

@@ -155,5 +155,36 @@ def test_pages_only_reference_scripts_that_exist(page):
             f"{page} посилається на /static/{src}, якого немає"
 
 
+# ── Метатег viewport ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("page", PAGES)
+def test_page_has_viewport_meta(page):
+    """Без `width=device-width` мобільний браузер вважає сторінку шириною
+    980px, і КОЖЕН медіа-запит із `max-width` не спрацьовує. Телефон показує
+    зменшений комп'ютерний макет, а телефонна розкладка мовчки не
+    застосовується -- саме це й сталося з чатом 27.08.
+    """
+    html = _read(page)
+    metas = re.findall(r'<meta name="viewport"[^>]*>', html)
+    assert metas, f"{page}: немає метатегу viewport"
+    assert "width=device-width" in metas[0], metas[0]
+    # Сучасний механізм для клавіатури: браузер зменшує сам вьюпорт, тому
+    # притиснуте до низу поле не ховається під нею.
+    assert "interactive-widget=resizes-content" in metas[0], metas[0]
+
+
+def test_chat_head_carries_viewport_meta():
+    """Сторінку чата малює Gradio, і вона метатега НЕ додає -- ми кладемо його
+    у `head` самі. Тест на код, бо готової сторінки тут немає: вона
+    складається при запуску сервісу.
+    """
+    src = io.open(os.path.join(os.path.dirname(STATIC), "chat_gradio",
+                               "app.py"), encoding="utf-8").read()
+    assert 'name="viewport"' in src,         "у head чата немає метатегу viewport -- телефонна розкладка не діє"
+    assert "width=device-width" in src
+    assert "interactive-widget=resizes-content" in src
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
