@@ -337,6 +337,55 @@ def exp_doc_by_number(records, ctx):
     return len(keys)
 
 
+#: Скільком завдань черги закрила ЛЮДИНА, у розрізі типу.
+#:
+#: Нащо це приладу. Очікуване по .md -- це «скільком завдань пайплайн
+#: СТВОРИВ». З бази шаблон бере «скільком зараз ВІДКРИТО». Поки ніхто нічого не
+#: закривав, ці два числа збігались, і різниця понять була не видна. 27.08
+#: Андрій закрив 130 завдань «нове прізвище» -- рівно те, що ми в нього й
+#: просили, -- і прилад назвав це розбіжністю: очікував 134, побачив 4.
+#:
+#: Порівнювати треба однорідне. Очікуване лишається «створено», а закрите
+#: людиною віднімається ОКРЕМИМ, друкованим рядком: тоді робота людини видна
+#: в приладі, а не схована в розбіжності.
+RESOLVED_QUEUE_SQL = """
+SELECT queue_type, count(*) AS n, min(resolution) AS resolution
+  FROM review_queue
+ WHERE resolved_at IS NOT NULL
+ GROUP BY queue_type
+"""
+
+
+def resolved_queue():
+    """{queue_type: (скільком закрито, з якою резолюцією)}; {} якщо не
+    прочиталось -- тоді корекції просто не буде, і це видно в розбіжності."""
+    try:
+        return {r["queue_type"]: (int(r["n"]), r["resolution"] or "")
+                for r in run_sql(RESOLVED_QUEUE_SQL, {})}
+    except Exception:
+        return {}
+
+
+def correct_review_queue(expected, ctx):
+    """Зняти з очікуваного те, що людина вже закрила. -> (нове, рядки)."""
+    resolved = ctx.get("resolved_queue") or {}
+    if not resolved:
+        return expected, []
+    out = dict(expected)
+    lines = []
+    for qt, (n, resolution) in sorted(resolved.items()):
+        if qt not in out:
+            continue
+        was = out[qt]
+        out[qt] = max(0, was - n)
+        lines.append(f"{qt}: людина закрила {n} "
+                     f"({resolution or 'без резолюції'}) — очікуване "
+                     f"{was} → {out[qt]}")
+        if out[qt] == 0:
+            del out[qt]
+    return out, lines
+
+
 def exp_review_queue(records, ctx):
     counts = {}
     for r in records:
@@ -384,15 +433,29 @@ def diag_unconfirmed(records, ctx):
 # Тому очікуване коригується ЯВНО і з бази, а не константою в коді: скільком
 # документів/осіб/фактів прийшло не від нас. Якщо штатку переллють іншою --
 # корекція поїде за нею.
+#: Документи в базі, яких НЕМА в нашому виході -- за контрольною сумою.
+#:
+#: Було `domain = 'staffing'`, тобто прилад знав рівно про одне чуже джерело.
+#: Насправді їх кілька: штатка, нормативний корпус (його вантажить Андрій
+#: своїм скриптом) і те, що завантажили через апку руками. Кожен такий
+#: документ давав розбіжність одразу в чотирьох перевірках.
+#:
+#: Ознака не домен, а ПОХОДЖЕННЯ: домен вигадали ми, а контрольна сума -- це
+#: факт. Перевірено на живій базі 27.08: 204 документи, 200 зійшлися за
+#: сумою, 4 -- ні, і це рівно штатка й три нормативні.
 OUTSIDE_SQL = """
+WITH outside AS (
+  SELECT id, domain FROM documents
+   WHERE checksum IS NULL OR NOT (checksum = ANY(%(ours)s))
+)
 SELECT
-  (SELECT count(*) FROM documents WHERE domain = 'staffing')      AS docs,
+  (SELECT count(*) FROM outside)                                  AS docs,
   (SELECT count(DISTINCT f.object_id) FROM facts f
-     JOIN documents d ON d.id = f.source_doc_id
-    WHERE d.domain = 'staffing')                                  AS people,
+     JOIN outside o ON o.id = f.source_doc_id)                    AS people,
   (SELECT count(*) FROM facts f
-     JOIN documents d ON d.id = f.source_doc_id
-    WHERE d.domain = 'staffing')                                  AS facts
+     JOIN outside o ON o.id = f.source_doc_id)                    AS facts,
+  (SELECT count(*) FROM outside WHERE domain = 'staffing')        AS staffing_docs,
+  (SELECT count(*) FROM outside WHERE domain = 'normative')       AS normative_docs
 """
 
 
@@ -423,13 +486,26 @@ def outside_person_facts(surname):
         return 0
 
 
-def outside_pipeline():
-    """-> {'docs': n, 'people': n, 'facts': n} або нулі, якщо не прочиталось."""
+#: Ключі, які віддає outside_pipeline(). Окремо штатка й нормативка, бо в
+#: перевірках «за доменом» і «за типом» вони йдуть у РІЗНІ рядки.
+OUTSIDE_KEYS = ("docs", "people", "facts", "staffing_docs", "normative_docs")
+
+
+def outside_pipeline(records=None):
+    """Що в базі є ПОЗА нашим виходом. -> словник із OUTSIDE_KEYS, або нулі.
+
+    `records` -- наші .md-записи: з них беруться контрольні суми. Без них
+    (старий виклик) чесніше віддати нулі, ніж вгадувати домен: нуль видно в
+    розбіжностях, а вгадування -- ні.
+    """
+    ours = sorted({r.file_hash for r in (records or []) if r.file_hash})
+    if not ours:
+        return {k: 0 for k in OUTSIDE_KEYS}
     try:
-        row = run_sql(OUTSIDE_SQL, {})[0]
-        return {k: int(row[k] or 0) for k in ("docs", "people", "facts")}
+        row = run_sql(OUTSIDE_SQL, {"ours": ours})[0]
+        return {k: int(row[k] or 0) for k in OUTSIDE_KEYS}
     except Exception:
-        return {"docs": 0, "people": 0, "facts": 0}
+        return {k: 0 for k in OUTSIDE_KEYS}
 
 
 def exp_documents_count(records, ctx):
@@ -437,9 +513,14 @@ def exp_documents_count(records, ctx):
     for r in records:
         key = r.domain or "(без домену)"
         counts[key] = counts.get(key, 0) + 1
-    # штатка -- не наш вихід, але вона в базі є (див. OUTSIDE_SQL)
-    if ctx.get("outside", {}).get("docs"):
-        counts["staffing"] = ctx["outside"]["docs"]
+    # Не наш вихід, але в базі є (див. OUTSIDE_SQL): штатка й нормативний
+    # корпус. Раніше все чуже зараховувалось у «staffing» -- через це
+    # нормативка давала розбіжність, а штатка вигадане число.
+    out = ctx.get("outside", {})
+    if out.get("staffing_docs"):
+        counts["staffing"] = counts.get("staffing", 0) + out["staffing_docs"]
+    if out.get("normative_docs"):
+        counts["normative"] = counts.get("normative", 0) + out["normative_docs"]
     return counts
 
 
@@ -448,8 +529,9 @@ def exp_count_by_doc_type(records, ctx):
     for r in records:
         key = TEMPLATE_TO_DOC_TYPE_NAME.get(r.template, NO_TYPE)
         counts[key] = counts.get(key, 0) + 1
-    if ctx.get("outside", {}).get("docs"):
-        counts["Штатна книжка"] = ctx["outside"]["docs"]
+    out = ctx.get("outside", {})
+    if out.get("staffing_docs"):
+        counts["Штатна книжка"] = out["staffing_docs"]
     return counts
 
 
@@ -725,7 +807,8 @@ def build_checks(ctx):
         "review_queue_count": dict(
             kind="compare", params={},
             expected=lambda rs: exp_review_queue(rs, ctx),
-            got=got_dict("queue_type", "n")),
+            got=got_dict("queue_type", "n"),
+            correct=lambda e, _dd, _rs: correct_review_queue(e, ctx)),
         "unconfirmed_count": dict(
             kind="compare", params={},
             expected=lambda rs: exp_unconfirmed_count(rs, ctx),
@@ -886,12 +969,24 @@ def main():
     # Дані поза пайплайном (штатка Андрія) -- читаємо з бази ДО побудови
     # перевірок: без цієї корекції прилад показував 5 «розбіжностей», яких
     # немає, бо порівнював базу з нашим виходом як із тим самим джерелом.
-    ctx["outside"] = ({"docs": 0, "people": 0, "facts": 0}
-                      if args.expected_only else outside_pipeline())
+    ctx["outside"] = ({k: 0 for k in OUTSIDE_KEYS}
+                      if args.expected_only else outside_pipeline(records))
     ctx["outside_person"] = (0 if args.expected_only
                              else outside_person_facts(ctx["surname"]))
+    # Завдання, закриті людиною: очікуване по .md знає лише про створені.
+    ctx["resolved_queue"] = ({} if args.expected_only else resolved_queue())
+    if ctx["resolved_queue"]:
+        total = sum(n for n, _r in ctx["resolved_queue"].values())
+        print(f"завдань черги закрито людиною: {total} "
+              + ", ".join(f"{qt} {n}"
+                          for qt, (n, _r) in sorted(
+                              ctx["resolved_queue"].items()))
+              + " -- очікуване по цих типах коригується")
     if ctx["outside"]["docs"]:
-        print(f"поза пайплайном (штатка): документів {ctx['outside']['docs']}, "
+        print(f"поза виходом пайплайна (за контрольною сумою): "
+              f"документів {ctx['outside']['docs']} "
+              f"(штатка {ctx['outside']['staffing_docs']}, "
+              f"нормативка {ctx['outside']['normative_docs']}), "
               f"осіб {ctx['outside']['people']}, фактів "
               f"{ctx['outside']['facts']}; у обраної особи «{ctx['surname']}» "
               f"зі штатки {ctx['outside_person']} факт(ів) -- очікувані числа "
@@ -962,7 +1057,7 @@ def main():
                 expected = "(виконання)"
             else:
                 expected = exp_fn(records)
-                if dedupe_rows and correct_fn:
+                if correct_fn:
                     expected, corr_lines = correct_fn(expected, dedupe_rows,
                                                       records)
             if args.expected_only:
