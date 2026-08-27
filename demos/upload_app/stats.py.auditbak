@@ -461,7 +461,7 @@ def quality_metrics(path=None):
                        if fields_total else None),
         "documents": docs,
         "per_corpus": per_corpus,
-        "normative_ok": None,
+        "normative_ok": normative.get("confirmed_normative"),
         "normative_total": normative.get("documents"),
         # Тести пайплайна й приладу: з БАЗОВОЇ ЛІНІЇ, тобто рівно ті
         # цифри, проти яких щодня йде перевірка «не ламає». Знаменник

@@ -1326,3 +1326,29 @@ details.src > *:not(summary) {
 :root[data-theme="dark"] #sidebar {
     box-shadow: 6px 0 14px -12px rgba(0, 0, 0, .6) !important;
 }
+
+/* 17. Під QR було ДВІ тонкі лінії замість однієї.
+ *
+ *     Наш розділювач у панелі один -- `border-top` у #side-status. Другу
+ *     лінію малює сам Gradio: він дає кожному своєму блоку власну рамку, і
+ *     рамка блоку, що стоїть вище, впирається в наш розділювач. Дві лінії в
+ *     упор читаються як подвійна межа й виглядають як недогляд.
+ *
+ *     Тому: блокам Gradio у панелі рамку й фон знімаємо (вони там не потрібні
+ *     -- панель сама поверхня), а наш єдиний розділювач лишаємо явно.
+ */
+#sidebar .block,
+#sidebar .form,
+#sidebar > div,
+#sidebar .gap {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+/* Єдиний розділювач у панелі -- перед підписом стану. Ставимо після
+   знеміження вище, інакше воно зняло б і його. */
+#side-status {
+    border-top: 1px solid var(--c-border) !important;
+    margin-top: auto !important;
+    padding: var(--s-3) var(--s-2) var(--s-1) !important;
+}
