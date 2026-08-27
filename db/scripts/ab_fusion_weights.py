@@ -47,6 +47,55 @@ WEIGHTS = [(1, 0), (1, 1), (1, 2), (1, 3), (1, 5), (0, 1)]
 KS = [10, 60]
 
 
+def dedupe_and_rank(cur, merged, canon, want, body_cache, prefix=80):
+    """Зводить дублікати і повертає позицію правильного УРИВКА.
+
+    Чому не позицію рядка: у корпусі є пари копій того самого закону, і
+    зведення дублікатів лишає у видачі ту копію, що трапилась вище. Якщо
+    істина прив'язана до одиниці з ІНШОЇ копії, вона читається як «не
+    знайдено» -- хоч користувач цей самий текст отримує.
+
+    Я на цьому попався тричі за одну роботу; найяскравіший випадок: правильна
+    одиниця була ПЕРША в лексичній гілці й ДРУГА у векторній, а прилад
+    показував «немає у видачі». Тому порівнюємо не id, а той самий ключ, яким
+    зводяться дублікати: (канонічний документ, початок тексту).
+
+    `want` -- множина таких ключів для правильних одиниць. `body_cache`
+    переживає всі конфігурації одного питання, інакше quote_of викликався б
+    десятки тисяч разів.
+    """
+    def body_of(doc_id, base):
+        if (doc_id, base) not in body_cache:
+            body_cache[(doc_id, base)] = SU.quote_of(cur, doc_id, base)[0]
+        return body_cache[(doc_id, base)]
+
+    seen, pos = set(), 0
+    for (doc_id, base), _meta in merged:
+        key = (canon.get(doc_id, doc_id),
+               " ".join(body_of(doc_id, base).split())[:prefix].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        pos += 1
+        if key in want:
+            return pos
+    return None
+
+
+def signatures(cur, ids, canon, body_cache, prefix=80):
+    """Ключі-відпечатки правильних одиниць -- у тому самому вигляді, у якому
+    їх бачить зведення дублікатів."""
+    out = set()
+    cur.execute("SELECT document_id, base_label FROM document_units WHERE id = ANY(%s)",
+                (sorted(ids),))
+    for doc_id, base in cur.fetchall():
+        if (doc_id, base) not in body_cache:
+            body_cache[(doc_id, base)] = SU.quote_of(cur, doc_id, base)[0]
+        out.add((canon.get(doc_id, doc_id),
+                 " ".join(body_cache[(doc_id, base)].split())[:prefix].lower()))
+    return out
+
+
 def weighted_merge(branches, k):
     """RRF із вагами. Склейка частин однієї логічної одиниці -- як у пошуку:
     ключ (документ, мітка), інакше частини конкурували б між собою."""
@@ -96,18 +145,22 @@ def main(argv=None):
             sem = (SU.semantic(cur, vec) if AB.MODELS[args.model]["table"] is None
                    else AB.semantic_side(cur, AB.MODELS[args.model]["table"], vec))
             canon = SU.canon_map(cur)
+            bodies = {}
+            want = signatures(cur, ids, canon, bodies)
             for c in cfgs:
                 wl, wv, k = c
-                fused = SU.dedupe_by_text(cur, weighted_merge([(lex, wl), (sem, wv)], k), canon)
-                ranks[c].append(AB.rank_fused(fused, ids))
-                if rescore and fused:
+                merged = weighted_merge([(lex, wl), (sem, wv)], k)
+                ranks[c].append(dedupe_and_rank(cur, merged, canon, want, bodies))
+                if rescore:
+                    fused = SU.dedupe_by_text(cur, merged, canon)
                     pool = fused[:args.rerank]
                     from measure_rerank_lift import RERANK_CHARS
-                    texts = [SU.quote_of(cur, d, b)[0][:RERANK_CHARS] for (d, b), _m in pool]
-                    sc = rescore(q, texts)
+                    texts = [bodies.setdefault((d, b), SU.quote_of(cur, d, b)[0])[:RERANK_CHARS]
+                             for (d, b), _m in pool]
+                    sc = rescore(q, texts) if texts else []
                     order = sorted(range(len(sc)), key=lambda j: -sc[j])
-                    rr_ranks[c].append(
-                        AB.rank_fused([pool[j] for j in order] + fused[args.rerank:], ids))
+                    reordered = [pool[j] for j in order] + fused[args.rerank:]
+                    rr_ranks[c].append(dedupe_and_rank(cur, reordered, canon, want, bodies))
                 else:
                     rr_ranks[c].append(None)
 
