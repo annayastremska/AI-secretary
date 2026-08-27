@@ -86,6 +86,9 @@ import vector_route as tier_vector  # noqa: E402
 # залежить, тести й CLI працюють як раніше.
 import progress  # noqa: E402
 
+# Машинний слід ходу -- по номеру звернення видно, як склалась відповідь.
+import trace  # noqa: E402
+
 # Живий лічильник часу відповіді. Лежить на рівень вище (demos/upload_app),
 # бо його ЧИТАЄ сторінка статистики, а не лише чат. Імпорт мусить бути
 # однаковий в обох місцях: `import livemetrics` тут і
@@ -1736,6 +1739,7 @@ def answer(question, history=None):
     означає ховати їх від себе."""
     cid = _request_id()
     token = _CURRENT_ID.set(cid)
+    trace_token = trace.begin(cid, question)
     started = time.monotonic()
     try:
         out = _answer_inner(question, history)
@@ -1746,6 +1750,8 @@ def answer(question, history=None):
         # Падіння бази теж іде в лічильник часу: людина чекала стільки ж, і
         # ховати цей хід означало б показувати кращу цифру, ніж є.
         livemetrics.record(spent, "збій доступу до бази")
+        trace.finish(road="збій доступу до бази", seconds=spent,
+                     error=type(exc).__name__)
         return _with_request_id(ANSWER_DB_DOWN, cid)
     finally:
         _CURRENT_ID.reset(token)
@@ -1760,6 +1766,14 @@ def answer(question, history=None):
                   cid, spent, road or "дорога не визначена",
                   len(out or ""), question or "")
     livemetrics.record(spent, road)
+    # Підсумок сліду. `has_source` -- окремо, бо відповідь без джерела це
+    # зламане правило продукту, і саме його треба вміти порахувати скриптом.
+    trace.finish(road=road, seconds=spent, answer_chars=len(out or ""),
+                 refusal=bool(out and ("не знайшла" in out
+                                       or "Відхилено" in out
+                                       or "не можу" in out)),
+                 has_source="<details" in (out or ""))
+    trace.reset(trace_token)
     return out
 
 

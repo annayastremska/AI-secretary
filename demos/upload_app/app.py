@@ -543,6 +543,45 @@ def skin_css():
 QR_PATH = os.path.join(PROJECT_ROOT, "data", "qr-guest.png")
 
 
+@app.get("/api/trace/{request_id}")
+def trace_one(request_id: str, request: Request):
+    """Слід одного ходу чата за номером звернення -- ТІЛЬКИ ОПЕРАТОРУ.
+
+    Запит Дениса 27.08: номер на скріншоті мусить дозволяти «автоматично
+    прогнати аналіз, як система там давала інфо». Це і є той маршрут.
+
+    Чому лише оператору. У сліді немає ні тексту відповіді, ні значень із
+    бази (за побудовою -- див. chat_gradio/trace.py), але є ПИТАННЯ людини й
+    параметри запиту. Питання -- це те, що людина шукала; віддавати його
+    будь-кому з посиланням не треба.
+    """
+    from demos.upload_app.chat_gradio import trace as chat_trace
+    if getattr(request.state, "access_level", LEVEL_OPERATOR) != LEVEL_OPERATOR:
+        return JSONResponse(status_code=403, content={
+            "error": "слід ходу доступний оператору: у ньому питання "
+                     "користувачів"})
+    row = chat_trace.find(request_id)
+    if row is None:
+        return JSONResponse(status_code=404, content={
+            "error": f"ходу з номером {request_id} у сліді немає"})
+    return row
+
+
+@app.get("/api/trace")
+def trace_summary(request: Request):
+    """Зведення по всіх ходах: дороги, шаблони, відмови, збої, час.
+
+    Те, для чого машинний слід і потрібен: одним запитом видно, як система
+    відповідала за весь показ -- скільком ходів пішло правилами, скільком
+    моделью, чи були відповіді без джерела.
+    """
+    from demos.upload_app.chat_gradio import trace as chat_trace
+    if getattr(request.state, "access_level", LEVEL_OPERATOR) != LEVEL_OPERATOR:
+        return JSONResponse(status_code=403, content={
+            "error": "зведення сліду доступне оператору"})
+    return chat_trace.summary()
+
+
 @app.get("/api/whoami")
 def whoami(request: Request):
     """Яким рівнем зайшла ця людина. Потрібно СТОРІНКАМ: вони статичні й самі

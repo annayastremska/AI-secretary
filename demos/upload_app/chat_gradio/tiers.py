@@ -38,6 +38,14 @@ import psycopg
 import yaml
 from psycopg.rows import dict_row
 
+# Машинний слід ходу (запит Дениса 27.08): по номеру звернення мусить
+# діставатись не рядок тексту, а СТРУКТУРА -- який шаблон, який SQL, скільком
+# рядків. Яруси лише КАЖУТЬ, що зробили; чи ведеться слід, вони не знають.
+try:
+    from . import trace
+except ImportError:  # запуск із chat_gradio/ у sys.path
+    import trace
+
 try:
     # Модулі чата в цьому пакеті імпортують один одного ПЛОСКО
     # (`import db`, `import tiers as tier_chat` в app.py: тека додана в
@@ -902,6 +910,7 @@ def params_for_template(template_id, question):
     далі (модель -> фолбек), а не виконується з вигаданим параметром."""
     t = _CATALOG[template_id]
     if t.get("blocked"):
+        trace.step("blocked", template=template_id, title=t.get("title"))
         return {}
     need = t.get("params") or []
     on_date, date_from, date_to = extract_dates(question)
@@ -1349,6 +1358,10 @@ def run_template(template_id, params):
             f"шаблон каталогу: {template_id} ({t['title']})",
             "заблоковано: SQL немає, відповідь — дослівний refusal шаблону"]
     rows = _run_template_sql(t["sql"], sql_params)
+    # Слід: що саме виконали. SQL -- ШАБЛОНУ, не зі значеннями; від рядків --
+    # лише кількість. Персональних даних тут немає за побудовою.
+    trace.step("template", template=template_id, title=t.get("title"),
+               sql=t["sql"].strip(), params=sql_params, rows=len(rows))
     unconfirmed = None
     if t.get("sql_unconfirmed"):
         unconfirmed = _run_template_sql(t["sql_unconfirmed"], sql_params)
