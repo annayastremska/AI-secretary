@@ -391,6 +391,11 @@ def chat_quality():
             "pct": (round(100.0 * router["routed_ok"] / routed, 1)
                     if routed and router.get("routed_ok") is not None
                     else None),
+            # Чесний замір ЦЬОГО ярусу -- «продовий вид»: лише питання, які
+            # НЕ ловлять правила, бо вектори стоять після правил і решти
+            # питань просто не бачать. Прапорець їде на сторінку, щоб підпис
+            # називав правильний знаменник.
+            "production_view": bool(router.get("production_view")),
             "encoder": router.get("encoder"),
             "threshold": router.get("threshold"),
             "measured_at": router.get("measured_at"),

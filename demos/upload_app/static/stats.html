@@ -187,8 +187,11 @@ function renderChatQuality(cq) {
        помилку маршрутизатора було б нечесно. */
     host.appendChild(tile(
       (r.pct !== null ? r.pct + "%" : "—"), "питань розпізнано правильно",
-      r.routed_ok + " з " + r.routed + " (решта " +
-      (r.questions - r.routed) + " свідомо йде в модель)",
+      r.routed_ok + " з " + r.routed +
+      (r.production_view
+        ? " питань, які векторний ярус узяв на себе; решта " +
+          (r.questions - r.routed) + " свідомо йде в модель"
+        : " з " + r.questions + " питань тест-сету"),
       r.confidently_wrong ? "tile--pending" : "tile--ok"));
   }
   /* Цитати з нормативки: мірка є в ланцюгу Андрія, але поки не рахується.
