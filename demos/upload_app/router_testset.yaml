@@ -275,16 +275,16 @@ questions:
     group: example
 
   - q: "Скільки людей у 2 роті зараз у відпустці?"
-    expected: subdivision_blocked
+    expected: count_by_state_in_subdivision
     group: example
 
   - q: "Хто відсутній у першому взводі?"
-    expected: subdivision_blocked
-    group: example
+    expected: list_by_state_in_subdivision
+    group: paraphrase
 
   - q: "Покажи відсутніх по підрозділах"
-    expected: subdivision_blocked
-    group: example
+    expected: subdivision_breakdown
+    group: paraphrase
 
   - q: "Привіт!"
     expected: smalltalk
@@ -457,11 +457,11 @@ questions:
 
   # підрозділи проти звичайного підрахунку/списку
   - q: "Скільки людей із 3 взводу зараз у відпустці?"
-    expected: subdivision_blocked
+    expected: count_by_state_in_subdivision
     group: trap
 
   - q: "Хто відсутній у нашій роті?"
-    expected: subdivision_blocked
+    expected: list_by_state_in_subdivision
     group: trap
 
   # чернетки-перелік проти чернеток-числа

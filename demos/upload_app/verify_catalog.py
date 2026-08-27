@@ -857,6 +857,12 @@ def main():
                     help="дата зрізу YYYY-MM-DD (дефолт: сьогодні)")
     ap.add_argument("--query", default="відпустка",
                     help="тема для normative_search")
+    ap.add_argument("--note", metavar="ТЕКСТ", default="",
+                    help="причина відомих розбіжностей -- їде у --json і "
+                         "показується під плиткою на сторінці. Число без "
+                         "причини читається як якість продукту, тому якщо "
+                         "розбіжність відома й не в продукті, її пояснення "
+                         "мусить подорожувати разом із числом")
     ap.add_argument("--json", metavar="ФАЙЛ",
                     help="записати підсумок (перевірок / розбіжностей) у "
                          "json, який читає сторінка «Статистика»")
@@ -1000,6 +1006,7 @@ def main():
             "as_of": ctx["as_of"],
             "measured_at": datetime.datetime.now().replace(
                 microsecond=0).isoformat(),
+            "note": args.note or None,
         }
         out_dir = os.path.dirname(os.path.abspath(args.json))
         if out_dir:

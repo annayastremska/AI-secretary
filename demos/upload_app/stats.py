@@ -406,6 +406,9 @@ def chat_quality():
                     else None),
             "as_of": catalog.get("as_of"),
             "measured_at": catalog.get("measured_at"),
+            # Причина відомих розбіжностей, якщо вона відома. Їде разом із
+            # числом: 85% без причини читаються як якість продукту.
+            "note": catalog.get("note"),
         }
     return out
 

@@ -200,6 +200,9 @@ function renderChatQuality(cq) {
   if (c && c.measured_at) {
     bits.push("звірка каталогу " + c.measured_at.replace("T", " "));
   }
+  /* Причина відомих розбіжностей іде ПЕРШОЮ, поперед дат заміру: це єдине
+     в цьому підписі, що людина мусить прочитати, а не проглянути. */
+  if (c && c.note) { bits.unshift(c.note); }
   if (r && r.measured_at) {
     bits.push("маршрутизація " + r.measured_at.replace("T", " ") +
               " (" + r.encoder + ", поріг " + r.threshold + ")");
