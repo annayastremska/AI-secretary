@@ -136,3 +136,4 @@ data/eval/reports/
 airflow/logs/
 data/postgres/
 data/originals/
+data/.gradio-cache/

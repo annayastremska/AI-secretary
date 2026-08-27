@@ -29,6 +29,22 @@ from fastapi import FastAPI, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# Кеш Gradio -- у НАШУ теку, а не в /tmp.
+#
+# Знайдено 27.08 живим падінням: `/tmp/gradio` належить root (створений, коли
+# апка ще запускалась від root), а служба тепер працює від ubuntu. Через це
+# Gradio міг лише ПЕРЕВИКОРИСТОВУВАТИ вже наявний кеш іконки -- і в ту мить,
+# коли я змінила mark.svg, хеш файла став іншим, mkdir у чужій теці впав із
+# PermissionError, і апка не піднялась узагалі. Тобто зміна картинки валила
+# сервіс, і залежало це від сміття в /tmp.
+#
+# Чужу теку не чіпаємо (вона root-ова й не наша) -- ставимо свій шлях.
+os.environ.setdefault(
+    "GRADIO_TEMP_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), "data", ".gradio-cache"))
+os.makedirs(os.environ["GRADIO_TEMP_DIR"], exist_ok=True)
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(APP_DIR))
 # Профіль пайплайна: локальний CPU-дефолт, на GPU-сервері перевизначається
 # змінною оточення (docs/deploy-gpu-server.md). Env, а не прапорець CLI:

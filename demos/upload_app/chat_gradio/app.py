@@ -49,6 +49,22 @@ import psycopg
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Кеш Gradio -- у НАШУ теку, а не в /tmp.
+#
+# Знайдено 27.08 живим падінням: `/tmp/gradio` належить root (створений, коли
+# апка ще запускалась від root), а служба тепер працює від ubuntu. Через це
+# Gradio міг лише ПЕРЕВИКОРИСТОВУВАТИ вже наявний кеш іконки -- і в ту мить,
+# коли я змінила mark.svg, хеш файла став іншим, mkdir у чужій теці впав із
+# PermissionError, і апка не піднялась узагалі. Тобто зміна картинки валила
+# сервіс, і залежало це від сміття в /tmp.
+#
+# Чужу теку не чіпаємо (вона root-ова й не наша) -- ставимо свій шлях.
+os.environ.setdefault(
+    "GRADIO_TEMP_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))))), "data", ".gradio-cache"))
+os.makedirs(os.environ["GRADIO_TEMP_DIR"], exist_ok=True)
+
 sys.path.insert(0, HERE)
 
 import db  # noqa: E402  (сім функцій стику, docs/contracts/2026-08-14_chat-db-interface.md)
