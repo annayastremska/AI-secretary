@@ -71,11 +71,23 @@ def build():
     files = []
 
     # ── theme.json: те саме, що в токенах ────────────────────────────────────
+    #
+    # Палітра ЧИТАЄТЬСЯ з токенів, а не стоїть тут літералами. Було
+    # літералами -- і 27.08 це вилізло: зелений у токенах зсунули, styles.css
+    # перезібрався, а theme.json лишився зі старим кольором. Тобто файл, який
+    # називається «тема», описував тему, якої вже немає.
+    def tok(name, fallback):
+        m = re.search(r"--" + name + r":\s*([^;]+);", roots)
+        return m.group(1).strip() if m else fallback
+
     files.append(w("theme.json", json.dumps({
         "name": "AI-секретар",
         "palette": {"band": "light", "scheme": "mono",
-                    "bg": "#f7f6f4", "surface": "#efedea", "text": "#1c1b19",
-                    "accent": "#4a5d3a", "accent2": "#2f3a26"},
+                    "bg": tok("c-bg", "#f7f6f4"),
+                    "surface": tok("c-surface", "#efedea"),
+                    "text": tok("c-text", "#1c1b19"),
+                    "accent": tok("c-accent", "#46682f"),
+                    "accent2": tok("c-brand", "#35472c")},
         "fonts": {"heading": {"family": "IBM Plex Sans", "class": "grotesque",
                               "weights": [400, 600, 700]},
                   "body": {"family": "IBM Plex Sans", "class": "grotesque",

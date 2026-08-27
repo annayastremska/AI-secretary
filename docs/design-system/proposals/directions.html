@@ -1,0 +1,178 @@
+<!-- @dsCard group="Пропозиції" name="Чотири напрями" subtitle="той самий блок у чотирьох мовах" viewport="900x1500" -->
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-секретар — чотири напрями</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+/* Один і той самий фрагмент -- смуга чисел і одна відповідь чата -- у
+   чотирьох мовах. Порівнювати напрями можна лише на ОДНАКОВОМУ вмісті:
+   інакше вибір робиться за текстом, а не за оформленням.
+   Кожен напрям тримається на власному наборі токенів у своєму .lane, тому
+   жоден не «підглядає» в чужі кольори. */
+.sheet { max-width: 860px; margin: 0 auto; padding: 28px 20px 56px }
+.lane { margin: 0 0 34px; border-radius: 10px; overflow: hidden;
+        border: 1px solid #ddd9d4 }
+.lane > .head { padding: 12px 16px; background: #efedea; border-bottom: 1px solid #ddd9d4 }
+.lane > .head b { font-size: 14px; letter-spacing: -.01em }
+.lane > .head span { display: block; color: #6a6560; font-size: 12.5px; margin-top: 2px }
+.pane { padding: 20px 18px 24px; background: var(--bg); color: var(--fg);
+        font-family: var(--ff) }
+.kpi { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: var(--gap) }
+.cell { padding: var(--pad); background: var(--card); border: var(--brd);
+        border-radius: var(--rad) }
+.cell .n { font-size: 30px; font-weight: var(--nw); line-height: 1.05;
+           font-variant-numeric: tabular-nums; font-family: var(--ffn);
+           letter-spacing: var(--nls) }
+.cell.big .n { font-size: 46px }
+.cell .l { font-size: 12.5px; color: var(--mut); margin-top: 6px }
+.reply { margin-top: var(--gap); padding: var(--pad); background: var(--card);
+         border: var(--brd); border-left: var(--bar); border-radius: var(--rad);
+         font-size: 14.5px; line-height: 1.55 }
+.reply b { font-weight: var(--nw) }
+.reply .src { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--hair);
+              font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+              color: var(--mut); font-family: var(--ffn) }
+.pill { display: inline-block; margin-top: 8px; padding: 1px 9px; border-radius: 999px;
+        border: 1px solid currentColor; font-size: 11px; font-weight: 600 }
+
+/* A. Приладова панель. Реєстр 2026 у Linear/Stripe/Vercel: волосяні
+      розділювачі замість рамок на кожній картці, табличні цифри, одне
+      головне число. Ощадно й professionally-нудно -- і саме тому не старіє. */
+.a { --bg:#ffffff; --fg:#16181a; --mut:#6b7280; --card:transparent;
+     --brd:0; --rad:0; --pad:14px 0; --gap:0; --hair:#e5e7eb;
+     --bar:3px solid #46682f; --nw:600; --nls:-.02em;
+     --ff:"Plex",system-ui,sans-serif; --ffn:"PlexMono",ui-monospace,monospace }
+.a .kpi { border-top: 1px solid var(--hair) }
+.a .cell { border-bottom: 1px solid var(--hair); border-right: 1px solid var(--hair);
+           padding: 16px 18px }
+.a .cell:last-child { border-right: 0 }
+.a .reply { border: 0; border-left: var(--bar); padding: 14px 0 14px 16px }
+
+/* B. Технічний сан. Те, що на refero зветься «clinical blueprint»: усе
+      службове моноширинним, капітельні рубрики з розрідженням, нульовий
+      радіус, майже біле креслярське тло. Найточніше описує наш продукт --
+      це прилад обліку, а не застосунок для настрою. */
+.b { --bg:#fbfbfa; --fg:#111312; --mut:#61645f; --card:#ffffff;
+     --brd:1px solid #dcdedb; --rad:0; --pad:14px 16px; --gap:10px;
+     --hair:#e6e8e4; --bar:2px solid #46682f; --nw:700; --nls:-.03em;
+     --ff:"Plex",system-ui,sans-serif; --ffn:"PlexMono",ui-monospace,monospace }
+.b .cell .n { font-family: var(--ffn) }
+.b .cell .l { text-transform: uppercase; letter-spacing: .09em; font-size: 10.5px }
+
+/* C. Теплий аналітик. «Quiet analyst's desk on warm paper»: тепле тло,
+      більший кегль, багато повітря, один акцент. Найм'якше для очей, але
+      найменш щільне -- на проєкторі влазить менше. */
+.c { --bg:#f7f5f0; --fg:#22201c; --mut:#6f6a61; --card:#fffefb;
+     --brd:1px solid #e4dfd5; --rad:8px; --pad:18px 20px; --gap:14px;
+     --hair:#ece7dd; --bar:4px solid #46682f; --nw:600; --nls:-.015em;
+     --ff:"Plex",system-ui,sans-serif; --ffn:"Plex",system-ui,sans-serif }
+.c .cell .l { font-size: 13.5px }
+
+/* D. Темний інструмент. «Midnight precision instrument»: темне первинне,
+      наш зелений -- єдиний колір на екрані. Найкраще виглядає на проєкторі
+      в темній залі, гірше -- на друку й на світлому телефоні надворі. */
+.d { --bg:#131614; --fg:#e8ebe4; --mut:#9aa094; --card:#1b1f1c;
+     --brd:1px solid #2b302b; --rad:4px; --pad:15px 17px; --gap:10px;
+     --hair:#2b302b; --bar:2px solid #9fc47a; --nw:600; --nls:-.02em;
+     --ff:"Plex",system-ui,sans-serif; --ffn:"PlexMono",ui-monospace,monospace }
+.d .reply { border-left-color:#9fc47a }
+.d .pill { color:#9fc47a }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <p class="kicker">Пропозиція 27.08 · що змінити далі</p>
+  <h1 style="font-size:26px;margin:6px 0 4px">Чотири напрями</h1>
+  <p class="lede" style="margin-bottom:26px">Один і той самий фрагмент —
+    смуга чисел зі «Статистики» і одна відповідь чата — у чотирьох мовах
+    оформлення. Вміст однаковий навмисно: інакше вибір робиться за текстом,
+    а не за виглядом. Кольори значень не змінюються ні в одному напрямі:
+    зелений — дія, бірюза — підтверджено, коричневий — чекає людину.</p>
+
+  <div class="lane">
+    <div class="head"><b>A. Приладова панель</b>
+      <span>Волосяні розділювачі замість рамки на кожній картці. Одне головне
+        число, табличні цифри. Реєстр Linear / Stripe / Vercel: навмисно
+        нудно, тому й не старіє.</span></div>
+    <div class="pane a">
+      <div class="kpi">
+        <div class="cell big"><div class="n">1 020</div>
+          <div class="l">підтверджених фактів</div></div>
+        <div class="cell"><div class="n">51</div><div class="l">чернеток</div></div>
+        <div class="cell"><div class="n">0,04 с</div><div class="l">медіана відповіді</div></div>
+      </div>
+      <div class="reply"><b>Доповідаю:</b> 1 особа у відпустці (усього в
+        реєстрі 303 особи).<br><b>Зріз:</b> на 2026-10-10 (за підтвердженими
+        фактами).<br><b>Чернетки (не в підрахунку):</b> 0.
+        <div class="src">джерело · count_by_state_on_date · звернення 0a7b1a</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="head"><b>B. Технічний сан</b>
+      <span>Усе службове — моноширинним: числа, дати, номери звернень.
+        Капітельні рубрики з розрідженням, нульовий радіус, креслярське тло.
+        Найточніше називає те, чим продукт є: прилад обліку.</span></div>
+    <div class="pane b">
+      <div class="kpi">
+        <div class="cell big"><div class="n">1 020</div>
+          <div class="l">підтверджених фактів</div></div>
+        <div class="cell"><div class="n">51</div><div class="l">чернеток</div></div>
+        <div class="cell"><div class="n">0,04 с</div><div class="l">медіана</div></div>
+      </div>
+      <div class="reply"><b>Доповідаю:</b> 1 особа у відпустці (усього в
+        реєстрі 303 особи).<br><b>Зріз:</b> на 2026-10-10 (за підтвердженими
+        фактами).<br><b>Чернетки (не в підрахунку):</b> 0.
+        <div class="src">джерело · count_by_state_on_date · звернення 0a7b1a</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="head"><b>C. Теплий аналітик</b>
+      <span>Тепле тло, більший кегль, багато повітря, скруглення 8px.
+        Найм'якше для очей і найдружніше для людини, яка бачить систему
+        вперше. Ціна — на екран влазить менше.</span></div>
+    <div class="pane c">
+      <div class="kpi">
+        <div class="cell big"><div class="n">1 020</div>
+          <div class="l">підтверджених фактів</div></div>
+        <div class="cell"><div class="n">51</div><div class="l">чернеток</div></div>
+        <div class="cell"><div class="n">0,04 с</div><div class="l">медіана</div></div>
+      </div>
+      <div class="reply"><b>Доповідаю:</b> 1 особа у відпустці (усього в
+        реєстрі 303 особи).<br><b>Зріз:</b> на 2026-10-10 (за підтвердженими
+        фактами).<br><b>Чернетки (не в підрахунку):</b> 0.
+        <div class="src">джерело · count_by_state_on_date · звернення 0a7b1a</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="head"><b>D. Темний інструмент</b>
+      <span>Темне первинне, наш зелений — єдиний колір на екрані. Найкраще
+        читається з проєктора в темній залі; гірше — на друку й на світлому
+        телефоні надворі.</span></div>
+    <div class="pane d">
+      <div class="kpi">
+        <div class="cell big"><div class="n">1 020</div>
+          <div class="l">підтверджених фактів</div></div>
+        <div class="cell"><div class="n">51</div><div class="l">чернеток</div></div>
+        <div class="cell"><div class="n">0,04 с</div><div class="l">медіана</div></div>
+      </div>
+      <div class="reply"><b>Доповідаю:</b> 1 особа у відпустці (усього в
+        реєстрі 303 особи).<br><b>Зріз:</b> на 2026-10-10 (за підтвердженими
+        фактами).<br><b>Чернетки (не в підрахунку):</b> 0.
+        <span class="pill">підтверджено</span>
+        <div class="src">джерело · count_by_state_on_date · звернення 0a7b1a</div></div>
+    </div>
+  </div>
+
+  <p class="lede">Напрями не виключають один одного цілком: A і B поєднуються
+    (волосяні розділювачі плюс моноширинні числа), C і D — ні. Що з цього
+    брати, вирішує Аня; жоден напрям не змінює ні одного правила продукту.</p>
+</div>
+</body>
+</html>

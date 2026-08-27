@@ -1028,14 +1028,25 @@ details.src > *:not(summary) {
     box-shadow: none !important;
 }
 
-/* 9. Перемикач теми в бічній панелі чата: під переходами на інші сторінки,
- *    дрібним. Це налаштування, а не дія, тому він тихіший за все інше.
+/* 9. Перемикач теми -- у шапці чата, праворуч, на рівні заголовка.
+ *    Був у бічній панелі, тобто третє різне місце для однієї дії на трьох
+ *    екранах. Тепер місце однакове всюди.
  */
-#theme-switch { margin-top: var(--s-3) !important }
+#topbar { position: relative !important }
+#theme-switch {
+    position: absolute !important;
+    top: 50% !important;
+    right: var(--s-5) !important;
+    transform: translateY(-50%) !important;
+    width: auto !important;
+    min-width: 0 !important;
+    flex: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    z-index: 3;
+}
 #theme-switch .theme-toggle {
-    width: 100% !important;
-    justify-content: center;
-    min-height: 34px !important;
     border-color: var(--c-border) !important;
     color: var(--c-muted) !important;
 }

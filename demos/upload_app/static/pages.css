@@ -576,45 +576,55 @@ pre.log {
 
 
 /* ===== ПЕРЕМИКАЧ ТЕМИ ====================================================
+ * Кругла іконка вгорі праворуч -- звичний людям вигляд (правка Ані 27.08).
+ * Було: текстова пігулка «Тема: як у системі». Вона їла місце в шапці й
+ * називала стан, який людина й так бачить очима: екран або світлий, або
+ * темний. Слова лишились у підказці й у aria-label -- там вони потрібні.
+ *
  * Три стани, не два: «як у системі» це окремий і найчастіше правильний стан
- * (телефон сам темніє ввечері). Кнопка називає ПОТОЧНИЙ стан, підказка при
- * наведенні -- наступний.
- * Стилі спільні для сторінок і для чата, бо кнопка одна й та сама.
+ * (телефон сам темніє ввечері). Знак кожного стану ставить theme-toggle.js.
  */
 .theme-toggle {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
     background: transparent;
     border: 1px solid var(--c-divider);
-    border-radius: var(--r-pill, 999px);
+    border-radius: 50%;
     color: inherit;
-    font-family: var(--font);
-    font-size: 12.5px;
-    font-weight: 600;
-    min-height: 30px;
-    padding: 0 12px;
     cursor: pointer;
-    white-space: nowrap;
-    opacity: .85;
-    transition: opacity 140ms ease, border-color 140ms ease,
-                background-color 140ms ease;
+    /* Іконка при натиску не мусить «плисти»: кнопка кругла й дрібна, і
+       найменший зсув на ній помітний більше, ніж на широкій. */
+    transition: background-color 140ms ease, border-color 140ms ease,
+                color 140ms ease;
 }
-.theme-toggle:hover { opacity: 1; background: var(--c-accent-soft) }
+.theme-toggle svg { display: block }
+.theme-toggle:hover {
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent, var(--c-divider));
+}
+.theme-toggle:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+}
 
 /* У брендовій смузі кнопка сидить у правому куті першого рядка. Смуга --
- * position: sticky з двома рядками (бренд і переходи), тому абсолют
- * прив'язується до неї, а не до сторінки. */
+ * position: sticky, тобто вже позиційований предок, і абсолют прив'язується
+ * до неї, а не до сторінки. */
 .appbar { position: sticky }
 .appbar .theme-toggle {
     position: absolute;
-    top: 14px;
+    top: 13px;
     right: var(--s-4, 16px);
-    /* Фолбек на --c-text: брендового кольору тексту немає у v1 (стара
-       тема, смуга там світла), і без фолбека кнопка лишилась би без
-       кольору взагалі. */
-    border-color: color-mix(in srgb, var(--c-brand-text, var(--c-text)) 38%,
+    /* Фолбек на --c-text: брендового кольору тексту немає у v1 (стара тема,
+       смуга там світла), і без фолбека кнопка лишилась би без кольору. */
+    border-color: color-mix(in srgb, var(--c-brand-text, var(--c-text)) 34%,
                             transparent);
     color: var(--c-brand-text, var(--c-text));
 }
-.appbar .theme-toggle:hover { background: rgba(255, 255, 255, .10) }
+.appbar .theme-toggle:hover { background: rgba(255, 255, 255, .12) }
 @media (max-width: 640px) {
-    .appbar .theme-toggle { top: 10px; font-size: 11.5px; padding: 0 9px }
+    .appbar .theme-toggle { top: 10px; width: 32px; height: 32px }
 }

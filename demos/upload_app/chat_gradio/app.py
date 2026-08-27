@@ -2037,13 +2037,6 @@ def build_blocks():
                 # Переходи між сторінками апки -- ті самі три, що в шапці
                 # звичайних сторінок (/ і /stats): один продукт означає, що
                 # набір переходів не змінюється від екрана до екрана.
-                # Перемикач теми -- той самий, що на звичайних сторінках
-                # (клас .theme-toggle, скрипт /static/theme-toggle.js
-                # підключений через head). Кнопка проста, бо весь стан живе у
-                # скрипті: у чаті вона лише інша за розташуванням.
-                gr.HTML('<button type="button" class="theme-toggle" '
-                        'data-mode="system">Тема</button>',
-                        elem_id="theme-switch")
                 gr.HTML('<a href="/" class="page-link">⬆&nbsp; Завантажити '
                         'документ</a>'
                         '<a href="/stats" class="page-link">▤&nbsp; '
@@ -2066,6 +2059,14 @@ def build_blocks():
             with gr.Column(scale=1, elem_id="main-col"):
                 with gr.Column(elem_id="topbar"):
                     gr.Markdown("Чат обліку особового складу")
+                    # Перемикач теми -- у шапці праворуч, на рівні заголовка:
+                    # те саме місце, що на двох звичайних сторінках. Був у
+                    # бічній панелі, і це було третє різне місце для однієї
+                    # й тієї самої дії. Порожня кнопка навмисно: іконку й
+                    # підписи ставить theme-toggle.js (підклеєний у head).
+                    gr.HTML('<button type="button" class="theme-toggle" '
+                            'data-mode="system" aria-label="Тема"></button>',
+                            elem_id="theme-switch")
 
                 with gr.Column(elem_id="hero", visible=True) as hero:
                     gr.HTML(

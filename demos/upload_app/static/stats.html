@@ -29,9 +29,12 @@
     <a href="/stats" aria-current="page">Статистика</a>
     <a href="/chat">Чат</a>
   </nav>
-  <!-- Перемикач стоїть у брендовій смузі, а не в підвалі: це налаштування
-       вигляду, і шукають його там, де вигляд і живе. -->
-  <button type="button" class="theme-toggle" data-mode="system">Тема</button>
+  <!-- Перемикач стоїть у брендовій смузі праворуч, а не в підвалі: це
+       налаштування вигляду, і шукають його там, де вигляд і живе. Порожня
+       навмисно -- іконку й підписи ставить theme-toggle.js, щоб три сторінки
+       не тримали три копії трьох SVG. -->
+  <button type="button" class="theme-toggle" data-mode="system"
+          aria-label="Тема"></button>
 </header>
 
 <main>

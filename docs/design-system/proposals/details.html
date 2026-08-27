@@ -1,0 +1,222 @@
+<!-- @dsCard group="Пропозиції" name="Вісім дрібниць" subtitle="до / після, кожна окремо" viewport="900x1700" -->
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-секретар — вісім дрібниць</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+/* Дрібниці, які не змінюють напряму, але з яких і складається відчуття
+   «зроблено». Кожна показана парою до/після: словами такі речі не
+   передаються, а різниця між ними -- одна властивість.
+   Кожну можна взяти або не взяти окремо від решти. */
+.sheet { max-width: 860px; margin: 0 auto; padding: 28px 20px 56px }
+.item { margin: 0 0 30px; border-top: 1px solid var(--c-border); padding-top: 16px }
+.item h3 { font-size: 15.5px; margin: 0 0 4px }
+.item p { margin: 0 0 12px; color: var(--c-muted); font-size: 13.5px;
+          line-height: 1.55; max-width: 68ch }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px }
+.box { border: 1px solid var(--c-border); border-radius: 4px; overflow: hidden }
+.box > .t { padding: 5px 10px; font-size: 10.5px; letter-spacing: .09em;
+            text-transform: uppercase; color: var(--c-muted);
+            background: var(--c-surface); border-bottom: 1px solid var(--c-border) }
+.box > .c { padding: 14px; background: var(--c-canvas) }
+.num { font-size: 26px; font-weight: 700; line-height: 1 }
+.tnum { font-variant-numeric: tabular-nums }
+.row { display: flex; justify-content: space-between; font-size: 14px;
+       padding: 3px 0 }
+.mono { font-family: var(--font-mono) }
+
+/* 1 */
+.hair-off .r { border-bottom: 1px solid #dcdcdc; padding: 9px 0; font-size: 14px }
+.hair-on  .r { border-bottom: 1px solid var(--c-hairline); padding: 9px 0; font-size: 14px }
+/* 2 */
+.btn { display: inline-flex; align-items: center; justify-content: center;
+       min-height: 40px; padding: 0 18px; border-radius: 3px; border: 0;
+       background: var(--c-accent); color: var(--c-on-accent); font: inherit;
+       font-weight: 600; font-size: 14.5px }
+.btn.soft { background: var(--c-accent-100); color: var(--c-accent-700);
+            border: 1px solid var(--c-accent-200) }
+/* 3 */
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+        border-radius: 999px; font-size: 11.5px; font-weight: 600;
+        border: 1px solid currentColor }
+.chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+          display: block }
+.ok { color: var(--c-success) } .dr { color: var(--c-warn) }
+.pd { color: var(--c-pending) }
+/* 4 */
+.spark { display: block; width: 100%; height: 34px }
+/* 6 */
+.skel { height: 12px; border-radius: 3px; margin: 7px 0;
+        background: linear-gradient(90deg, var(--c-surface) 0%,
+          var(--c-hairline) 50%, var(--c-surface) 100%) }
+.skel.w1 { width: 62% } .skel.w2 { width: 88% } .skel.w3 { width: 45% }
+/* 7 */
+.empty { text-align: center; padding: 18px 10px; color: var(--c-muted);
+         font-size: 13.5px }
+.empty b { display: block; color: var(--c-text); font-size: 14.5px;
+           margin-bottom: 4px }
+/* 8 */
+.kbd { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 6px;
+       border: 1px solid var(--c-divider); border-bottom-width: 2px;
+       border-radius: 4px; color: var(--c-muted) }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <p class="kicker">Пропозиція 27.08 · дрібниці</p>
+  <h1 style="font-size:26px;margin:6px 0 4px">Вісім дрібниць</h1>
+  <p class="lede" style="margin-bottom:8px">Те, з чого й складається відчуття
+    «зроблено», і чого не видно з опису. Кожна пара — одна змінена
+    властивість. Кожну можна взяти окремо.</p>
+
+  <div class="item">
+    <h3>1. Волосяний розділювач замість сірої лінії</h3>
+    <p>Розділювач у таблиці зараз того самого тону, що й рамка блоку, тому
+      таблиця читається як сітка з клітинками. Світліший розділювач залишає
+      структуру, але перестає конкурувати з даними — око йде по числах, а не
+      по лініях.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c hair-off">
+        <div class="r">1 механізована рота <b class="tnum">86</b></div>
+        <div class="r">2 механізована рота <b class="tnum">91</b></div>
+        <div class="r">взвод забезпечення <b class="tnum">34</b></div>
+      </div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c hair-on">
+        <div class="r">1 механізована рота <b class="tnum">86</b></div>
+        <div class="r">2 механізована рота <b class="tnum">91</b></div>
+        <div class="r">взвод забезпечення <b class="tnum">34</b></div>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="item">
+    <h3>2. Одна насичена кнопка на екран, решта — світлі</h3>
+    <p>Коли всі кнопки зелені, жодна не головна. Насичений зелений лишається
+      за головною дією («Записати в базу»), решта переходить у світлий щабель.
+      Це та сама фарба, інша роль.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c">
+        <span class="btn">Записати в базу</span>
+        <span class="btn" style="margin-left:8px">Статистика</span></div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c">
+        <span class="btn">Записати в базу</span>
+        <span class="btn soft" style="margin-left:8px">Статистика</span></div></div>
+    </div>
+  </div>
+
+  <div class="item">
+    <h3>3. Пігулка стану з точкою</h3>
+    <p>Пігулки вже є. Точка перед підписом додає другий, некольоровий сигнал —
+      її видно на друку, на проєкторі й людині, яка не розрізняє зелений і
+      коричневий. Правило продукту «чернетка ≠ факт» тоді читається формою, а
+      не лише кольором.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c">
+        <span class="chip ok">підтверджено</span>
+        <span class="chip dr" style="margin-left:6px">чернетка</span>
+        <span class="chip pd" style="margin-left:6px">чекає людини</span></div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c">
+        <span class="chip ok"><i></i>підтверджено</span>
+        <span class="chip dr" style="margin-left:6px"><i></i>чернетка</span>
+        <span class="chip pd" style="margin-left:6px"><i></i>чекає людини</span></div></div>
+    </div>
+  </div>
+
+  <div class="item">
+    <h3>4. Крихітний графік біля живого числа</h3>
+    <p>Медіана часу відповіді — число, яке живе. Одне число каже «зараз»,
+      графік каже «і так було весь час». Дані вже є: живий лічильник тримає
+      останні 500 ходів, малювати нічого нового не треба.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c">
+        <div class="num tnum">0,04 с</div>
+        <div style="color:var(--c-muted);font-size:12.5px;margin-top:6px">
+          медіана часу відповіді</div></div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c">
+        <div class="num tnum">0,04 с</div>
+        <div style="color:var(--c-muted);font-size:12.5px;margin:6px 0 8px">
+          медіана часу відповіді</div>
+        <svg class="spark" viewBox="0 0 200 34" preserveAspectRatio="none"
+             aria-hidden="true">
+          <path d="M0 30 L20 29 L40 26 L60 28 L80 12 L100 27 L120 29 L140 22
+                   L160 28 L180 30 L200 24" fill="none"
+                stroke="var(--c-accent)" stroke-width="1.6" />
+          <circle cx="200" cy="24" r="2.6" fill="var(--c-accent)" />
+        </svg></div></div>
+    </div>
+  </div>
+
+  <div class="item">
+    <h3>5. Табличні цифри всюди, де числа стоять у стовпчик</h3>
+    <p>У пропорційному наборі «1» вужча за «8», і стовпчик чисел дрібно
+      «дихає» при кожному оновленні. Табличні цифри однакової ширини — рядки
+      стоять рівно. Для живого лічильника, який оновлюється сам, це помітно
+      найбільше.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c">
+        <div class="row"><span>підтверджено</span><b>1 020</b></div>
+        <div class="row"><span>чернетки</span><b>51</b></div>
+        <div class="row"><span>черга</span><b>165</b></div></div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c">
+        <div class="row"><span>підтверджено</span><b class="tnum">1 020</b></div>
+        <div class="row"><span>чернетки</span><b class="tnum">51</b></div>
+        <div class="row"><span>черга</span><b class="tnum">165</b></div></div></div>
+    </div>
+  </div>
+
+  <div class="item">
+    <h3>6. Скелет замість «завантаження…»</h3>
+    <p>Сторінка статистики спершу порожня, потім стрибком заповнюється. Сірі
+      смужки на місці майбутніх чисел показують, СКІЛЬКИ буде даних і де вони
+      стануть, тому поява перестає бути стрибком. Слово «завантаження»
+      натомість не каже нічого.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c">
+        <div style="color:var(--c-muted);font-size:13.5px">завантаження…</div></div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c">
+        <div class="skel w1"></div><div class="skel w2"></div>
+        <div class="skel w3"></div></div></div>
+    </div>
+  </div>
+
+  <div class="item">
+    <h3>7. Порожній стан, який каже, що робити</h3>
+    <p>Живий лічильник до першого питання показує прочерки. Замість прочерків —
+      один рядок про те, чому порожньо, і що зробити, щоб наповнилось. Це та
+      сама чесність, що в правилі «відмова краща за вигадку»: не вдавати
+      число, але й не залишати людину в тупику.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c">
+        <div class="num">—</div>
+        <div style="color:var(--c-muted);font-size:12.5px;margin-top:6px">
+          медіана часу відповіді</div></div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c empty">
+        <b>Ще не міряли</b>
+        Лічильник заповнюється з першого питання в чаті.</div></div>
+    </div>
+  </div>
+
+  <div class="item">
+    <h3>8. Підказка про клавіші там, де вона доречна</h3>
+    <p>Enter надсилає питання вже зараз, але про це ніде не сказано. Дрібний
+      підпис під полем — і людина перестає шукати кнопку. Ніякої нової
+      поведінки, лише названа наявна.</p>
+    <div class="pair">
+      <div class="box"><div class="t">зараз</div><div class="c">
+        <div style="color:var(--c-muted);font-size:12.5px">Відповідь
+          формується з документів; джерело — під кожною відповіддю.</div></div></div>
+      <div class="box"><div class="t">пропозиція</div><div class="c">
+        <div style="color:var(--c-muted);font-size:12.5px">Відповідь
+          формується з документів; джерело — під кожною відповіддю.
+          <span style="margin-left:8px"><span class="kbd">Enter</span>
+          надіслати · <span class="kbd">Shift</span>+<span class="kbd">Enter</span>
+          новий рядок</span></div></div></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
