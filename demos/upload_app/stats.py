@@ -41,6 +41,14 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(APP_DIR))
 CHAT_DIR = os.path.join(APP_DIR, "chat_gradio")
 
+# Живий лічильник часу відповіді чата. Шлях імпорту мусить бути ОДНАКОВИЙ тут
+# і в chat_gradio/app.py: «import livemetrics» там і «from demos.upload_app
+# import livemetrics» тут дали б два різні модулі з двома різними буферами --
+# чат рахував би в один, сторінка читала б інший і завжди показувала нулі.
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+from demos.upload_app import livemetrics  # noqa: E402
+
 # Лічильники: ключ -> (SQL, як розібрати рядки). Кожен окремим запитом --
 # один недоступний лічильник не мусить забирати з собою решту сторінки.
 SQL_DOCS_BY_STATUS = ("SELECT status, COUNT(*) AS n FROM documents "
@@ -289,6 +297,13 @@ def collect(query=None, report_path=None):
         },
         "quality": quality_metrics()[0],
         "quality_error": quality_metrics()[1],
+        # Живі числа чата: беруться з пам'яті ТОГО САМОГО процесу, у якому
+        # працює чат (апка й чат -- один процес, чат змонтований у FastAPI).
+        # Ніякого запису на диск і в базу: база -- зона Андрія й для нас
+        # тільки на читання.
+        "chat_live": livemetrics.snapshot(),
+        # Сталі числа внутрішнього заміру: маршрутизація і звірка каталогу.
+        "chat_quality": chat_quality(),
         "run_report": report,
         "run_report_error": report_error,
         "run_report_path": os.path.relpath(path, PROJECT_ROOT).replace("\\", "/"),
@@ -312,6 +327,87 @@ def collect(query=None, report_path=None):
 # не якість.
 
 BASELINE_PATH = os.path.join(PROJECT_ROOT, "eval", "baseline.json")
+
+# ── Сталі метрики якості ЧАТА (а не пайплайна) ──────────────────────────────
+#
+# Пайплайн міряється часткою правильно витягнутих полів. Для чата це не
+# годиться: він нічого не витягує, він ВІДПОВІДАЄ. Тому дві окремі мірки, і
+# кожна відповідає на своє питання:
+#
+#   1. чи правильно ЗРОЗУМІЛИ питання -- measure_router по router_testset.yaml
+#      («питання -> очікуваний шаблон»). Головне тут не «скільком відповіли»,
+#      а скільком узяли ВПЕВНЕНО-НЕПРАВИЛЬНО: впевнена помилка гірша за
+#      фолбек у модель, бо фолбек усе одно дасть правильну відповідь;
+#   2. чи правильне ЧИСЛО у відповіді -- verify_catalog: для кожного шаблону
+#      цифра з бази звіряється з незалежним підрахунком по .md-записах
+#      пайплайна. Це і є «повноцінно правильна відповідь» у найсуворішому
+#      сенсі: не «схоже», а те саме число.
+#
+# Третя мірка, про яку просила Аня -- «% підходящих цитат» із нормативних
+# актів (ланцюг Андрія: підрядок + перекриття лем). Вона ще НЕ рахується, і
+# сторінка каже про це прямо, а не показує прочерк без пояснення: доступ до
+# схеми `andriy_test` для `milidoc_readonly` ще не виданий.
+#
+# Файли звітів лежать у data/eval/ і їдуть у git навмисно: цифра, яка живе
+# лише в чиємусь локальному прогоні, нічого не доводить.
+ROUTER_REPORT = os.path.join(PROJECT_ROOT, "data", "eval",
+                             "router-report.json")
+CATALOG_REPORT = os.path.join(PROJECT_ROOT, "data", "eval",
+                              "catalog-report.json")
+
+#: Чому цитати нормативки поки не рахуються. Текст іде на екран як є.
+QUOTES_BLOCKED = ("ланцюг нормативки ще не підключений: потрібен доступ "
+                  "milidoc_readonly до схеми andriy_test")
+
+
+def _read_json(path):
+    try:
+        with io.open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        # Немає звіту -- це не помилка сторінки, а відсутність заміру.
+        # Показуємо прочерк і кажемо, чим його заповнити.
+        return None
+
+
+def chat_quality():
+    """Сталі числа якості чата. Винятків не кидає: відсутність файла -- поле
+    відповіді, а не падіння сторінки."""
+    router = _read_json(ROUTER_REPORT)
+    catalog = _read_json(CATALOG_REPORT)
+    out = {"router": None, "catalog": None,
+           "quotes": {"blocked": QUOTES_BLOCKED}}
+    if router:
+        total = router.get("questions") or 0
+        routed = router.get("routed") or 0
+        out["router"] = {
+            "questions": total,
+            "routed": routed,
+            "routed_ok": router.get("routed_ok"),
+            "confidently_wrong": router.get("confidently_wrong"),
+            # Частка ПРАВИЛЬНИХ серед тих, які ярус узяв на себе. Знаменник
+            # саме `routed`, а не всі питання: решта свідомо йде в модель, і
+            # рахувати її як помилку маршрутизатора нечесно.
+            "pct": (round(100.0 * router["routed_ok"] / routed, 1)
+                    if routed and router.get("routed_ok") is not None
+                    else None),
+            "encoder": router.get("encoder"),
+            "threshold": router.get("threshold"),
+            "measured_at": router.get("measured_at"),
+        }
+    if catalog:
+        checks = catalog.get("checks") or 0
+        out["catalog"] = {
+            "checks": checks,
+            "matched": catalog.get("matched"),
+            "failures": catalog.get("failures"),
+            "pct": (round(100.0 * catalog["matched"] / checks, 1)
+                    if checks and catalog.get("matched") is not None
+                    else None),
+            "as_of": catalog.get("as_of"),
+            "measured_at": catalog.get("measured_at"),
+        }
+    return out
 
 #: Корпуси з еталоном -> як їх називати людині.
 _CORPORA = {

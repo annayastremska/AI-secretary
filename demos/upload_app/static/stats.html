@@ -41,6 +41,17 @@
     <p class="hint" id="queue-note"></p>
   </section>
 
+  <!-- Робота чата стоїть ПЕРЕД виміряною якістю пайплайна навмисно: людина
+       приходить на сторінку після розмови з чатом, і перше питання в неї про
+       чат, а не про витяг полів. -->
+  <section id="chat-sec">
+    <h2>Робота чата</h2>
+    <div class="tiles" id="chat-live-tiles"></div>
+    <p class="hint" id="chat-live-note"></p>
+    <div class="tiles" id="chat-quality-tiles"></div>
+    <p class="hint" id="chat-quality-note"></p>
+  </section>
+
   <section id="quality-sec">
     <h2>Виміряна якість обробки</h2>
     <div class="tiles" id="quality-tiles"></div>
@@ -73,6 +84,32 @@ function tile(num, label, note, cls) {
   return d;
 }
 
+/* Пігулка стану: та сама роль, що в кольору плитки, але видна ФОРМОЮ.
+   Нащо дублювати колір формою: на проєкторі й на телефоні відтінки сідають,
+   а підпис у рамці лишається читним. */
+function pill(text, cls) {
+  const s = document.createElement("span");
+  s.className = "pill" + (cls ? " " + cls : "");
+  s.textContent = text;
+  return s;
+}
+
+/* Плитка з пігулкою замість дрібного підпису знизу. */
+function stateTile(num, label, pillText, cls) {
+  const d = tile(num, label, null, cls);
+  d.appendChild(pill(pillText, cls ? cls.replace("tile--", "pill--") : null));
+  return d;
+}
+
+/* Головне число розділу: той самий будівельник, інший розмір. Ієрархія
+   робиться КЛАСОМ, а не окремою розміткою -- інакше два способи зробити
+   плитку розійдуться на першій правці. */
+function heroTile(num, label, note, cls) {
+  const d = tile(num, label, note, cls);
+  d.classList.add("tile--hero");
+  return d;
+}
+
 function note(cls, msg) {
   const d = document.createElement("div");
   d.className = "note " + cls; d.textContent = msg; return d;
@@ -99,12 +136,106 @@ function kvList(map, labels) {
   return dl;
 }
 
+/* ЖИВІ числа. Оновлюються самі, поки сторінка відкрита: у цьому й сенс --
+   людина ставить питання в чаті, вертається на статистику й бачить, що
+   медіана поїхала. Числа з пам'яті процесу, тому після перезапуску сервісу
+   вони починаються з нуля -- і на екрані так і написано. */
+function renderChatLive(m) {
+  const host = $("chat-live-tiles");
+  host.textContent = "";
+  if (!m || !m.n) {
+    $("chat-live-note").textContent =
+      "Питань чату ще не ставили з моменту запуску сервісу — міряти нічого.";
+    return;
+  }
+  /* Медіана, а не середнє: правила відповідають за 0.04 с, модель за 3-45 с,
+     і одна довга відповідь задирає середнє так, що воно перестає описувати
+     хоч що-небудь. Найгірші 10% -- окремим числом, поруч. */
+  host.append(
+    heroTile(m.median_s + " с", "медіана часу відповіді",
+             "типовий хід: половина швидше, половина довше"),
+    tile(m.p90_s + " с", "найгірші 10%", "9 з 10 відповідей швидші за це"),
+    tile(m.total, "питань з запуску сервісу"));
+  const roads = Object.entries(m.by_road || {})
+    .sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + v);
+  $("chat-live-note").textContent =
+    "Живі числа: рахуються на справжніх ходах чата з " +
+    (m.since || "?").replace("T", " ") + " (з моменту запуску сервісу; " +
+    "медіана — по останніх " + m.window + " ходах)." +
+    (roads.length ? " Дороги: " + roads.join(" · ") + "." : "");
+}
+
+/* СТАЛІ числа: внутрішній замір приладами на фіксованому тест-сеті, без
+   участі живих людей. Змінюються лише коли прилад перезапустили -- тому й
+   стоять окремим рядком плиток і мають дату заміру в підписі. */
+function renderChatQuality(cq) {
+  const host = $("chat-quality-tiles");
+  host.textContent = "";
+  if (!cq) { return; }
+  const r = cq.router, c = cq.catalog;
+  if (c) {
+    /* Найсуворіша з наших мірок: цифра, яку чат називає людині, звірена з
+       незалежним підрахунком по файлах пайплайна. Не «схоже» -- те саме. */
+    host.appendChild(tile(
+      (c.pct !== null ? c.pct + "%" : "—"), "відповідей із правильним числом",
+      c.matched + " з " + c.checks + " перевірок звірки каталогу",
+      c.failures ? "tile--pending" : "tile--ok"));
+  }
+  if (r) {
+    /* Правильність РОЗУМІННЯ питання. Знаменник -- питання, які векторний
+       ярус узяв на себе: решта свідомо йде в модель, і рахувати її як
+       помилку маршрутизатора було б нечесно. */
+    host.appendChild(tile(
+      (r.pct !== null ? r.pct + "%" : "—"), "питань розпізнано правильно",
+      r.routed_ok + " з " + r.routed + " (решта " +
+      (r.questions - r.routed) + " свідомо йде в модель)",
+      r.confidently_wrong ? "tile--pending" : "tile--ok"));
+  }
+  /* Цитати з нормативки: мірка є в ланцюгу Андрія, але поки не рахується.
+     Прочерк БЕЗ причини гірший за відсутність плитки, тому причина -- у
+     підписі плитки, а не в документації. */
+  host.appendChild(tile("—", "підходящих цитат із норм-актів",
+                        "ще не міряємо", "tile--draft"));
+  const bits = [];
+  if (c && c.measured_at) {
+    bits.push("звірка каталогу " + c.measured_at.replace("T", " "));
+  }
+  if (r && r.measured_at) {
+    bits.push("маршрутизація " + r.measured_at.replace("T", " ") +
+              " (" + r.encoder + ", поріг " + r.threshold + ")");
+  }
+  if (!c && !r) {
+    bits.push("замірів ще немає: verify_catalog --json і " +
+              "measure_router --gate --json не запускали");
+  }
+  if (cq.quotes && cq.quotes.blocked) { bits.push(cq.quotes.blocked); }
+  $("chat-quality-note").textContent =
+    "Сталі числа внутрішнього заміру (без участі користувачів): " +
+    bits.join("; ") + ".";
+}
+
 function block(title, node) {
   const wrap = document.createElement("div");
   const h = document.createElement("h3");
   h.textContent = title;
   wrap.append(h, node);
   return wrap;
+}
+
+/* Живі числа оновлюємо окремим ЛЕГКИМ маршрутом, а не повним /api/stats:
+   той робить сім запитів у Postgres, і смикати чужу базу кожні кілька секунд
+   заради секундоміра ми не будемо (база -- зона Андрія). Тут читання з
+   пам'яті процесу. */
+const LIVE_EVERY_MS = 5000;
+
+async function pollLive() {
+  try {
+    const resp = await fetch("/api/chat-live");
+    if (resp.ok) { renderChatLive(await resp.json()); }
+  } catch (err) {
+    /* Мовчки: сторінка не мусить сипати помилками через один невдалий
+       опит. Числа просто лишаються попередніми. */
+  }
 }
 
 async function load() {
@@ -118,6 +249,7 @@ async function load() {
     return;
   }
   render(data);
+  setInterval(pollLive, LIVE_EVERY_MS);
 }
 
 function render(data) {
@@ -133,13 +265,16 @@ function render(data) {
       ". Це не «нуль у базі»: невідомо."));
   } else {
     const d = data.documents, f = data.facts, q = data.review_queue;
+    /* Головне число розділу -- підтверджені факти: саме вони і є те, з чого
+       чат складає відповіді. Решта поруч і дрібніше. */
     $("db-tiles").append(
+      heroTile(f.confirmed, "підтверджених фактів",
+               "входять у підрахунки", "tile--ok"),
+      stateTile(f.unconfirmed, "чернеток", "не в підрахунку", "tile--draft"),
+      stateTile(q.people_unmatched, "осіб не зійшлися зі штаткою",
+                "чекає людини", "tile--pending"),
       tile(d.total, "документів"),
-      tile(data.people, "осіб у реєстрі"),
-      tile(f.confirmed, "підтверджених фактів", "входять у підрахунки", "tile--ok"),
-      tile(f.unconfirmed, "чернеток", "факти з непевним полем: у підрахунки не входять", "tile--draft"),
-      tile(q.people_unmatched, "осіб не зійшлися зі штаткою",
-           "потребують рішення людини", "tile--pending"));
+      tile(data.people, "осіб у реєстрі"));
 
     /* Типи документів -- одним рядком, без таблиці: на сторінці потрібне
        основне, а не всі розкладки (правка Ані 25.08). */
@@ -170,6 +305,9 @@ function render(data) {
       : "";
   }
 
+  renderChatLive(data.chat_live);
+  renderChatQuality(data.chat_quality);
+
   /* Виміряна якість: одна головна цифра (частка правильно витягнутих полів
      проти заздалегідь відомої відповіді) плюс те, що її підпирає. */
   const qm = data.quality;
@@ -178,7 +316,7 @@ function render(data) {
       "Цифри якості не читаються: " + (data.quality_error || "невідомо")));
   } else {
     $("quality-tiles").append(
-      tile((qm.fields_pct !== null ? qm.fields_pct + "%" : "—"),
+      heroTile((qm.fields_pct !== null ? qm.fields_pct + "%" : "—"),
            "полів витягнуто правильно",
            qm.fields_ok + " з " + qm.fields_total + " на " + qm.documents +
            " документах", "tile--ok"),

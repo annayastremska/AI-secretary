@@ -50,6 +50,8 @@
 
 import argparse
 import datetime
+import io
+import json
 import glob
 import os
 import sys
@@ -855,6 +857,9 @@ def main():
                     help="дата зрізу YYYY-MM-DD (дефолт: сьогодні)")
     ap.add_argument("--query", default="відпустка",
                     help="тема для normative_search")
+    ap.add_argument("--json", metavar="ФАЙЛ",
+                    help="записати підсумок (перевірок / розбіжностей) у "
+                         "json, який читає сторінка «Статистика»")
     ap.add_argument("--expected-only", action="store_true",
                     help="лише незалежний підрахунок, без бази")
     args = ap.parse_args()
@@ -913,6 +918,7 @@ def main():
     print("-" * len(header))
 
     failures = 0
+    checks_run = 0
     covered = set()
     for t in templates:
         tid = t["id"]
@@ -921,6 +927,7 @@ def main():
             # Новий шаблон без перевірки -- це теж розбіжність: скрипт
             # мусить покривати 100% каталогу.
             print(f"{tid:38} {'—':>28} {'—':>28} НЕМАЄ ПЕРЕВІРКИ")
+            checks_run += 1
             failures += 1
             continue
         covered.add(tid)
@@ -931,6 +938,7 @@ def main():
             print(f"{tid:38} {'blocked+refusal':>28} "
                   f"{('так' if ok else 'ні'):>28} "
                   f"{'OK' if ok else 'РОЗБІЖНІСТЬ'}")
+            checks_run += 1
             failures += 0 if ok else 1
             continue
 
@@ -959,6 +967,7 @@ def main():
             except Exception as e:
                 print(f"{label:38} {fmt(expected):>28} "
                       f"{'ПОМИЛКА SQL':>28} {type(e).__name__}: {e}")
+                checks_run += 1
                 failures += 1
                 continue
             if check["kind"] == "execute":
@@ -975,11 +984,30 @@ def main():
                 print("    діагностика (очікуване по файлах-джерелах):")
                 for line in check["diag"](records):
                     print(f"      {line}")
+            checks_run += 1
             failures += 0 if ok else 1
 
     missing = covered.symmetric_difference({t["id"] for t in templates})
     if missing:
         print(f"\nшаблони без перевірки: {sorted(missing)}")
+
+    if args.json and not args.expected_only:
+        payload = {
+            "checks": checks_run,
+            "matched": checks_run - failures,
+            "failures": failures,
+            "templates": len(templates),
+            "as_of": ctx["as_of"],
+            "measured_at": datetime.datetime.now().replace(
+                microsecond=0).isoformat(),
+        }
+        out_dir = os.path.dirname(os.path.abspath(args.json))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with io.open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        print(f"--json: підсумок записано у {args.json}")
 
     print()
     if args.expected_only:

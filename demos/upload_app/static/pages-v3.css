@@ -795,3 +795,114 @@ button:disabled { opacity: .45; transform: none; box-shadow: none }
 thead th, .tile--ok { background: var(--c-accent-100) }
 tbody tr:hover { background: var(--c-accent-soft) }
 .dropzone { border-color: var(--c-accent-200) }
+
+
+/* ===== ПАНЕЛЬ: ГОЛОВНЕ ЧИСЛО РОЗДІЛУ І ПІГУЛКИ СТАНУ ======================
+ * Було: усі числа розділу однакового кегля -- рівний список, у якому око не
+ * знає, з чого починати. Стало: у кожному розділі одне головне число великим
+ * розміром, решта дрібніша. Ієрархія робиться КЛАСОМ на тій самій плитці, а
+ * не окремою розміткою: два способи зробити плитку розійшлися б на першій
+ * правці.
+ */
+.tile--hero { grid-column: span 2 }
+.tile--hero .tile-num {
+    font-size: var(--fs-display, 44px);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+.tile--hero .tile-label { font-size: 14px; font-weight: 600 }
+
+/* Пігулка стану: та сама роль, що в кольору плитки, але видна ФОРМОЮ.
+ * Нащо дублювати колір формою: на проєкторі й на телефоні відтінки сідають,
+ * а підпис у рамці лишається читним. */
+.pill {
+    display: inline-block;
+    margin-top: var(--s-2, 8px);
+    padding: 2px 9px;
+    border-radius: var(--r-pill, 999px);
+    border: 1px solid currentColor;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: transparent;
+}
+.pill--ok      { color: var(--c-success) }
+.pill--draft   { color: var(--c-warn) }
+.pill--pending { color: var(--c-pending) }
+
+/* Головна плитка на телефоні розтягується на весь рядок: удвох із сусідкою
+ * дисплейне число не влазить і ламається на два рядки. */
+@media (max-width: 640px) {
+    .tile--hero { grid-column: 1 / -1 }
+    .tile--hero .tile-num { font-size: 36px }
+}
+
+
+/* ===== СМУГА ШЛЯХУ 1-2-3 (.pathbar) ======================================
+ * Шлях людини: файл -> що витягли -> у базу. Стоїть від початку, а не
+ * з'являється під час обробки: людина мусить бачити, скільки кроків усього,
+ * ДО того, як почала.
+ * Стан несе один атрибут `data-at` на контейнері -- підсвічування класами по
+ * трьох елементах було б три місця, які треба тримати в узгодженні.
+ * Ім'я НЕ `.steps`: у наборі дизайн-системи так зветься інший компонент
+ * (вертикальний перелік стадій пайплайна всередині картки).
+ */
+.pathbar {
+    display: flex;
+    gap: var(--s-2, 8px);
+    list-style: none;
+    margin: var(--s-4, 16px) 0 var(--s-5, 24px);
+    padding: 0;
+}
+.pathbar li {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 var(--s-3, 12px);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-surface);
+    color: var(--c-muted);
+    font-size: 13.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background-color 140ms ease, color 140ms ease,
+                border-color 140ms ease;
+}
+.pathbar-n {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 21px;
+    height: 21px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+/* Поточний крок. */
+.pathbar[data-at="1"] li[data-step="1"],
+.pathbar[data-at="2"] li[data-step="2"],
+.pathbar[data-at="3"] li[data-step="3"] {
+    background: var(--c-accent);
+    border-color: var(--c-accent);
+    color: var(--c-on-accent);
+}
+/* Пройдені кроки: світлий фон акценту, не сірий -- видно, що це вже наше. */
+.pathbar[data-at="2"] li[data-step="1"],
+.pathbar[data-at="3"] li[data-step="1"],
+.pathbar[data-at="3"] li[data-step="2"] {
+    background: var(--c-accent-100, var(--c-accent-soft));
+    border-color: var(--c-accent-200, var(--c-accent-line));
+    color: var(--c-text);
+}
+
+@media (max-width: 640px) {
+    .pathbar li { padding: 0 8px; font-size: 12.5px }
+    .pathbar li span.pathbar-n { width: 19px; height: 19px }
+}

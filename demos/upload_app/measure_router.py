@@ -32,6 +32,9 @@ leave-one-out: перебудовувати індекс на кожен при�
 Результати заміру 25.08 -- docs/research/2026-08-25_encoder-measurement.md.
 """
 import argparse
+import datetime
+import io
+import json
 import os
 import sys
 import time
@@ -139,9 +142,13 @@ def crosscheck(encoder_name, encoder, utter_texts, route_of, questions,
 
 
 def measure(encoder_name, questions):
-    """-> кількість ВПЕВНЕНО-НЕПРАВИЛЬНИХ на ДІЮЧІЙ конфігурації
-    (AGGREGATION i THRESHOLD із vector_route), або None, якщо цей
-    encoder не є діючим. Потрібно для гейта --gate у main()."""
+    """-> словник цифр ДІЮЧОЇ конфігурації (AGGREGATION і THRESHOLD із
+    vector_route) або None, якщо цей encoder не є діючим.
+
+    Було одне число (впевнено-неправильних) для гейта. Стало словник, бо ті
+    самі цифри тепер показуються на сторінці «Статистика» як «правильно
+    розпізнаних питань». Рахувати їх удруге, окремо для сторінки, означало б
+    два числа, які розійдуться на першій же правці каталогу."""
     spec = ENCODER_SPECS[encoder_name]
     print(f"\n=== {encoder_name} (pooling={spec['pooling']}, "
           f"префікси: query='{spec['query_prefix']}' "
@@ -235,10 +242,27 @@ def measure(encoder_name, questions):
         # вибору, а гейт мусить дивитись рівно на те, що стоїть у проді.
         if agg == AGGREGATION and encoder_name == ENCODER_NAME:
             live = [r for r in results if r["score"] >= THRESHOLD and not r["ok"]]
-            live_conf_wrong = len(live)
+            routed = [r for r in results if r["score"] >= THRESHOLD]
+            live_conf_wrong = {
+                "encoder": encoder_name,
+                "aggregation": agg,
+                "threshold": THRESHOLD,
+                "questions": len(results),
+                # top-1 БЕЗ порога: чи взагалі знайдено правильний шаблон.
+                "top1_ok": sum(r["ok"] for r in results),
+                # З порогом: скільки питань ярус узяв на себе (`routed`) і
+                # скільки з них узяв правильно. Саме ця пара -- чесний
+                # «правильно розпізнаних»: решта питань не помилка, вона
+                # свідомо йде далі в модель.
+                "routed": len(routed),
+                "routed_ok": sum(r["ok"] for r in routed),
+                "fallback": len(results) - len(routed),
+                "confidently_wrong": len(live),
+            }
             print(f"    ДІЮЧА конфігурація ({encoder_name}, agg={agg}, "
                   f"поріг {THRESHOLD}): впевнено-неправильних "
-                  f"{live_conf_wrong}")
+                  f"{len(live)}; ярус узяв {len(routed)}/{len(results)}, "
+                  f"з них правильно {live_conf_wrong['routed_ok']}")
             for r in live:
                 print(f"      «{r['q']}» -> {r['got']}@{r['score']:.3f} "
                       f"(чекали {r['expected']})")
@@ -258,6 +282,10 @@ def main():
     ap.add_argument("--gate", action="store_true",
                     help="код виходу 1, якщо на ДІЮЧІЙ конфігурації є хоч "
                          "один впевнено-неправильний маршрут")
+    ap.add_argument("--json", metavar="ФАЙЛ",
+                    help="записати цифри ДІЮЧОЇ конфігурації у json, який "
+                         "читає сторінка «Статистика». Без прапорця прилад "
+                         "лишається як був -- лише друкує")
     ap.add_argument("--production-view", action="store_true",
                     help="міряти лише питання, які НЕ ловлять правила "
                          "(rules_route) -- справжнє навантаження векторного "
@@ -297,12 +325,32 @@ def main():
             # це РЕЗУЛЬТАТ заміру, а не падіння скрипта: фіксуємо і йдемо далі
             print(f"  НЕ ЗАМІРЯНО: {type(exc).__name__}: {exc}")
 
+    if args.json:
+        # Пишемо РІВНО те, що заміряно, плюс момент заміру. Сторінка нічого
+        # не дораховує: інакше цифра на екрані й цифра приладу -- дві різні
+        # цифри, і невідомо, яка з них правда.
+        if gate_value is None:
+            print("\n--json: діючий encoder не заміряно, файл не змінено")
+        else:
+            payload = dict(gate_value)
+            payload["measured_at"] = datetime.datetime.now().replace(
+                microsecond=0).isoformat()
+            payload["production_view"] = bool(args.production_view)
+            out_dir = os.path.dirname(os.path.abspath(args.json))
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            with io.open(args.json, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+                fh.write("\n")
+            print(f"\n--json: цифри записано у {args.json}")
+
     if args.gate:
         if gate_value is None:
             print("\nГЕЙТ НЕ ВІДПРАЦЮВАВ: діючий encoder не заміряно")
             raise SystemExit(2)
-        if gate_value:
-            print(f"\nГЕЙТ ПРОВАЛЕНО: впевнено-неправильних {gate_value} "
+        if gate_value["confidently_wrong"]:
+            print(f"\nГЕЙТ ПРОВАЛЕНО: впевнено-неправильних "
+                  f"{gate_value['confidently_wrong']} "
                   f"(мусить бути 0). Причина зазвичай одна -- змінили "
                   f"examples каталогу. Або правити приклади, або підіймати "
                   f"поріг СВІДОМО і з новою цифрою в доці.")

@@ -41,6 +41,15 @@
   <p class="lede">Покажемо, що витягли з документа. У базу — лише після
     вашого підтвердження.</p>
 
+  <!-- Шлях людини трьома кроками. Нумерація тут НЕ оздоба: це справді
+       послідовність, і порядок несе сенс (у базу не можна раніше, ніж
+       побачив, що витяглось). `data-at` ставить JS. -->
+  <ol class="pathbar" id="pathbar" data-at="1">
+    <li data-step="1"><span class="pathbar-n">1</span>Файл</li>
+    <li data-step="2"><span class="pathbar-n">2</span>Що витягли</li>
+    <li data-step="3"><span class="pathbar-n">3</span>У базу</li>
+  </ol>
+
   <section>
     <label class="dropzone" id="dropzone">
       <span class="big">Перетягніть файл документа сюди</span>
@@ -180,8 +189,17 @@ window.addEventListener("DOMContentLoaded", () => {
 function resetView() {
   ["progress-sec", "review-sec", "db-sec", "log-details", "ocr-hint"]
     .forEach(id => $(id).classList.add("hidden"));
+  atStep(1);
   ["stepper", "review-body", "db-body", "status-line", "pipeline-error", "upload-error"]
     .forEach(id => $(id).innerHTML = "");
+}
+
+/* Поточний крок -- одна функція й один атрибут. Нащо так: підсвічувати
+   класами по три елементи означало б три місця, які треба тримати в
+   узгодженні, і перший же новий розділ їх розсинхронізує. */
+function atStep(n) {
+  const el = $("pathbar");
+  if (el) { el.setAttribute("data-at", String(n)); }
 }
 
 function showError(id, msg) {
@@ -231,6 +249,7 @@ async function poll() {
   } else if (job.state === "commit_failed") {
     renderReview(job);
     $("db-sec").classList.remove("hidden");
+  atStep(3);
     $("db-body").innerHTML = "";
     $("db-body").appendChild(note("err", job.error || "запис не вдався"));
     $("commit-btn").disabled = false;  /* можна повторити після підняття бази */
@@ -297,6 +316,7 @@ function renderLog(job) {
 
 function renderReview(job) {
   $("review-sec").classList.remove("hidden");
+  atStep(2);
   const p = job.preview;
   if (!p) return;
   const shownStatus = job.duplicate_upload ? "duplicate" : p.status;
@@ -397,6 +417,7 @@ function sourceOf(p, field) {
 
 function renderDbResult(job) {
   $("db-sec").classList.remove("hidden");
+  atStep(3);
   const body = $("db-body");
   body.innerHTML = "";
   const r = job.db_result;

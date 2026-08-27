@@ -86,6 +86,15 @@ import vector_route as tier_vector  # noqa: E402
 # залежить, тести й CLI працюють як раніше.
 import progress  # noqa: E402
 
+# Живий лічильник часу відповіді. Лежить на рівень вище (demos/upload_app),
+# бо його ЧИТАЄ сторінка статистики, а не лише чат. Імпорт мусить бути
+# однаковий в обох місцях: `import livemetrics` тут і
+# `from demos.upload_app import livemetrics` там дали б ДВА різні модулі з
+# двома різними буферами -- чат рахував би в один, сторінка читала б інший і
+# показувала нулі. Тому корінь проєкту в sys.path і повний шлях пакета.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
+from demos.upload_app import livemetrics  # noqa: E402
+
 WARN_FALLBACK = "⚠️ локальна модель недоступна, маршрут обрано правилами"
 CLARIFY_MARK = "🔎 уточнення"
 
@@ -1731,17 +1740,32 @@ def answer(question, history=None):
     try:
         out = _answer_inner(question, history)
     except psycopg.OperationalError as exc:
+        spent = time.monotonic() - started
         _journal.warning("[%s] база недоступна за %.1f с: %s | питання: %.80s",
-                         cid, time.monotonic() - started,
-                         type(exc).__name__, question or "")
+                         cid, spent, type(exc).__name__, question or "")
+        # Падіння бази теж іде в лічильник часу: людина чекала стільки ж, і
+        # ховати цей хід означало б показувати кращу цифру, ніж є.
+        livemetrics.record(spent, "збій доступу до бази")
         return _with_request_id(ANSWER_DB_DOWN, cid)
     finally:
         _CURRENT_ID.reset(token)
     out = _with_request_id(out, cid)
+    spent = time.monotonic() - started
     _journal.info("[%s] %.1f с | відповідь %d символів | питання: %.80s",
-                  cid, time.monotonic() - started, len(out or ""),
-                  question or "")
+                  cid, spent, len(out or ""), question or "")
+    livemetrics.record(spent, _road_of(out))
     return out
+
+
+#: Дорогу беремо з ГОТОВОЇ відповіді, а не з окремого прапорця в логіці:
+#: у блоці «джерело» вона вже є (її бачить людина), і друге місце, де та сама
+#: річ визначається, розійшлося б із першим на першій же правці.
+_ROAD = re.compile(r"дорога: ([^<\n]{1,60})")
+
+
+def _road_of(text):
+    m = _ROAD.search(text or "")
+    return m.group(1).strip() if m else None
 
 
 # ── Вікно ────────────────────────────────────────────────────────────────────

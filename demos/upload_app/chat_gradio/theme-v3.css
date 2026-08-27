@@ -865,3 +865,55 @@ details.src > *:not(summary) {
 /* 5. Підпис під назвою в бічній панелі -- світліше тло, тому контраст
  *    беремо не прозорістю, а кольором. */
 #brand .brand-sub { color: var(--c-muted); font-size: 12.5px }
+
+/* ===== ДРУГИЙ ПРОХІД ПО ЖИВОМУ ЧАТУ 27.08 ================================ */
+
+/* 6. Кнопка «відправити» з'їжджала НА НОВИЙ РЯДОК під полем.
+ *    Причина: Gradio кладе кнопку у власну обгортку-блок, а обгортка -- це
+ *    елемент flex зі стандартною шириною 100%, тому рядок переносився. Ми
+ *    стилізували саму кнопку, а переносила рядок обгортка. Тому правила
+ *    тепер на ОБГОРТКУ, і перенос заборонено явно. */
+#composer { flex-wrap: nowrap !important }
+#composer > *:last-child,
+#composer > *:has(#send-btn) {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    align-self: flex-end !important;
+    /* Обгортка Gradio несе власні відступи й межу -- вони тут зайві:
+       видимою мусить бути кнопка, а не рамка навколо кнопки. */
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+/* 7. Стрічка щільніша й спокійніша (запит Ані).
+ *    Було: відступи розраховані на широкий екран, і три рядки відповіді
+ *    займали пів екрана. Стало: менші проміжки, менший аватар, а блок
+ *    «Джерело» -- тонкий рядок, який розкривається, а не постійна панель. */
+#chat-area .message-row { margin-bottom: var(--s-2) !important }
+#chat-area .message { line-height: 1.5 }
+.gradio-container .message.bot details,
+.gradio-container .bot .message details {
+    background: transparent !important;
+    border: 0 !important;
+    border-top: 1px solid var(--c-hairline) !important;
+    border-radius: 0 !important;
+    padding: var(--s-2) 0 0 !important;
+    margin-top: var(--s-2) !important;
+}
+.gradio-container details > summary {
+    cursor: pointer;
+    font-size: 11px !important;
+    letter-spacing: .09em;
+    color: var(--c-muted) !important;
+}
+.gradio-container details[open] > summary { margin-bottom: var(--s-2) }
+/* Розкритий вміст «Джерела» -- дрібним і моноширинним: це службова
+   довідка (SQL, номер звернення), а не текст відповіді. */
+.gradio-container details[open] {
+    font-family: var(--font-mono) !important;
+    font-size: 12px !important;
+    color: var(--c-muted) !important;
+}
+.gradio-container details[open] > summary { font-family: var(--font) !important }
