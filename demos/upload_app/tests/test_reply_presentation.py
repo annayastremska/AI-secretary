@@ -38,3 +38,52 @@ def test_answer_text_itself_has_no_markup():
     import demos.upload_app.chat_gradio.tiers as tiers
     src = open(tiers.__file__, encoding="utf-8").read()
     assert "**Доповідаю" not in src
+
+
+# ── Номер звернення: РІВНО ОДИН раз, і саме дрібним рядком знизу ────────────
+#
+# Аня 27.08: «код звернення дублюється, нехай він буде лише окремим шрифтом
+# меншим знизу». До цього номер стояв і в блоці «джерело», і окремим рядком --
+# два однакові шестизначні коди в одній відповіді читаються як два різні
+# номери.
+
+SRC_WITH_ID = (
+    "Доповідаю: 32 записи.\n\n"
+    "<details class=\"src\"><summary>джерело</summary>"
+    "джерело: шаблон<br>дорога: каталог<br>"
+    "зріз бази: 2026-08-27<br>звернення: 69b6ea</details>")
+
+
+def test_request_id_is_shown_exactly_once():
+    out = chat_app.render_reply(SRC_WITH_ID)
+    assert out.count("69b6ea") == 1, out
+    assert '<div class="req-id">звернення 69b6ea</div>' in out
+    assert "звернення: 69b6ea" not in out, "номер лишився в блоці «джерело»"
+
+
+def test_removing_the_id_leaves_no_dangling_separator():
+    """Вирізаємо разом із розділювачем: інакше в «джерелі» лишається
+    висячий `<br>` перед закриттям, тобто порожній рядок у розгортці."""
+    out = chat_app.render_reply(SRC_WITH_ID)
+    assert "<br></details>" not in out
+    # І сам блок «джерело» цілий -- вирізали рядок, а не розтрощили розмітку
+    assert "<details class=\"src\">" in out and "</details>" in out
+
+
+def test_short_refusal_without_details_also_gets_one_id():
+    """Короткі відмови приходять без `<details>`: там номер дописано порожнім
+    рядком, і його теж треба перенести в дрібний рядок, а не подвоїти."""
+    out = chat_app.render_reply("Відхилено.\n\nзвернення: abc123")
+    assert out.count("abc123") == 1
+    assert '<div class="req-id">звернення abc123</div>' in out
+
+
+def test_raw_answer_still_carries_the_number():
+    """ПЕРЕВІРКА НА ПОБІЧНУ ШКОДУ. Прибрано лише з ВІДОБРАЖЕННЯ. У сирому
+    тексті номер мусить лишитись: на ньому тримається `_with_request_id`
+    (готові константи-відмови, чий footer зібрався ще при імпорті) і заборона
+    дописувати щось після службового маркера стану діалогу."""
+    filled = chat_app._with_request_id("Відхилено.", "abc123")
+    assert "звернення: abc123" in filled
+    # і повторний виклик не подвоює
+    assert chat_app._with_request_id(filled, "abc123").count("abc123") == 1
