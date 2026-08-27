@@ -1511,12 +1511,22 @@ details.src > *:not(summary) {
  *     шапці». Це та сама помилка, що з підказкою: правило на «усіх нащадків»
  *     живе доти, доки нащадок один.
  */
-#topbar > * { border-bottom: 0 !important; padding-bottom: 0 !important }
-#topbar .prose,
-#topbar h1, #topbar h2, #topbar h3, #topbar p {
+/* Жодних меж у шапці -- крім ОДНІЄЇ, під назвою екрана.
+   Селектор «усе, що схоже на текст» (`.prose`, `h1..h3`, `p`) не годився: Gradio
+   обертає будь-який свій вміст у `.prose`, тому такий селектор малював лінію і
+   під обгорткою, і під абзацом усередині неї (дві лінії), і під обгорткою
+   перемикача теми (третя, та сама «непотрібна під кнопкою»). Тому в назви тепер
+   власний id, і межа малюється рівно на ньому. */
+#topbar *,
+#topbar > * {
+    border: 0 !important;
+    padding-bottom: 0 !important;
+}
+#topbar-title {
     border-bottom: 1px solid var(--c-border) !important;
     padding-bottom: var(--s-3) !important;
 }
+#topbar-title * { border: 0 !important; padding-bottom: 0 !important }
 /* Блоку кнопки меню на широкому екрані немає зовсім -- ні межі, ні висоти.
    МЕДІА-ЗАПИТ, а не просто `display: none`: телефонне правило 19 стоїть у
    файлі ВИЩЕ, тому безумовне приховування тут перебило б його -- і кнопка
@@ -1525,6 +1535,6 @@ details.src > *:not(summary) {
 @media (min-width: 861px) {
     #nav-toggle-block { display: none !important }
 }
-/* Перемикач теми стоїть абсолютом і в потоці місця не займає -- межа під ним
-   не потрібна (вона й малювала «полоску під кнопкою»). */
-#theme-switch { border: 0 !important; padding: 0 !important }
+/* Перемикач теми стоїть абсолютом і в потоці місця не займає: ні межі, ні
+   відступів. Кругла межа самої кнопки задається окремо (правило 9) і живе. */
+#theme-switch, #theme-switch .prose { border: 0 !important; padding: 0 !important }
