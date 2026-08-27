@@ -1149,34 +1149,14 @@ details.src > *:not(summary) {
     color: color-mix(in srgb, var(--c-on-accent) 88%, transparent);
 }
 
-/* 14. Позначка рівня доступу в бічній панелі чата: під переходами, над QR. */
-.gradio-container .access-badge {
-    display: flex !important;
-    flex-wrap: wrap;
-    gap: 6px 8px;
-    margin-top: var(--s-3);
-    font-size: 11.5px;
-}
-.gradio-container .access-who {
-    font-family: var(--font-data, var(--font-mono));
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    padding: 3px 8px;
-    border: 1px solid currentColor;
-    border-radius: var(--r-pill, 999px);
-}
-.gradio-container .access-badge--guest .access-who { color: var(--c-pending) }
-.gradio-container .access-badge--operator .access-who { color: var(--c-success) }
-.gradio-container .access-note { color: var(--c-muted) }
-.gradio-container a.access-up {
-    color: var(--c-accent) !important;
-    text-decoration: underline !important;
-    background: transparent !important;
-    border: 0 !important;
-    padding: 0 !important;
-    min-height: 0 !important;
-    display: inline !important;
-}
+/* 14. (прибрано) Позначка рівня доступу в бічній панелі чата.
+ *
+ *     Рішення Ані 27.08: у чаті її не показуємо. Вона ламала ритм тісної
+ *     панелі -- три елементи в рядок плюс посилання, -- а рівень доступу
+ *     видно на двох звичайних сторінках, і цього досить: людина заходить на
+ *     сайт, а не в чат окремо. Правила прибрані, щоб не лишалось мертвого
+ *     CSS на клас, якого тут більше немає.
+ */
 
 /* 16. Бічна панель: ніжна рамка праворуч і початок від самої стелі.
  *
@@ -1596,13 +1576,6 @@ details.src > *:not(summary) {
     }
     #theme-switch { right: var(--s-3) !important; top: 6px !important }
 
-    /* Позначка рівня доступу -- у панелі, тобто у шухляді. На головному
-       екрані вона місця не займає. */
-    #sidebar .access-badge {
-        display: flex !important;
-        flex-wrap: wrap;
-        gap: 6px 8px !important;
-    }
 }
 
 /* 22. Позначка рівня не мусить залежати від класів Gradio.

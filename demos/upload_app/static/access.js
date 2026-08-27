@@ -35,14 +35,23 @@
        Тепер, якщо місця ще немає, ми просто не вставляємо -- спостерігач за
        деревом покличе ще раз, коли панель з'явиться. Не показати позначку
        на секунду довше краще, ніж показати її в чужому місці зіпсованою. */
-    var host = document.querySelector(".appbar")
-      || document.getElementById("page-links");
-    if (!host) { return false; }
-    if (host.classList && host.classList.contains("appbar")) {
+    var bar = document.querySelector(".appbar");
+    if (bar) {
       badge.classList.add("access-badge--bar");
+      bar.appendChild(badge);
+      return "placed";
     }
-    host.appendChild(badge);
-    return true;
+    /* У ЧАТІ ПОЗНАЧКИ НЕМА (рішення Ані 27.08). Вона стояла в бічній панелі,
+       і від неї «все інше негарно поїхало»: панель тісна, а позначка це три
+       елементи в рядок плюс посилання -- вони ламали ритм решти панелі. А
+       рівень доступу видно на двох звичайних сторінках, і цього досить:
+       людина заходить на сайт, а не в чат окремо.
+
+       Повертаємо "done", а не "false": інакше спостерігач за деревом
+       нескінченно перепитував би /api/whoami, шукаючи місце, якого тут за
+       рішенням немає. */
+    if (document.getElementById("sidebar")) { return "done"; }
+    return false;
   }
 
   function build(info) {
@@ -110,7 +119,8 @@
         return;
       }
       if (!info || !info.level) { state = "idle"; return; }
-      if (!place(build(info))) {
+      var placed = place(build(info));
+      if (placed === false) {
         /* Місця ще немає -- вертаємо стан, спостерігач покличе ще раз. */
         state = "idle";
         return;
