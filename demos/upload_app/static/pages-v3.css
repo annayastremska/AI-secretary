@@ -1199,3 +1199,55 @@ thead th {
        переходів. */
     .access-badge--bar { margin: var(--s-2) var(--s-4) var(--s-3) !important }
 }
+
+/* ===== ТЕЛЕФОН: ПОВІТРЯ, ЗАХІД ДРУГИЙ ====================================
+ * Аня 27.08: «сторінка завантаження досі cluttered, бракує відступів».
+ *
+ * Перший захід збільшив відступи навколо блоків. Цього не досить, і причина
+ * в іншому місці: щільно стоїть ВМІСТ блоків, а не блоки між собою. Смуга
+ * кроків, дві кнопки й підпис під ними злипаються в один згусток, тому
+ * верхня половина екрана виглядає забитою незалежно від того, скільком
+ * повітря навколо неї.
+ *
+ * Тому цей захід -- усередину: більший крок між рядками, вищі кнопки з
+ * проміжком, підпис відділений, заголовок і вступ не в упор один до одного.
+ */
+@media (max-width: 640px) {
+    h1 {
+        font-size: 25px !important;
+        line-height: 1.25;
+        margin: 0 0 var(--s-3) !important;
+    }
+    .lede {
+        font-size: 15px !important;
+        line-height: 1.55 !important;
+        margin: 0 0 var(--s-6) !important;
+    }
+    /* Смуга кроків: вище, з повітрям, і кроки не в упор один до одного. */
+    .pathbar {
+        gap: var(--s-2) !important;
+        margin: 0 0 var(--s-6) !important;
+    }
+    .pathbar li { min-height: 50px !important; font-size: 12px !important }
+
+    /* Блок вибору файла -- головна дія екрана, тому найбільше повітря саме
+       тут: усередині рамки, між кнопками й перед підписом. */
+    section { padding: var(--s-5) var(--s-4) !important;
+              margin: 0 0 var(--s-6) !important }
+    .pick-mobile { display: block }
+    .pick {
+        min-height: 62px !important;
+        margin: 0 0 var(--s-4) !important;
+        font-size: 16px !important;
+    }
+    .pick:last-of-type { margin-bottom: 0 !important }
+    .pick-note {
+        margin: var(--s-4) 0 0 !important;
+        font-size: 13.5px !important;
+    }
+
+    /* Плитки статистики на телефоні -- один стовпчик: два стовпці на 390px
+       дають числа, які не влазять, і підписи в два рядки. */
+    .tiles { grid-template-columns: 1fr !important }
+    .tiles .tile:nth-child(odd) { border-right: 0 !important }
+}

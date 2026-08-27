@@ -1791,3 +1791,38 @@ details.src > *:not(summary) {
        за собою сторінку. */
     #chat-area { overscroll-behavior: contain !important }
 }
+
+/* 28. ТЕЛЕФОН: шапка чата -- брендовою зеленню (Аня 27.08).
+ *
+ *     Нащо саме на телефоні. На широкому екрані бренд несе бічна панель: там
+ *     знак, назва продукту й підпис. На телефоні панель схована в шухляду --
+ *     тобто на головному екрані бренда немає взагалі, і чат виглядає як
+ *     сторінка нізвідки. Зелена смуга вгорі повертає його одним елементом.
+ *
+ *     Разом із тлом мусить змінитись УСЕ, що на ньому лежить: назва, кнопка
+ *     меню, перемикач теми. Половинчаста заміна (темний текст на темній
+ *     оливі) -- це рівно та поломка, яку ми вже мали в повідомленнях чата.
+ */
+@media (max-width: 860px) {
+    #topbar {
+        background: var(--c-brand) !important;
+        border-bottom: 0 !important;
+        /* Безпечна зона зверху: на iPhone смуга статусу накриває перші
+           пікселі, і зелень мусить іти під неї, а вміст -- нижче. */
+        padding-top: calc(var(--s-2) + env(safe-area-inset-top)) !important;
+    }
+    #topbar-title, #topbar-title * {
+        color: var(--c-brand-text) !important;
+    }
+    /* Риски кнопки меню -- світлі, інакше на зеленому їх не видно. */
+    #nav-toggle span { background: var(--c-brand-text) !important }
+    /* Перемикач теми -- світла межа й світлий знак. */
+    #theme-switch .theme-toggle {
+        border-color: color-mix(in srgb, var(--c-brand-text) 40%,
+                                transparent) !important;
+        color: var(--c-brand-text) !important;
+    }
+    #theme-switch .theme-toggle:hover {
+        background: rgba(255, 255, 255, .12) !important;
+    }
+}
