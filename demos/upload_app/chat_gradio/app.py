@@ -1805,6 +1805,8 @@ TOKENS_CSS = {
 TOGGLE_JS = os.path.join(_STATIC, "theme-toggle.js")
 #: Показ рівня доступу -- той самий файл, що на звичайних сторінках.
 ACCESS_JS = os.path.join(_STATIC, "access.js")
+#: Телефонна розкладка й вимірювання висот -- на них тримається розкладка чата.
+MOBILE_JS = os.path.join(_STATIC, "mobile.js")
 
 TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
 
@@ -1898,6 +1900,8 @@ def make_head_css():
         toggle = fh.read()
     with open(ACCESS_JS, encoding="utf-8") as fh:
         access = fh.read()
+    with open(MOBILE_JS, encoding="utf-8") as fh:
+        mobile = fh.read()
     # Скрипт перемикача теми -- тим самим способом, що CSS: інлайном, а
     # не <script src>. Причина та сама, що в коментарі вище: head
     # віддається до монтування, і відносний шлях під root_path=/chat не
@@ -1905,7 +1909,8 @@ def make_head_css():
     # тобто без блимання світлою темою.
     return ("<style>" + "\n".join(parts) + "</style>"
             + "<script>" + toggle + "</script>"
-            + "<script>" + access + "</script>")
+            + "<script>" + access + "</script>"
+            + "<script>" + mobile + "</script>")
 
 
 #: Запасні приклади -- без дат і номерів, бо саме вони й «псуються» при зміні
@@ -2097,6 +2102,16 @@ def build_blocks():
 
             with gr.Column(scale=1, elem_id="main-col"):
                 with gr.Column(elem_id="topbar"):
+                    # Кнопка меню -- ЛІВОРУЧ у шапці, і лише на вузькому
+                    # екрані (ховає CSS). Розмітка серверна, а не вставлена
+                    # скриптом: кнопка, якої немає до виконання JS, --
+                    # мертва кнопка для читача екрана.
+                    gr.HTML('<button type="button" id="nav-toggle" '
+                            'aria-label="Меню" aria-expanded="false">'
+                            '<span></span><span></span><span></span>'
+                            '</button>'
+                            '<div id="nav-backdrop" aria-hidden="true"></div>',
+                            elem_id="nav-toggle-block")
                     gr.Markdown("Чат обліку особового складу")
                     # Перемикач теми -- у шапці праворуч, на рівні заголовка:
                     # те саме місце, що на двох звичайних сторінках. Був у

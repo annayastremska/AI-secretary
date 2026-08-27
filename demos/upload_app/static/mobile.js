@@ -40,6 +40,47 @@
     measure();
   }
 
+  /* ── 1b. Висоти шапки, поля вводу й підказки ──────────────────────────
+   *
+   * Розкладка чата виймає стрічку, поле й підказку з потоку (див. правило 18
+   * у темі), і стрічці потрібні `top` і `bottom`. Числами їх зашивати не
+   * можна: рівно на цьому вже двічі ламалось -- літерал 104px розійшовся з
+   * реальністю, як тільки поле підросло. Тому міряємо справжні висоти й
+   * кладемо у змінні CSS.
+   *
+   * ResizeObserver, а не одноразовий замір: поле вводу росте, коли людина
+   * пише багаторядкове питання, і стрічка мусить одразу віддати йому місце.
+   */
+  function heights() {
+    var map = {
+      "--topbar-h": document.getElementById("topbar"),
+      "--composer-h": document.getElementById("composer"),
+      "--hint-h": document.getElementById("hint"),
+    };
+    for (var name in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, name)) { continue; }
+      var el = map[name];
+      if (!el) { continue; }
+      var h = Math.round(el.getBoundingClientRect().height);
+      /* Нуль означає «елемент ще не намалювався» -- запасне значення з CSS
+         кращe за нуль: нуль зробив би стрічку на весь екран і сховав поле. */
+      if (h > 0) { root.style.setProperty(name, h + "px"); }
+    }
+  }
+
+  function watchHeights() {
+    heights();
+    if (!window.ResizeObserver) { return; }
+    var ro = new ResizeObserver(heights);
+    ["topbar", "composer", "hint"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && !el.dataset.roWired) {
+        el.dataset.roWired = "1";
+        ro.observe(el);
+      }
+    });
+  }
+
   /* ── 2. Шухляда ───────────────────────────────────────────────────────── */
   function main() {
     return document.getElementById("main-col");
@@ -79,6 +120,7 @@
   }
 
   function wire() {
+    watchHeights();
     var btn = document.getElementById("nav-toggle");
     if (btn && !btn.dataset.wired) {
       btn.dataset.wired = "1";
@@ -128,8 +170,12 @@
   if (window.MutationObserver) {
     var obs = new MutationObserver(function () {
       wire();
-      if (document.getElementById("nav-toggle") &&
-          document.getElementById("nav-toggle").dataset.wired) {
+      heights();
+      /* Знімаємось, коли є і висоти, і (якщо вона взагалі є) кнопка меню.
+         На широкому екрані кнопки немає, тому достатньо шапки. */
+      var haveHeights = !!document.getElementById("composer");
+      var btnEl = document.getElementById("nav-toggle");
+      if (haveHeights && (!btnEl || btnEl.dataset.wired)) {
         obs.disconnect();
       }
     });

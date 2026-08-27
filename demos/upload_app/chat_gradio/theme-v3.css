@@ -1099,52 +1099,6 @@ details.src > *:not(summary) {
 #theme-switch { pointer-events: none !important }
 #theme-switch .theme-toggle { pointer-events: auto !important }
 
-/* 12. Поле вводу з'їжджало за екран і обрізалось.
- *
- *     Причина -- МАГІЧНЕ ЧИСЛО. Висота стрічки рахувалась як
- *     `100dvh - --header-h - --composer-h`, де `--composer-h` це літерал
- *     104px. Поки поле було одного рядка, число сходилось. Далі воно
- *     підросло (вище поле, підказка про клавіші під ним, кнопка «спробувати
- *     ще»), сума перевищила висоту вікна -- і низ поїхав за екран. На повному
- *     екрані так само: справа не в розмірі вікна, а в тому, що два числа
- *     мусили збігатись, а збігатись їм нічого не змушувало.
- *
- *     Тому число прибрано зовсім: колонка чата -- це висота вікна, шапка,
- *     поле й підказка займають, скільком їм потрібно, а стрічка забирає
- *     решту. Тепер жодна майбутня правка поля не може обрізати екран, бо
- *     висоту стрічки ніхто не називає числом -- вона те, що лишилось.
- *
- *     `:has` тут не про красу: Gradio може обгорнути стрічку у власний блок,
- *     і тоді розтягуватись мусить обгортка, а не сама стрічка.
- */
-#main-col {
-    height: 100dvh !important;
-    max-height: 100dvh !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    gap: 0 !important;
-}
-#main-col > * { flex: 0 0 auto }
-#main-col > *:has(#chat-area) {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-}
-#chat-area {
-    flex: 1 1 auto !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-}
-/* Прокручується САМА стрічка, а не колонка: інакше поле вводу їхало б угору
-   разом із повідомленнями. */
-#chat-area, #chat-area .bubble-wrap { overflow-y: auto !important }
-/* Екран вітання займає вільне місце так само, як стрічка: без цього він
-   тулився до шапки, а поле вводу лишалось унизу з великою дірою. */
-#main-col > *:has(#hero) { flex: 1 1 auto; min-height: 0 }
-
 /* 13. Блок гостьового доступу: зелена рама, код на білій плашці, по центру.
  *
  *     Правка Ані 27.08: обіграти цікавіше -- менша рама, зелена, код по
@@ -1224,57 +1178,6 @@ details.src > *:not(summary) {
     display: inline !important;
 }
 
-/* 15. Поле вводу опускалося вниз і зникало, коли стрічка росла.
- *
- *     Причина -- ГЛИБИНА ОБГОРТОК, а не висота вікна. У правилі 12 я
- *     поставила стискання (`flex: 1 1 auto; min-height: 0`) на ПРЯМОГО
- *     нащадка колонки. Але між ним і стрічкою Gradio має ще кілька своїх
- *     шарів, і кожен із них -- елемент flex зі стандартним `min-height:
- *     auto`. Такий елемент відмовляється стискатись нижче свого вмісту: він
- *     росте разом зі стрічкою й виштовхує поле вводу за нижню межу колонки, а
- *     `overflow: hidden` його там і ховає.
- *
- *     Тому правило накриває ВЕСЬ ЛАНЦЮГ предків стрічки, а не один рівень:
- *     `*:has(#chat-area)` -- це кожен елемент усередині колонки, який містить
- *     стрічку, на будь-якій глибині. Вгадувати кількість шарів Gradio не
- *     треба, і наступне оновлення бібліотеки цього не зламає.
- *
- *     Прокручується САМА стрічка. Поле вводу лишається на місці завжди --
- *     воно вже не частина того, що росте.
- */
-#main-col *:has(#chat-area) {
-    display: flex !important;
-    flex-direction: column !important;
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-}
-#chat-area {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    height: auto !important;
-    max-height: none !important;
-    overflow-y: auto !important;
-}
-/* Внутрішня обгортка стрічки теж мусить стискатись: інакше прокрутка
-   з'являється не в неї, а в колонки -- і поле знову їде вгору разом із
-   повідомленнями. */
-#chat-area .bubble-wrap {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    overflow-y: auto !important;
-}
-/* Поле вводу й підказка -- не стискаються й не ростуть. */
-#composer, #hint, #retry-btn {
-    flex: 0 0 auto !important;
-    min-height: 0 !important;
-}
-/* Смуга поля вводу читається як окрема: власне тло й волосяна межа зверху.
-   Доти при довгій стрічці було незрозуміло, де закінчується розмова. */
-#composer {
-    background: var(--c-bg) !important;
-    border-top: 1px solid var(--c-hairline) !important;
-}
-
 /* 16. Бічна панель: ніжна рамка праворуч і початок від самої стелі.
  *
  *     Рамка (`border-right`) була прописана ще в правилі 54 -- і її не було
@@ -1351,4 +1254,235 @@ details.src > *:not(summary) {
     border-top: 1px solid var(--c-border) !important;
     margin-top: auto !important;
     padding: var(--s-3) var(--s-2) var(--s-1) !important;
+}
+
+/* 18. РОЗКЛАДКА ЧАТА: три елементи виймаються з потоку.
+ *
+ *     Історія трьох спроб, бо вона тут повчальна.
+ *
+ *     Спроба 1 -- магічне число: висота стрічки = `100dvh` мінус шапка мінус
+ *     ЛІТЕРАЛ 104px. Поле підросло -> сума перевищила вікно -> низ за екраном.
+ *
+ *     Спроба 2 -- flex по ланцюгу обгорток (`*:has(#chat-area)`). Працювала
+ *     на першій відповіді й ламалась на ДРУГІЙ: Gradio перебудовує дерево
+ *     після кожного ходу, і мої `display: flex` та `flex: 1` лягали на
+ *     елементи, для яких бібліотека планувала іншу розкладку. Висота одного з
+ *     предків ставала нульовою -- стрічка згорталась (однотонний екран), поле
+ *     вводу виштовхувалось. Підхід був хибний за побудовою: боротьба з чужою
+ *     розкладкою її ж зброєю, і кожна нова версія дерева -- новий шанс
+ *     програти.
+ *
+ *     Спроба 3, ця. Не боремося ні з чим: три елементи, які мусять стояти на
+ *     місці, ВИЙМАЄМО З ПОТОКУ. Тоді обгортки можуть перебудовуватись як
+ *     завгодно -- вони більше не несуть висоту. Стрічка отримує ВИЗНАЧЕНУ
+ *     висоту (є і top, і bottom), а саме визначена висота потрібна тому, що
+ *     прокручується.
+ *
+ *     Висоти не зашиті числами: їх міряє static/mobile.js і кладе у змінні.
+ *     У var() лишаються запасні значення -- якщо скрипт не запустився,
+ *     розкладка не ідеальна, але робоча.
+ */
+#main-col {
+    position: relative !important;
+    height: var(--vvh, 100dvh) !important;
+    max-height: var(--vvh, 100dvh) !important;
+    overflow: hidden !important;
+    display: block !important;
+}
+#chat-area {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: var(--topbar-h, 62px) !important;
+    bottom: calc(var(--composer-h, 78px) + var(--hint-h, 30px)) !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
+#chat-area .bubble-wrap {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+#composer {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: var(--hint-h, 30px) !important;
+    width: auto !important;
+    background: var(--c-bg) !important;
+    border-top: 1px solid var(--c-hairline) !important;
+    z-index: 4;
+}
+#hint {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: auto !important;
+    background: var(--c-bg) !important;
+    z-index: 4;
+}
+/* «Спробувати ще» з'являється лише після збою -- кладемо його над полем, щоб
+   воно не стрибало. */
+#retry-btn {
+    position: absolute !important;
+    right: var(--s-5) !important;
+    bottom: calc(var(--composer-h, 78px) + var(--hint-h, 30px) + var(--s-2)) !important;
+    z-index: 5;
+}
+/* Екран вітання -- на тому самому місці, що стрічка. */
+#hero {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: var(--topbar-h, 62px) !important;
+    bottom: calc(var(--composer-h, 78px) + var(--hint-h, 30px)) !important;
+    width: auto !important;
+    overflow-y: auto !important;
+}
+#topbar {
+    position: relative !important;
+    z-index: 3;
+}
+
+/* 19. ТЕЛЕФОН: бічна панель стає шухлядою, чат займає весь екран.
+ *
+ *     Зауваження Ані: «на телефоні навіть не видно чата, це обрізана
+ *     комп'ютерна картинка». І це правда: розкладка була двоколонковою, а
+ *     панель фіксованих 272px на екрані 390px забирає половину розмови.
+ *     Медіа-запити, які були, правили кегль і відступи -- тобто ознаки, а не
+ *     причину.
+ *
+ *     Правила, узяті з практики чат-інтерфейсів (Setproduct, огляди 2026), а
+ *     не з голови:
+ *       * перелік/панель на телефоні -- ШУХЛЯДА за кнопкою, не вужча колонка;
+ *       * поле вводу ПРИТИСНУТЕ до низу й піднімається з клавіатурою;
+ *       * ширина повідомлення -- уся, мінус 16px з боків;
+ *       * дотикова цiль -- не менша за 44px;
+ *       * зайве з шапки при відкритій клавіатурі -- ховати.
+ *
+ *     Межа 860px, а не 640: двоколонкова розкладка перестає працювати задовго
+ *     до телефонної ширини -- на планшеті в портреті панель уже з'їдає
+ *     розмову.
+ */
+#nav-toggle { display: none }
+#nav-backdrop { display: none }
+
+@media (max-width: 860px) {
+    /* ── Панель -> шухляда ─────────────────────────────────────────────── */
+    #sidebar {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: min(86vw, 320px) !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        height: 100% !important;
+        max-height: none !important;
+        z-index: 60 !important;
+        transform: translateX(-100%);
+        transition: transform 200ms var(--ease);
+        /* Тінь із правила 16 тут не потрібна -- у шухляди своя, сильніша. */
+        box-shadow: 0 0 40px rgba(0, 0, 0, .35) !important;
+        overflow-y: auto !important;
+    }
+    :root[data-nav="open"] #sidebar { transform: translateX(0) }
+
+    #nav-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 55;
+        background: rgba(0, 0, 0, .42);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 200ms var(--ease);
+    }
+    :root[data-nav="open"] #nav-backdrop { opacity: 1; pointer-events: auto }
+
+    /* ── Кнопка меню: три риски, дотикова цiль 44px ─────────────────────── */
+    #nav-toggle-block {
+        position: absolute !important;
+        top: 8px !important;
+        left: 6px !important;
+        z-index: 6;
+        width: auto !important;
+        padding: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+    }
+    #nav-toggle {
+        display: grid;
+        place-content: center;
+        gap: 4px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+    }
+    #nav-toggle span {
+        display: block;
+        width: 18px;
+        height: 2px;
+        background: var(--c-text);
+        transition: transform 200ms var(--ease), opacity 200ms var(--ease);
+    }
+    /* Відкрито -- риски складаються в хрестик: людина мусить бачити, що та
+       сама кнопка закриває. */
+    :root[data-nav="open"] #nav-toggle span:nth-child(1) {
+        transform: translateY(6px) rotate(45deg);
+    }
+    :root[data-nav="open"] #nav-toggle span:nth-child(2) { opacity: 0 }
+    :root[data-nav="open"] #nav-toggle span:nth-child(3) {
+        transform: translateY(-6px) rotate(-45deg);
+    }
+
+    /* ── Чат на весь екран ─────────────────────────────────────────────── */
+    #main-col { width: 100% !important }
+    #topbar { padding: var(--s-2) 0 !important }
+    #topbar > * {
+        padding: 0 var(--s-3) 0 52px !important;   /* місце під кнопку меню */
+        max-width: none !important;
+    }
+    #chat-area, #hero {
+        padding: var(--s-3) var(--s-3) 0 !important;
+        max-width: none !important;
+    }
+    /* Повідомлення -- на всю ширину: обмеження 68ch на 390px не робить нічого,
+       крім звуження і без того вузького. */
+    #chat-area .message, #chat-area .message-content {
+        max-width: none !important;
+    }
+    #composer { padding: var(--s-2) var(--s-3) var(--s-3) !important }
+    #composer textarea { font-size: 16px !important }   /* iOS не зумить */
+    #send-btn {
+        right: calc(var(--s-3) + 6px) !important;
+        width: 44px !important;
+        min-width: 44px !important;
+        height: 44px !important;
+    }
+    #hint { padding: 0 var(--s-3) var(--s-2) !important; font-size: 10.5px }
+    /* Підказка про клавіші на телефоні безглузда: клавіш немає. */
+    #hint .keys { display: none }
+
+    /* QR гостьового входу на телефоні не потрібен: людина вже зайшла з
+       телефона, показувати їй код для входу -- безглуздо. */
+    #guest-qr-block { display: none !important }
+
+    /* Блок «джерело» став довшим (тип документа, номер, дата) -- на вузькому
+       екрані розгорнутий він з'їдає розмову. Дрібніше й щільніше. */
+    #chat-area details { font-size: 11.5px !important }
+}
+
+/* Клавіатура відкрита -- ховаємо назву екрана: три рядки шапки на 40% висоти
+   вікна це забагато. Кнопка меню лишається. */
+@media (max-width: 860px) and (max-height: 460px) {
+    #topbar > *:not(#nav-toggle-block) { display: none !important }
+    #topbar { padding: 0 !important; min-height: 48px }
 }
