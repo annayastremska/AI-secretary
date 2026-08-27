@@ -1826,3 +1826,53 @@ details.src > *:not(summary) {
         background: rgba(255, 255, 255, .12) !important;
     }
 }
+
+/* 29. Три правки з телефона -- і чому попередні не подіяли.
+ *
+ * A. НАЗВА В ЗЕЛЕНІЙ ШАПЦІ лишалась темною. Я поставив колір селектором
+ *    `#topbar-title *`, а в базовій темі стоїть `#topbar h3, #topbar p` із
+ *    `!important`. Специфічність: `#topbar h3` -- id плюс елемент, а
+ *    `#topbar-title *` -- id плюс універсальний, який не важить нічого. Тобто
+ *    базове правило сильніше, і колір не мінявся.
+ *    Урок той самий, що вранці: `!important` не робить правило сильнішим за
+ *    інше `!important` -- далі рахується специфічність. Тому тут селектори
+ *    названі поелементно.
+ *
+ * B. ОБВОДКА ПОВІДОМЛЕНЬ не поменшала, бо відступ дає не лише сама коробка:
+ *    свій відступ має ще внутрішня обгортка Gradio. Я зменшив зовнішній, а
+ *    внутрішній лишився -- сума майже не змінилась. Тепер знімається обидва.
+ */
+@media (max-width: 860px) {
+    /* A. Назва -- поелементно, інакше базове правило перемагає. */
+    #topbar-title h1, #topbar-title h2, #topbar-title h3,
+    #topbar-title p, #topbar-title .prose, #topbar-title span {
+        color: var(--c-brand-text) !important;
+    }
+    /* Перемикач теми на зеленому -- світлий, у ЛЮБІЙ темі: тло тут завжди
+       брендове, тому колір знака не залежить від світлої чи темної. */
+    .gradio-container #theme-switch .theme-toggle {
+        border-color: color-mix(in srgb, var(--c-brand-text) 45%,
+                                transparent) !important;
+        color: var(--c-brand-text) !important;
+        background: transparent !important;
+    }
+    .gradio-container #theme-switch .theme-toggle svg { stroke: currentColor }
+
+    /* B. Обводка повідомлення: і зовнішній відступ, і внутрішній. */
+    .gradio-container #chat-area .message.bot,
+    .gradio-container #chat-area .message.user {
+        padding: 7px 10px !important;
+    }
+    .gradio-container #chat-area .message-content,
+    .gradio-container #chat-area .message .prose,
+    .gradio-container #chat-area .message .md {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    /* Відступ між абзацами всередині відповіді теж менший: на 390px кожен
+       зайвий піксель по вертикалі -- це рядок тексту, який не влазить. */
+    .gradio-container #chat-area .message-content p { margin: 0 0 4px !important }
+    .gradio-container #chat-area .message-content p:last-child {
+        margin-bottom: 0 !important;
+    }
+}
