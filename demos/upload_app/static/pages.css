@@ -607,8 +607,12 @@ pre.log {
     position: absolute;
     top: 14px;
     right: var(--s-4, 16px);
-    border-color: color-mix(in srgb, var(--c-brand-text) 38%, transparent);
-    color: var(--c-brand-text);
+    /* Фолбек на --c-text: брендового кольору тексту немає у v1 (стара
+       тема, смуга там світла), і без фолбека кнопка лишилась би без
+       кольору взагалі. */
+    border-color: color-mix(in srgb, var(--c-brand-text, var(--c-text)) 38%,
+                            transparent);
+    color: var(--c-brand-text, var(--c-text));
 }
 .appbar .theme-toggle:hover { background: rgba(255, 255, 255, .10) }
 @media (max-width: 640px) {
