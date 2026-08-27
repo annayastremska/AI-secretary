@@ -31,6 +31,7 @@
 #     поки нуль, тож повертається [] і чат чесно відмовляє.
 
 import os
+import re
 
 import psycopg
 from psycopg.rows import dict_row
@@ -158,6 +159,14 @@ def _absence_row(r):
         "service_id": (f"ID-{r['object_id']}"
                        if r["fact_status"] == "confirmed" else ""),
         "person_name_raw": r["person_name_raw"] or "",
+        # ЧИЯ це відсутність -- ключем, а не рядком.
+        #
+        # `object_id` у запиті був завжди, але назовні не виходив, тому «чий це
+        # документ» доводилось з'ясовувати порівнянням ПІБ. А саме порівняння
+        # ПІБ і є причиною п. 6 звіту Дениса: у картці однієї людини лежали
+        # документи двох інших, бо всі троє мали спільний шматок імені.
+        # Прилад, який міряє чистоту картки, мусить питати КЛЮЧ.
+        "object_id": r["object_id"],
         "date_from": _iso(r["date_from"]),
         "date_to": _iso(r["date_to"]),
         "reason": (r["reason"] or "") if dim == "leave" else "",
@@ -228,8 +237,14 @@ def find_people(subdivision=None, name=None):
            "WHERE 1=1")
     params = {}
     if name:
-        sql += " AND o.canonical_name ILIKE %(name)s"
-        params["name"] = f"%{name}%"
+        # МЕЖА СЛОВА, а не підрядок (див. `name_word_regex`). Якщо слово
+        # закоротке для надійного пошуку -- НЕ шукаємо взагалі: порожній
+        # результат честніший за пів реєстру.
+        rx = name_word_regex(name)
+        if rx is None:
+            return []
+        sql += " AND o.canonical_name ~* %(name)s"
+        params["name"] = rx
     if subdivision:
         # той самий вимір, що й у фільтрі відсутностей, лише від o.id
         sql += (" AND EXISTS (SELECT 1 FROM facts sf "
@@ -240,6 +255,10 @@ def find_people(subdivision=None, name=None):
         params["subdivision"] = _subdivision_pattern(subdivision)
     rows = _query(sql + " ORDER BY o.id", params)
     return [{
+        # Ключ особи. Доти картка складалась і порівнювалась по ПІБ, тобто по
+        # тому самому, що й ламається (п. 6-7 звіту). Прилад ідентифікації
+        # порівнює `object_id`, а не рядок.
+        "object_id": r["object_id"],
         "service_id": r["service_id"] or f"ID-{r['object_id']}",
         # service_id вище має підміну на ID-<object_id>, тому по ньому не
         # видно, чи людина зійшлася зі штаткою. Окремий прапорець -- щоб
@@ -269,6 +288,52 @@ _SUBDIVISION_FILTER = """
               WHERE sf.object_id = f.object_id
                 AND sf.value ILIKE %(subdivision)s)
 """
+
+
+#: Скільком літер дозволяємо дописати після основи слова. Відмінок української
+#: забирає до трьох («Крижанівськ-ого»), тому чотири -- запас на один символ.
+_INFLECTION = 4
+
+#: Мінімальна довжина основи, за якою шукаємо. Коротше -- і «Бог» почне ловити
+#: пів реєстру.
+_MIN_STEM = 5
+
+
+def name_word_regex(word):
+    """Слово з питання -> регулярка Postgres, що ловить це слово в ПІБ ЦІЛИМ.
+
+    НАВІЩО ЦЕ ВЗАГАЛІ ІСНУЄ. Доти пошук особи був `canonical_name ILIKE
+    '%слово%'` -- неприв'язаний підрядок. Наслідок -- п. 6 звіту Дениса
+    27.08: «Богодар» як підрядок є і в «Ґоляш **Богодар** Святославович», і в
+    «Дашкевич Едуард **Богодар**ович», тому три різні людини склеювались в
+    одну картку. Помилку такого роду збоку не видно: картка виглядає
+    нормальною.
+
+    ЯК. Слово мусить починатись на межі (початок рядка або пробіл) і
+    закінчуватись на межі -- з допуском на відмінок в обидві сторони:
+    основа береться коротшою на три літери, а після неї дозволяється до
+    чотирьох. Тобто «Богодар» ловить «Богодар» і «Богодара», але НЕ
+    «Богодарович» (там шість зайвих). А «Крижанівського» з питання ловить
+    «Крижанівський» у базі -- саме той випадок, через який обрізання й
+    з'явилось (без нього чат упевнено заперечував власні дані).
+
+    Метасимволи екрануються: текст приходить від людини й у регулярку
+    підставляти його як є не можна.
+    """
+    w = str(word or "").strip()
+    if len(w) < 3:
+        return None
+    stem = w[:max(_MIN_STEM, len(w) - 3)]
+    # ДОПУСК ПРОПОРЦІЙНИЙ ДОВЖИНІ, а не однаковий.
+    #
+    # Зловив власний тест: при постійному допуску чотири літери коротке слово
+    # «Бог» ловило «Богодар», «Богуслав» і решту -- тобто пів реєстру. Для
+    # трилітерного слова допуск нуль (лише точний збіг), для довгого -- до
+    # чотирьох, бо саме там живе відмінок. Короткі прізвища при цьому не
+    # заборонені: «Дяк» знайдеться, просто не притягне «Дякович».
+    room = min(_INFLECTION, max(0, len(w) - 3))
+    return (r"(^|\s)" + re.escape(stem)
+            + r"[а-яіїєґА-ЯІЇЄҐ'ʼ-]{0,%d}(\s|$)" % room)
 
 
 def _subdivision_pattern(text):
@@ -334,8 +399,12 @@ def returning_on_date(date, subdivision=None):
 def absences_for_person(name_or_service_id, only_active=True):
     """Всі документи про відсутність людини. only_active=True -> лише
     confirmed (аналог «чинний»); False -> і непідтверджені теж."""
+    # МЕЖА СЛОВА замість підрядка -- та сама причина, що у `find_people`.
+    # Ця функція лишається потрібною для одного випадку: особи в реєстрі
+    # немає, а документи з її ПІБ є (тоді `object_id` брати нізвідки).
+    rx = name_word_regex(name_or_service_id)
     sql = _ABSENCE_SELECT + (
-        "  AND (o.canonical_name ILIKE %(pat)s "
+        "  AND (o.canonical_name ~* %(pat)s "
         "       OR p2.service_id = %(exact)s) ")
     sql = sql.replace(
         "JOIN documents dc ON dc.id = f.source_doc_id",
@@ -345,8 +414,35 @@ def absences_for_person(name_or_service_id, only_active=True):
         sql += " AND f.status = 'confirmed'"
     rows = _query(sql + " ORDER BY dat.value NULLS LAST",
                   {"dims": ABSENCE_DIMS,
-                   "pat": f"%{name_or_service_id}%",
+                   # Регулярка, яка не збігається ні з чим, замість None: так
+                   # лишається робочою гілка пошуку за службовим номером.
+                   "pat": rx or r"(?!)",
                    "exact": str(name_or_service_id)})
+    return [_absence_row(r) for r in rows]
+
+
+def absences_for_object(object_id, only_active=True):
+    """Документи про відсутність ОДНІЄЇ особи -- за ключем, не за ПІБ.
+
+    ЦЕ ГОЛОВНА ПРАВКА БЛОКУ C. Доти картка особи складалася з ДВОХ незалежних
+    пошуків по одному рядку: `find_people(name)` давав заголовок, а
+    `absences_for_person(name)` -- документи, і ніде не було сказано, що вони
+    мусять стосуватись однієї людини. Тому «Богодар Святославович» давав
+    картку Дашкевича з документами Ґоляша й Ващенка (п. 6 звіту), а навіть
+    повне однозначне ПІБ «Дашкевич Едуард Богодарович» тягло документ другого
+    Дашкевича -- зміряно приладом 28.08.
+
+    Тут зв'язок один: спершу з'ясовуємо, ХТО це (`object_id`), потім беремо
+    ЙОГО документи. Чужий документ у картці стає неможливим за побудовою, а не
+    менш імовірним.
+    """
+    if not object_id:
+        return []
+    sql = _ABSENCE_SELECT + "  AND f.object_id = %(oid)s "
+    if only_active:
+        sql += " AND f.status = 'confirmed'"
+    rows = _query(sql + " ORDER BY dat.value NULLS LAST",
+                  {"dims": ABSENCE_DIMS, "oid": int(object_id)})
     return [_absence_row(r) for r in rows]
 
 

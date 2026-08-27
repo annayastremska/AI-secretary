@@ -1,0 +1,258 @@
+{
+  "questions": 15,
+  "person_ok": 15,
+  "docs_clean": 15,
+  "input_not_silently_fixed": 15,
+  "fully_ok": 15,
+  "cases": [
+    {
+      "question": "Богодар Святославович",
+      "expect": "57",
+      "strict_docs": true,
+      "note": "п.6: імʼя й по батькові Ґоляша. Денис отримав картку Дашкевича (48) з документами Ґоляша (57) і Ващенка (101)",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Богодар Святославович",
+      "chosen": "Ґоляш Богодар Святославович",
+      "chosen_id": 57,
+      "matches": 1,
+      "doc_owners": [
+        57
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Де зараз Ґоляш",
+      "expect": "57",
+      "strict_docs": true,
+      "note": "контроль: пряме прізвище мусить працювати",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Ґоляш",
+      "chosen": "Ґоляш Богодар Святославович",
+      "chosen_id": 57,
+      "matches": 1,
+      "doc_owners": [
+        57
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Розкажи все про Ґоляша",
+      "expect": "57",
+      "strict_docs": true,
+      "note": "п.28 щит: родовий відмінок",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Ґоляша",
+      "chosen": "Ґоляш Богодар Святославович",
+      "chosen_id": 57,
+      "matches": 1,
+      "doc_owners": [
+        57
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Де зараз Голяш",
+      "expect": "refusal",
+      "strict_docs": true,
+      "note": "п.7: «Голяш» без Ґ у базі немає. Денис отримав Гоголь-Яновського (254) впевнено",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": null,
+      "chosen": null,
+      "chosen_id": null,
+      "matches": 0,
+      "doc_owners": [],
+      "foreign": []
+    },
+    {
+      "question": "Де зараз Malyshko",
+      "expect": "refusal",
+      "strict_docs": true,
+      "note": "п.24 щит: латиницею не шукаємо",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": null,
+      "chosen": null,
+      "chosen_id": null,
+      "matches": 0,
+      "doc_owners": [],
+      "foreign": []
+    },
+    {
+      "question": "Де зараз Кривопишний",
+      "expect": "refusal",
+      "strict_docs": true,
+      "note": "п.20: особи немає; другий рядок про документи зайвий",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": null,
+      "chosen": null,
+      "chosen_id": null,
+      "matches": 0,
+      "doc_owners": [],
+      "foreign": []
+    },
+    {
+      "question": "Покажи всі документи по Малишко Каміллі Омелянівні",
+      "expect": "62",
+      "strict_docs": true,
+      "note": "п.9: на ПОВНЕ ПІБ просив уточнити. Збіг за «Малишко» два (62, 301), за повним ПІБ -- один",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Малишко Каміллі Омелянівні",
+      "chosen": "Малишко Камілла Омелянівна",
+      "chosen_id": 62,
+      "matches": 1,
+      "doc_owners": [
+        62
+      ],
+      "foreign": []
+    },
+    {
+      "question": "де Каміла",
+      "expect": "62",
+      "strict_docs": true,
+      "note": "п.9: менш точний запит працював",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Каміла",
+      "chosen": "Малишко Камілла Омелянівна",
+      "chosen_id": 62,
+      "matches": 1,
+      "doc_owners": [
+        62
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Малишко",
+      "expect": "ambiguous",
+      "strict_docs": true,
+      "note": "два збіги (62, 301) -- уточнення тут правильне",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Малишко",
+      "chosen": "Малишко Камілла Омелянівна",
+      "chosen_id": 62,
+      "matches": 2,
+      "doc_owners": [
+        62
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Дашкевич",
+      "expect": "ambiguous",
+      "strict_docs": true,
+      "note": "два збіги (48, 85)",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Дашкевич",
+      "chosen": "Дашкевич Едуард Богодарович",
+      "chosen_id": 48,
+      "matches": 2,
+      "doc_owners": [
+        48
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Дашкевич Едуард Богодарович",
+      "expect": "48",
+      "strict_docs": true,
+      "note": "повне ПІБ -- однозначно",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Дашкевич Едуард Богодарович",
+      "chosen": "Дашкевич Едуард Богодарович",
+      "chosen_id": 48,
+      "matches": 1,
+      "doc_owners": [
+        48
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Ващенко Богодар Максимович",
+      "expect": "101",
+      "strict_docs": true,
+      "note": "повне ПІБ -- однозначно",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Ващенко Богодар Максимович",
+      "chosen": "Ващенко Богодар Максимович",
+      "chosen_id": 101,
+      "matches": 1,
+      "doc_owners": [
+        101
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Що відомо про Крижанівського?",
+      "expect": "126",
+      "strict_docs": true,
+      "note": "п.30 щит: родовий відмінок довгого прізвища, особи немає у штатці",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Крижанівського",
+      "chosen": "Крижанівський Тарас Богданович",
+      "chosen_id": 126,
+      "matches": 1,
+      "doc_owners": [
+        126
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Швайко Давид Борисович",
+      "expect": "31",
+      "strict_docs": true,
+      "note": "у документах «Швайко» (31), у штатці «Швайка» (325) -- це РІЗНІ object_id",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Швайко Давид Борисович",
+      "chosen": "Швайко Давид Борисович",
+      "chosen_id": 31,
+      "matches": 2,
+      "doc_owners": [
+        31
+      ],
+      "foreign": []
+    },
+    {
+      "question": "Дутка Адам",
+      "expect": "9",
+      "strict_docs": true,
+      "note": "у документах без по батькові (9), у штатці «Дутка Адам Демидович» (222)",
+      "person": "ok",
+      "docs": "ok",
+      "said": "ok",
+      "stem": "Дутка Адам",
+      "chosen": "Дутка Адам",
+      "chosen_id": 9,
+      "matches": 2,
+      "doc_owners": [
+        9
+      ],
+      "foreign": []
+    }
+  ]
+}
