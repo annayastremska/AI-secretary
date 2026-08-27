@@ -1388,7 +1388,7 @@ _DBISH = re.compile(
     r"переві|підрозділ|баз[аіи]|скільки|хто\b|реєстр", re.I)
 
 
-def _extra_tiers(question):
+def _extra_tiers(question, history=None):
     """Порядок доріг (етап 3 плану): каталог правилами → ВЕКТОРИ (найближчий
     шаблон за прикладами, мс) → модель-класифікатор у закритий перелік →
     вільний SELECT (ярус 2). Векторний ярус стоїть ДО гейта _DBISH: він
@@ -1676,7 +1676,7 @@ def _answer_inner(question, history=None):
         elif result is None:
             # сім функцій не підійшли → каталог шаблонів → ярус 2 → чесна
             # відмова (порядок доріг з шапки файлу)
-            out = _extra_tiers(merged) or (
+            out = _extra_tiers(merged, history) or (
                 "Порахувати це за наявними полями не можна (у документах "
                 "немає таких даних).\n" + ANSWER_REFUSE)
         else:
@@ -1691,7 +1691,7 @@ def _answer_inner(question, history=None):
     else:
         # перед чесною відмовою -- каталог шаблонів і ярус 2 (вільний SELECT
         # під рейками); якщо і вони не впорались, відмова лишається відмовою
-        out = _extra_tiers(merged) or ANSWER_REFUSE
+        out = _extra_tiers(merged, history) or ANSWER_REFUSE
 
     out = _as_report(out)
 

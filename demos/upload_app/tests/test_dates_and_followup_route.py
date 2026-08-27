@@ -235,3 +235,34 @@ def test_route_md_tells_the_model_about_the_conversation():
     assert "РОЗМОВУ" in system
     assert "ЗАПОВНИ" in system
     assert "НАЗВИ" in system
+
+
+def test_history_reaches_model_route_through_the_real_call_path(monkeypatch):
+    """ПЕРЕВІРКА НА ПОБІЧНУ ШКОДУ, і вона тут не теоретична.
+
+    Тести вище перевіряють ПІДПИСИ, і цього виявилось мало: пробрасуючи
+    історію, я передала її в `_model_catalog_tier` із `_extra_tiers`, у якого
+    параметра `history` не було зовсім. Виходив `NameError` на будь-якому
+    питанні, що доходило до модельного яруса, -- тобто чат падав. Зловив це
+    лише повний прогін набору (`test_unknown_domain_gate`), і саме тому
+    загальна перевірка після кожного блоку не скорочується.
+
+    Тест іде РЕАЛЬНИМ шляхом виклику й дивиться, що дійшло до маршрутизатора.
+    """
+    seen = {}
+
+    def fake_route(question, history=None):
+        seen["question"] = question
+        seen["history"] = history
+        return None            # далі яруси не потрібні
+
+    monkeypatch.setattr(tiers, "model_route", fake_route)
+    monkeypatch.setattr(chat_app, "model_available", lambda: True)
+    monkeypatch.setattr(tiers, "_get_model", lambda: object())
+
+    history = [{"role": "user", "content": "Скільком у відпустці 2026-10-10?"},
+               {"role": "assistant", "content": "1 особа"}]
+    chat_app._extra_tiers("а хто?", history)
+
+    assert seen.get("history") == history, (
+        "історія не дійшла до маршрутизатора реальним шляхом виклику")
