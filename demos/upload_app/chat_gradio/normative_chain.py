@@ -139,8 +139,6 @@ def _prepare():
         if scripts not in sys.path:
             sys.path.insert(0, scripts)
         import search_units_test as su          # noqa: F401
-        from build_units_test import load_encoder
-        from measure_rerank_lift import load_reranker
     except Exception as exc:
         _STATE.update(ready=False,
                       reason=f"немає коду пошуку по одиницях: "
@@ -175,8 +173,8 @@ def _prepare():
         return False, _STATE["reason"]
 
     try:
-        _STATE["encode"] = load_encoder()
-        _STATE["rescore"] = load_reranker()
+        _STATE["encode"] = _load_query_encoder()
+        _STATE["rescore"] = _load_reranker()
     except Exception as exc:
         _STATE.update(ready=False,
                       reason=f"моделі пошуку не піднялись: "
@@ -184,6 +182,74 @@ def _prepare():
         return False, _STATE["reason"]
     _STATE.update(ready=True, reason="", su=su)
     return True, ""
+
+
+#: Модель, якою побудовані вектори одиниць у базі. НЕ вибір, а факт:
+#: `document_units.embedding_model` = саме вона, 384 виміри. Закодувати запит
+#: іншою моделью означало б порівнювати непорівнюване, причому МОВЧКИ -- пошук
+#: не впав би, а просто перестав знаходити.
+UNITS_ENCODER = "intfloat/multilingual-e5-small"
+#: Префікс запиту e5. Тексти одиниць кодувались із «passage: », питання
+#: кодується з «query: » -- так навчена ця родина моделей.
+QUERY_PREFIX = "query: "
+#: Реранкер: пара «питання + текст», логіт як бал.
+RERANKER = "BAAI/bge-reranker-v2-m3"
+
+
+def _load_query_encoder():
+    """Кодувальник ЗАПИТУ. Свій, а не зі скриптів збірки Андрія.
+
+    Ланцюг брав його з `build_units_test`, а той тягне `segment_documents` --
+    різання документів на одиниці, якого на нашій гілці немає. Тобто читання
+    готового індексу падало через відсутність коду ЗБІРКИ цього індексу. Читати
+    й будувати -- різні задачі, і друга не мусить бути умовою першої.
+
+    Спосіб той самий, що при збірці (перевірено по його коду): усереднення по
+    маскованих токенах і L2-нормалізація. Інший спосіб дав би інші вектори при
+    тій самій моделі, і пошук зіпсувався б мовчки.
+
+    CPU навмисно: карта на сервері спільна, на ній працює модель чата, а тут
+    кодується ОДИН короткий запит. Ціна -- десятки мілісекунд, і вона не варта
+    ризику зачепити сусідній процес.
+    """
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(UNITS_ENCODER)
+    model = AutoModel.from_pretrained(UNITS_ENCODER).eval()
+
+    def encode(texts):
+        enc = tok(list(texts), padding=True, truncation=True, max_length=512,
+                  return_tensors="pt")
+        with torch.no_grad():
+            out = model(**enc).last_hidden_state
+        mask = enc["attention_mask"].unsqueeze(-1).float()
+        emb = (out * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+        return torch.nn.functional.normalize(emb, p=2, dim=1).tolist()
+
+    return encode
+
+
+def _load_reranker():
+    """Реранкер. Своя обгортка з тієї ж причини, що й кодувальник."""
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(RERANKER)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        RERANKER).eval()
+
+    def score(query, texts, batch=8):
+        out = []
+        for i in range(0, len(texts), batch):
+            chunk = list(texts[i:i + batch])
+            enc = tok([query] * len(chunk), chunk, padding=True,
+                      truncation=True, max_length=512, return_tensors="pt")
+            with torch.no_grad():
+                out.extend(model(**enc).logits.view(-1).float().tolist())
+        return out
+
+    return score
 
 
 def _canon_map(cur):
@@ -271,7 +337,7 @@ def answer(question):
     except ImportError:
         import tiers as _t
 
-    vec = str(_STATE["encode"](["query: " + question])[0])
+    vec = str(_STATE["encode"]([QUERY_PREFIX + question])[0])
     with _t._connect() as conn, conn.cursor() as cur:
         fused = su.dedupe_by_text(
             cur, su.rrf_merge(su.lexical(cur, question),
