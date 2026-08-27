@@ -431,14 +431,61 @@ def extract_dates(question):
     low = question.lower()
     today = datetime.date.today()
 
-    m = re.search(r"\d{4}-\d{2}-\d{2}", question)
-    if m:
-        d = datetime.date.fromisoformat(m.group(0))
-        return d, None, None
-    m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", question)
-    if m:
-        d = datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
-        return d, None, None
+    # ДВІ дати в питанні -- це період, а не зріз на першій із них.
+    #
+    # Було `re.search` (перший збіг) із поверненням `(d, None, None)`, тому
+    # «з 2026-05-10 по 2026-10-10» ставало одним днем -- сім разів із семи у
+    # перевірці Дениса перед демо. Причина, як він і припустив, одна й та сама,
+    # що ламає порівняння двох сутностей: береться перший параметр, решта
+    # відкидається без жодного слова.
+    #
+    # Перевернутий період повертається ЯК Є (`from > to`): мовчки поміняти межі
+    # означало б відповісти на інше питання й не сказати про це. Назвати це
+    # мусить той, хто рендерить.
+    #
+    # Замір Андрія на цій функції: дві дати = період, 4/8 -> 8/8.
+    found = []
+    for mm in re.finditer(r"\d{4}-\d{2}-\d{2}", question):
+        try:
+            found.append((mm.start(), datetime.date.fromisoformat(mm.group(0))))
+        except ValueError:
+            # Недійсна дата («2026-02-30») -- НЕ виняток і не дата.
+            #
+            # Доти тут стояв `fromisoformat` без try, і виняток летів
+            # НЕПЕРЕХВАЧЕНИМ просто з правилового ярусу. Денис у п. 23 звіту
+            # отримав правильну відповідь «це недійсна дата» саме тому, що
+            # правила падали й питання йшло далі, до моделі. Тобто похвалена
+            # поведінка була випадковою.
+            #
+            # Тепер падіння немає, але тиха втрата дати була б ГІРШОЮ за
+            # падіння: питання «скільком у відпустці 2026-02-30» отримало б
+            # відповідь про сьогодні. Тому недійсні дати збираються окремо, і
+            # правиловий ярус відмовляє по них явно -- див. `impossible_dates`.
+            pass
+    for mm in re.finditer(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", question):
+        try:
+            found.append((mm.start(), datetime.date(
+                int(mm.group(3)), int(mm.group(2)), int(mm.group(1)))))
+        except ValueError:
+            pass
+    found.sort()
+    dates = [d for _pos, d in found]
+
+    # «наступного дня після X» -- інакше віддається сам X (п. 2 звіту: питали
+    # про 11-те, отримували 10-те). «Наступного дня» БЕЗ дати навмисно не
+    # обробляється: її нема звідки взяти, і «сьогодні+1» був би вгадуванням.
+    if dates and re.search(r"наступн\w*\s+дн\w*\s+(?:після|за)", low):
+        return dates[0] + datetime.timedelta(days=1), None, None
+    # Односторонні межі: «не пізніше X» -- це верхня МЕЖА, а не точка
+    # (п. 3 звіту: «закінчується не пізніше 20-го» читалось як «саме 20-го»).
+    if len(dates) == 1 and re.search(r"не\s+пізніше", low):
+        return None, None, dates[0]
+    if len(dates) == 1 and re.search(r"не\s+раніше", low):
+        return None, dates[0], None
+    if len(dates) >= 2:
+        return None, dates[0], dates[1]
+    if len(dates) == 1:
+        return dates[0], None, None
 
     month, month_at = _month_span(low)
     # Рік -- ЧОТИРИ цифри, будь-які, а не лише «20xx».
@@ -556,9 +603,82 @@ def extract_name(question):
     return None
 
 
+#: Рядки, що ВИГЛЯДАЮТЬ як дата, але датою не є. Дві форми -- ті самі, що
+#: читає `extract_dates`: ISO і «дд.мм.рррр».
+_DATE_SHAPED = (re.compile(r"\d{4}-\d{2}-\d{2}"),
+                re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b"))
+
+
+def _impossible_written_date(question):
+    """«31 лютого 2026» -> рядок для повідомлення, або None.
+
+    Словесна форма недійсної дати виглядає інакше, ніж цифрова, але дефект той
+    самий: `extract_dates` тихо віддає ВЕСЬ місяць (2026-02-01 — 2026-02-28),
+    тобто відповідає на інше питання й не каже про це. Для людини різниця між
+    «за 31 лютого» і «за весь лютий» велика.
+    """
+    low = (question or "").lower()
+    month, month_at = _month_span(low)
+    if not month:
+        return None
+    m = re.search(r"(\d{1,2})(?:-?го)?\s+$", low[:month_at])
+    if not m:
+        return None
+    day = int(m.group(1))
+    if not 1 <= day <= 31:
+        return None
+    year_m = re.search(r"\b(\d{4})\b", low[month_at:])
+    year = int(year_m.group(1)) if year_m else datetime.date.today().year
+    try:
+        datetime.date(year, month, day)
+    except ValueError:
+        return f"{day} {low[month_at:month_at + 12].split()[0]} {year}"
+    return None
+
+
+def impossible_dates(question):
+    """-> список рядків із питання, які схожі на дату, але датою не є.
+
+    Навіщо окремою функцією. `extract_dates` тепер недійсну дату просто
+    пропускає -- інакше `date.fromisoformat('2026-02-30')` летів би
+    неперехваченим винятком із правилового ярусу (саме це й було до 27.08).
+    Але тиха втрата дати ГІРША за падіння: «скільком у відпустці 2026-02-30»
+    отримало б відповідь про сьогодні, з датою зрізу й джерелом, тобто
+    впевнену відповідь на інше питання.
+
+    Тому недійсна дата -- це не «немає дати», а окремий факт про питання, і
+    правила по ньому ВІДМОВЛЯЮТЬ. Той самий принцип, що вже діє для номера
+    документа з літерою О (`doc_number_warning`): ввід не виправляємо й
+    схожого не підставляємо, а називаємо місце, де система не впевнена.
+    """
+    bad = []
+    for mm in _DATE_SHAPED[0].finditer(question or ""):
+        try:
+            datetime.date.fromisoformat(mm.group(0))
+        except ValueError:
+            bad.append(mm.group(0))
+    for mm in _DATE_SHAPED[1].finditer(question or ""):
+        try:
+            datetime.date(int(mm.group(3)), int(mm.group(2)), int(mm.group(1)))
+        except ValueError:
+            bad.append(mm.group(0))
+    written = _impossible_written_date(question)
+    if written:
+        bad.append(written)
+    return bad
+
+
 def rules_route(question):
     """-> (template_id, params) або None, якщо правила не впізнали питання."""
     low = question.lower()
+    # ГЕЙТ НЕДІЙСНОЇ ДАТИ -- найперший, до всього іншого.
+    #
+    # Раніше, ніж будь-який підрахунок, бо будь-який підрахунок із втраченою
+    # датою підставить «сьогодні» й відповість упевнено не на те питання.
+    # Рівно те, чого Денис похвалив у п. 23, -- тільки тепер це поведінка, а
+    # не побічний ефект падіння.
+    if impossible_dates(question):
+        return "date_invalid", {}
     on_date, date_from, date_to = extract_dates(question)
     state = extract_state(question)
     doc_number = extract_doc_number(question)
@@ -776,9 +896,29 @@ ROUTE_SCHEMA = {
         "date_to": {"type": ["string", "null"]},
         "name": {"type": ["string", "null"]},
         "doc_number": {"type": ["string", "null"]},
+        # `subdivision` у схемі не було ВЗАГАЛІ, тому «а в першій роті?» не
+        # мало чим виразитись: підрозділ дістають правила з ПОТОЧНОГО рядка, а
+        # в наступному ході його там немає. Це друга половина п. 1 звіту
+        # («так само губиться підрозділ»).
+        "subdivision": {"type": ["string", "null"]},
+        # `carried_over` -- не для SQL, а для показу людині: «дату взято з
+        # попереднього питання». Це моя вимога з беклогу: успадковане мусить
+        # бути ВИДНИМ, бо тихо відповісти не на те питання гірше за уточнення.
+        #
+        # ФОРМА обмежена навмисно. У Андрія поле пливло чотирма формами
+        # (`["on_date","2026-08-27"]`, `["state","on_date"]`,
+        # `["doc_number=123"]`), тобто механізм був, а користуватись ним було
+        # неможливо. Тут перелічені рівно НАЗВИ параметрів -- значення бере код
+        # із params, і рядок для людини будує він же.
+        "carried_over": {
+            "type": "array",
+            "items": {"type": "string",
+                      "enum": ["state", "on_date", "date_from", "date_to",
+                               "subdivision", "name", "doc_number"]},
+        },
     },
     "required": ["template", "state", "on_date", "date_from", "date_to",
-                 "name", "doc_number"],
+                 "name", "doc_number", "subdivision", "carried_over"],
     "additionalProperties": False,
 }
 
@@ -787,10 +927,26 @@ def _catalog_lines():
     """Перелік шаблонів для промпта -- будується з КАТАЛОГУ, а не з файла
     промпта. Каталог лишається єдиним джерелом шаблонів: інакше новий шаблон
     треба було б додавати у двох місцях, і копії розійшлись би мовчки."""
-    return "\n".join(
-        f"- {tid}: {t['title']}. Приклади: "
-        + "; ".join(t.get("examples", [])[:2])
-        for tid, t in _CATALOG.items())
+    # `route_hint` -- підказка МОДЕЛІ, і живе вона окремим полем каталогу, а не
+    # в заголовку.
+    #
+    # Андрій зміряв, що три уточнення підіймають точність вибору шаблона з 17
+    # до 19, і вписав їх у `title` -- бо доти єдине, що доходило до промпта, це
+    # заголовок. Але `title` людина теж бачить: він друкується в блоці
+    # «джерело» («шаблон каталогу: …»). Тобто приріст купувався б за ціну
+    # службового тексту на екрані -- рівно п. 25 звіту Дениса, де внутрішня
+    # кухня вилазить до користувача. Андрій це сам назвав і лишив рішення мені.
+    #
+    # Окреме поле знімає вибір: моделі -- підказка, людині -- заголовок.
+    lines = []
+    for tid, t in _CATALOG.items():
+        head = t["title"]
+        hint = (t.get("route_hint") or "").strip()
+        if hint:
+            head += f"; {hint}"
+        lines.append(f"- {tid}: {head}. Приклади: "
+                     + "; ".join(t.get("examples", [])[:2]))
+    return "\n".join(lines)
 
 
 def _route_system():
@@ -811,12 +967,62 @@ def _route_system():
         return None
 
 
-def model_route(question):
+def _history_text(content):
+    """Gradio 6 віддає content або рядком, або мультимодальним списком
+    [{'text': ..., 'type': 'text'}, ...] -- навіть для звичайного тексту без
+    жодних файлів. Без цієї розпаковки `isinstance(content, str)` мовчки
+    відкидає ВСЮ історію.
+
+    ЖИВЕ ТУТ, а не в `app.py`, з 27.08: історія тепер потрібна двом місцям --
+    перенесенню слотів у правиловій дорозі (app) і маршрутизаторові на моделі
+    (тут). Дві копії однієї розпаковки розійшлися б мовчки, і другою поломкою
+    був би той самий симптом: історія «не читається» без жодної помилки.
+    `app.py` користується цією функцією через `tier_chat._history_text`.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return ""
+
+
+def _history_block(history, limit=4):
+    """Останні ходи розмови для маршрутизатора -- КОРОТКО, лише репліки людини.
+
+    Навіщо: «а хто?» після «скільком у відпустці 2026-10-10?» не має ні стану,
+    ні дати, і маршрутизатор без розмови їх нізвідки не візьме. Це п. 1 звіту
+    Дениса -- «кожне наступне повідомлення він читає так, ніби воно перше».
+
+    Формат навмисно бідний: нумеровані репліки ЛЮДИНИ, без відповідей чата.
+    Відповіді додають токенів і шуму, а заміряно (Андрій, 21 хід) було саме
+    це: без історії 8 правильних ходів, з історією 18.
+    """
+    if not history:
+        return ""
+    lines = []
+    for m in (history or [])[-limit * 2:]:
+        if isinstance(m, dict) and m.get("role") == "user":
+            txt = _history_text(m.get("content")).strip()
+            if txt:
+                lines.append(f"[{len(lines) + 1}] {txt}")
+    if not lines:
+        return ""
+    return "Розмова:\n" + "\n".join(lines) + "\n\n"
+
+
+def model_route(question, history=None):
     """-> (template_id|'вільний_sql'|'відмова', params) або None."""
     system = _route_system()
     if system is None:          # немає файла промпта -- ярус не працює
         return None
-    data = _model_json(system, question, ROUTE_SCHEMA)
+    # Маршрутизаторові їде РОЗМОВА, а не одне питання (див. `_history_block`).
+    # Останній хід позначений явно: без мітки модель у частині випадків
+    # відповідала на перше питання списку.
+    user = _history_block(history) + f"Останній хід користувача: {question}"
+    data = _model_json(system, user, ROUTE_SCHEMA)
     if not data or data.get("template") not in ROUTE_IDS:
         return None
     tid = data["template"]
@@ -848,7 +1054,16 @@ def model_route(question):
         # відпустку/відрядження/відсутність -- не віримо вибору (маленька
         # модель тягне незнайомі питання в найближчий шаблон), віддаємо в
         # ярус 2. Це перевірка кодом, не довіра до моделі.
-        if extract_state(question) is None:
+        # ПЕРЕВІРЯЄТЬСЯ НЕ ЛИШЕ ТЕКСТ ПИТАННЯ, а й те, що віддала модель.
+        #
+        # Було `if extract_state(question) is None`. На «а хто?» це викидало
+        # ПРАВИЛЬНИЙ вибір моделі у вільний_sql: слова про відпустку в репліці
+        # немає, хоча стан однозначно є в розмові. Через цей один рядок приріст
+        # від історії (8/21 -> 18/21) не доходив до користувача взагалі.
+        #
+        # Запобіжник при цьому лишається запобіжником: якщо модель віддала
+        # стан, якого немає в `STATE_DIMS`, ми їй так само не віримо.
+        if extract_state(question) is None and state not in STATE_DIMS:
             return "вільний_sql", {}
         if state not in STATE_DIMS:
             state = extract_state(question)
@@ -857,8 +1072,16 @@ def model_route(question):
     if tid == "count_by_state_on_date":
         params["on_date"] = _date("on_date") or r_on or today
     if tid in ("count_by_state_period", "list_by_state"):
-        params["date_from"] = _date("date_from") or _date("on_date") or r_from or r_on or today
-        params["date_to"] = _date("date_to") or _date("on_date") or r_to or r_on or today
+        # ПОРЯДОК тут не косметика. Раніше `_date("on_date")` стояв ПЕРЕД
+        # правилами, і одна дата від моделі підставлялась в ОБИДВІ межі --
+        # тобто період згортався в один день навіть тоді, коли в тексті було
+        # дві дати. Модель одну дату віддає охоче (заміряно окремо), тому явно
+        # знайдений у ТЕКСТІ діапазон мусить бити її одиничне поле: дві дати в
+        # питанні -- задеклароване, а одне поле -- втратна згортка того самого.
+        params["date_from"] = (_date("date_from") or r_from
+                               or _date("on_date") or r_on or today)
+        params["date_to"] = (_date("date_to") or r_to
+                             or _date("on_date") or r_on or today)
     if tid == "person_status":
         name = (data.get("name") or "").strip()
         if not name:
@@ -896,6 +1119,31 @@ def model_route(question):
         params["name"] = name
     if "query" in need and "query" not in params:
         params["query"] = question
+    # УСПАДКОВАНЕ МУСИТЬ БУТИ ВИДНИМ -- моя вимога з беклогу чата, і вона тут
+    # головна, а не приємний додаток. Тихо взяти дату з попереднього питання й
+    # відповісти впевнено -- це відповідь не на те питання без жодного слова;
+    # уточнення в такому разі краще.
+    #
+    # Довіряємо моделі рівно в одному: ЯКІ параметри вона взяла з розмови.
+    # Перевіряємо кодом: чи такий параметр справді є у фінальних params і чи
+    # НЕ названий він у самому питанні (тоді нічого не успадковано -- модель
+    # просто перелічила поля). Ключ починається з підкреслення й тому не
+    # доходить до SQL: `_sql_params` фільтрує за списком дозволених імен.
+    declared = [n for n in (data.get("carried_over") or [])
+                if isinstance(n, str)]
+    q_on, q_from, q_to = extract_dates(question)
+    named_here = {
+        "state": extract_state(question) is not None,
+        "on_date": q_on is not None,
+        "date_from": q_from is not None,
+        "date_to": q_to is not None,
+        "subdivision": extract_subdivision(question) is not None,
+        "doc_number": extract_doc_number(question) is not None,
+    }
+    carried = [n for n in declared
+               if (n in params or n == "state") and not named_here.get(n)]
+    if carried:
+        params["_carried"] = carried
     return tid, params
 
 
@@ -1085,6 +1333,28 @@ def _names_without_service_id(name_pattern):
         return {r["name"] for r in rows}
     except psycopg.Error:
         return set()
+
+
+def _inverted_period_lines(params):
+    """Рядок про перевернутий період («кінець раніше за початок») або [].
+
+    п. 5 звіту Дениса: «Скільком у відпустці з 2026-10-01 по 2026-09-01?» --
+    ні попередження, ні розвороту. Розвороту й НЕ БУДЕ: поміняти межі мовчки
+    означало б відповісти на інше питання й не сказати про це. Тому межі
+    лишаються як написано, а факт називається вголос -- і саме тому нуль у
+    такій відповіді читається правильно («межі перевернуті»), а не як
+    «нікого не було».
+
+    Один текст на обидва шаблони з періодом, щоб копії не розійшлися.
+    """
+    d_from, d_to = params.get("date_from"), params.get("date_to")
+    if not d_from or not d_to:
+        return []
+    if str(d_from) <= str(d_to):
+        return []
+    return [f"⚠️ у питанні кінець періоду ({d_to}) раніше за початок "
+            f"({d_from}). Межі я не міняю — порахувала як написано, тому "
+            f"нуль тут означає «межі перевернуті», а не «нікого не було»."]
 
 
 def _unmatched_note(params):
@@ -1406,6 +1676,7 @@ def run_template(template_id, params):
         lines.append(f"Зріз: період {params['date_from']} — {params['date_to']} "
                      "(за підтвердженими фактами).")
         lines.append(f"Чернетки (не в підрахунку): {u}.")
+        lines += _inverted_period_lines(params)
         lines += _unmatched_note(params)
         # межі перевіряємо по початку періоду: якщо він поза покриттям,
         # людині треба сказати саме це, а не показувати чистий нуль
@@ -1423,6 +1694,7 @@ def run_template(template_id, params):
                              f"{_esc(DIM_LABEL.get(r['dim'], r['dim']))}"
                              f", {_fmt_period(r)} ({_doc_ref(r)})")
         lines.append(f"Зріз: {params['date_from']} — {params['date_to']}{denom}.")
+        lines += _inverted_period_lines(params)
         if u_rows:
             lines.append(f"Окремо непідтверджені (потребують перевірки людиною, "
                          f"у підсумок не входять): {len(u_rows)}")

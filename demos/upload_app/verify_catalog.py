@@ -939,6 +939,12 @@ def build_checks(ctx):
             expected=lambda rs: exp_failed(rs, ctx),
             got=got_first_row),
         "subdivision_unknown": dict(kind="blocked", params={}),
+        # Недійсна дата -- та сама природа, що підрозділ, якого немає: SQL
+        # немає за задумом, перевіряється blocked + текст refusal. Доданий
+        # 27.08 разом із правкою «дві дати = період»: та правка прибрала
+        # неперехвачений ValueError, який доти випадково давав правильну
+        # відповідь через падіння правил.
+        "date_invalid": dict(kind="blocked", params={}),
         "absent_without_docs_impossible": dict(kind="blocked",
                                               params={}),
         # Склад за штаткою: цифру звірити з .md неможливо -- це дані

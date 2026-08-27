@@ -1011,19 +1011,12 @@ def answer_reference(question):
 # ── Головна функція. Викликається і з Gradio, і без нього ────────────────────
 
 
-def _history_text(content):
-    """Gradio 6 віддає content або рядком, або мультимодальним списком
-    [{'text': ..., 'type': 'text'}, ...] (навіть для звичайного тексту без
-    жодних файлів). Без цієї розпаковки isinstance(content, str) мовчки
-    відкидає всю історію -- саме так злиття нижче ніколи не спрацьовувало."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            p.get("text", "") for p in content
-            if isinstance(p, dict) and p.get("type") == "text"
-        )
-    return ""
+#: Розпаковка контенту історії Gradio -- ОДНА копія, у `tiers.py`.
+#:
+#: Переїхала туди 27.08: історію тепер читають два місця -- перенесення слотів
+#: тут і маршрутизатор на моделі там. Дві копії розійшлися б мовчки, а симптом
+#: був би той самий, що вже раз ловили: історія «не читається» без помилки.
+_history_text = tier_chat._history_text
 
 
 # ── Перенесення слотів між ходами ───────────────────────────────────────────
@@ -1307,8 +1300,21 @@ def _vector_tier(question):
 # якому нема з чого вийти).
 _MODEL_REFUSED = object()
 
+#: Назви успадкованих параметрів -- людською мовою. Технічні імена (`on_date`,
+#: `date_from`) у відповіді читались би як помилка: це рівно п. 25 звіту
+#: Дениса, де назовні вилазить внутрішня кухня.
+CARRIED_LABEL = {
+    "state": "стан (відпустка / відрядження)",
+    "on_date": "дата",
+    "date_from": "початок періоду",
+    "date_to": "кінець періоду",
+    "subdivision": "підрозділ",
+    "name": "прізвище",
+    "doc_number": "номер документа",
+}
 
-def _model_catalog_tier(question):
+
+def _model_catalog_tier(question, history=None):
     """Друга спроба ярусу 1: модель-класифікатор у ЗАКРИТИЙ перелік шаблонів
     каталогу (tiers.model_route). Модель лише обирає шаблон і параметри --
     SQL і текст відповіді лишаються кодом. -> текст, _MODEL_REFUSED або None
@@ -1317,7 +1323,7 @@ def _model_catalog_tier(question):
         return None
     progress.stage("model_catalog")
     try:
-        routed = tier_chat.model_route(question)
+        routed = tier_chat.model_route(question, history)
     except Exception:
         return None
     if not routed:
@@ -1331,6 +1337,21 @@ def _model_catalog_tier(question):
         text, source = tier_chat.run_template(tid, params)
     except Exception:
         return None
+    # УСПАДКОВАНЕ З РОЗМОВИ -- ВИДИМИМ РЯДКОМ, перед джерелом.
+    #
+    # Правило продукту, а не зручність: якщо дата чи стан узяті з попереднього
+    # питання, людина мусить це бачити. Інакше вона читає впевнену відповідь і
+    # не знає, що система дописала половину питання за неї -- а це саме той
+    # клас помилок, який неможливо перевірити оком (п. 1 і п. 11 звіту: «зріз
+    # злетів», а на екрані два числа виглядають як брехня).
+    #
+    # Список приходить від маршрутизатора вже перевіреним кодом: там лишились
+    # тільки ті назви, що справді є у параметрах і НЕ названі в самому питанні.
+    carried = (params or {}).get("_carried") or []
+    if carried:
+        text += ("\n\n⚠️ узято з попереднього питання: "
+                 + ", ".join(_esc(CARRIED_LABEL.get(c, c)) for c in carried)
+                 + ". Якщо мали на увазі інше — напишіть це в питанні.")
     return text + _fmt_source_block(
         source, f"каталог шаблонів, обрано моделлю-класифікатором ({tid})")
 
@@ -1382,7 +1403,7 @@ def _extra_tiers(question):
         return out
     if not _DBISH.search(question):
         return None
-    out = _model_catalog_tier(question)
+    out = _model_catalog_tier(question, history)
     if out is _MODEL_REFUSED:
         return None
     if out is not None:
@@ -1418,6 +1439,13 @@ _STATE_TEMPLATES = {
     "list_by_state_in_subdivision",
     "subdivision_breakdown",
     "subdivision_unknown",
+    # Недійсна дата -- сюди ж, і з тієї самої причини, що підрозділ, якого
+    # немає: стара дорога такої умови не знає й відповіла б числом на дату,
+    # якої не існує. Підключено 27.08 -- і не з першої спроби: правила почали
+    # віддавати `date_invalid`, а перехвату не було, і питання ТИХО поїхало
+    # старою дорогою. Зловив `test_gate_templates_are_wired`, тобто тест,
+    # написаний рівно на цю помилку після того, як я зробила її вперше.
+    "date_invalid",
 }
 
 
