@@ -1,0 +1,770 @@
+/* Візуальний шар звичайних сторінок апки: / (завантаження) і /stats
+ * (статистика). Пара до chat_gradio/theme.css -- обидва файли споживають ОДНІ
+ * токени з theme-tokens.css (задача B3: дві сторінки мусять виглядати одним
+ * продуктом).
+ *
+ * Що зведено до чата й чому саме так:
+ *   - шапка з переходами між сторінками -- та сама на всіх трьох екранах,
+ *     щоб «де я і куди можна» не мінялось від сторінки до сторінки. Раніше
+ *     перехід на / був плаваючою пігулкою в куті, а на чат -- посиланням у
+ *     сайдбарі: два різні жести для однієї дії;
+ *   - колонка --col (760px) -- та сама міра, що в стрічці чата;
+ *   - блоки-нотатки: ліва смуга кольору стану + м'який фон (як .note--warn
+ *     у чаті), а не залитий прямокутник;
+ *   - радіуси, відступи, приглушений акцент -- з токенів, а не власні hex-и.
+ *
+ * Класи (.note.warn, .badge.needs_review, ol.stepper, .spin …) лишились ті
+ * самі, що їх ставить JS сторінки завантаження -- переписаний вигляд, не
+ * розмітка.
+ */
+
+* { box-sizing: border-box }
+
+html, body {
+    margin: 0;
+    background: var(--c-bg);
+    color: var(--c-text);
+    font: 15px/1.6 var(--font);
+}
+
+/* ── Шапка: одна на всі сторінки ─────────────────────────────────────────── */
+
+.appbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: var(--s-4);
+    padding: var(--s-3) var(--s-5);
+    background: var(--c-bg);
+    border-bottom: 1px solid var(--c-border);
+}
+.appbar .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    text-decoration: none;
+    color: inherit;
+}
+.appbar .brand svg, .appbar .brand img { width: 28px; height: 28px; flex: none }
+.appbar .brand-name { font-size: 14px; font-weight: 600; line-height: 1.3 }
+.appbar .brand-sub { font-size: 12px; color: var(--c-muted) }
+.appbar nav { display: flex; gap: var(--s-1); margin-left: auto; flex-wrap: wrap }
+.appbar nav a {
+    padding: 7px var(--s-3);
+    border-radius: var(--r-md);
+    border: 1px solid transparent;
+    color: var(--c-muted);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+}
+.appbar nav a:hover { background: var(--c-accent-soft); color: var(--c-text) }
+/* поточна сторінка: не «підсвічена кнопка», а спокійна позначка місця */
+.appbar nav a[aria-current="page"] {
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent-line);
+    color: var(--c-text);
+}
+
+/* ── Колонка й картки ────────────────────────────────────────────────────── */
+
+main {
+    max-width: var(--col);
+    margin: 0 auto;
+    padding: var(--s-5) var(--s-5) var(--s-6);
+}
+h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 var(--s-2);
+}
+.lede { color: var(--c-muted); font-size: 14px; margin: 0 0 var(--s-5) }
+
+section {
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-lg);
+    padding: var(--s-4) var(--s-5);
+    margin-bottom: var(--s-3);
+    box-shadow: var(--shadow-sm);
+}
+h2 {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--c-muted);
+    margin: 0 0 var(--s-3);
+}
+h3 { font-size: 14px; font-weight: 600; margin: var(--s-4) 0 var(--s-1) }
+.hint {
+    color: var(--c-muted);
+    font-size: 13px;
+    margin: var(--s-2) 0 0;
+}
+
+/* ── Зона завантаження: одна первинна дія ───────────────────────────────── */
+
+.dropzone {
+    display: block;
+    border: 1px dashed var(--c-border);
+    border-radius: var(--r-md);
+    padding: var(--s-6) var(--s-5);
+    text-align: center;
+    cursor: pointer;
+    color: var(--c-muted);
+    font-size: 14px;
+    background: var(--c-surface);
+    transition: border-color .15s, background .15s;
+}
+.dropzone:hover, .dropzone:focus-within, .dropzone.drag {
+    border-color: var(--c-accent-line);
+    background: var(--c-accent-soft);
+}
+.dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0 }
+.dropzone .big {
+    display: block;
+    margin-bottom: var(--s-1);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--c-text);
+}
+.dropzone.disabled { pointer-events: none; opacity: .55 }
+
+/* ── Степер: стан кроку і секундомір ────────────────────────────────────── */
+
+ol.stepper {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-2) var(--s-5);
+}
+ol.stepper li { display: flex; align-items: center; gap: var(--s-2) }
+ol.stepper .dot {
+    flex: none;
+    width: 20px; height: 20px;
+    border-radius: var(--r-full);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    border: 1px solid var(--c-border);
+    color: var(--c-muted);
+    background: var(--c-bg);
+}
+li.done .dot {
+    border-color: var(--c-success);
+    background: var(--c-success-soft);
+    color: var(--c-success);
+}
+li.running .dot { border-color: var(--c-accent); color: var(--c-accent) }
+li.failed .dot {
+    border-color: var(--c-error);
+    background: var(--c-error-soft);
+    color: var(--c-error);
+}
+li.pendingstep { opacity: .45 }
+.stepname { font-size: 14px; font-weight: 600 }
+.steptime {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--c-muted);
+    font-variant-numeric: tabular-nums;
+}
+li.running .steptime { color: var(--c-accent) }
+.spin {
+    display: inline-block;
+    width: 11px; height: 11px;
+    border-radius: var(--r-full);
+    border: 2px solid var(--c-accent);
+    border-top-color: transparent;
+    animation: spin .9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg) } }
+
+/* ── Стани: пігулка статусу ─────────────────────────────────────────────── */
+
+.badge {
+    display: inline-block;
+    padding: 3px var(--s-3);
+    border-radius: var(--r-pill);
+    border: 1px solid currentColor;
+    font-size: 13px;
+    font-weight: 600;
+}
+.badge.confirmed { color: var(--c-success); background: var(--c-success-soft) }
+.badge.needs_review { color: var(--c-warn); background: var(--c-warn-soft) }
+.badge.duplicate, .badge.unchanged {
+    color: var(--c-accent);
+    background: var(--c-accent-soft);
+}
+.badge.unresolved { color: var(--c-pending); background: var(--c-pending-soft) }
+.badge.error { color: var(--c-error); background: var(--c-error-soft) }
+.next { margin: var(--s-2) 0 0; color: var(--c-muted); font-size: 13px }
+
+/* ── Блоки-нотатки: та сама мова, що в чаті (ліва смуга стану) ───────────── */
+
+.note {
+    margin: var(--s-2) 0;
+    padding: var(--s-2) var(--s-3);
+    border-left: 3px solid var(--c-muted);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    font-size: 13px;
+    line-height: 1.55;
+}
+.note.warn { border-color: var(--c-warn); background: var(--c-warn-soft) }
+.note.info { border-color: var(--c-accent); background: var(--c-accent-soft) }
+.note.pending { border-color: var(--c-pending); background: var(--c-pending-soft) }
+.note.err { border-color: var(--c-error); background: var(--c-error-soft) }
+
+/* ── Таблиці полів ──────────────────────────────────────────────────────── */
+
+.tablewrap { overflow-x: auto; margin-top: var(--s-1) }
+table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+th, td {
+    text-align: left;
+    padding: var(--s-2) var(--s-3);
+    border-bottom: 1px solid var(--c-border);
+    vertical-align: top;
+}
+tr:last-child td { border-bottom: none }
+th {
+    color: var(--c-muted);
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+td.gap { color: var(--c-muted); font-style: italic }
+td.src { color: var(--c-muted); white-space: nowrap }
+
+/* ── Кнопки ─────────────────────────────────────────────────────────────── */
+
+button {
+    font: inherit;
+    font-size: 14px;
+    padding: 9px var(--s-4);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    border: 1px solid var(--c-border);
+    background: transparent;
+    color: var(--c-text);
+}
+button:hover { background: var(--c-accent-soft) }
+button.primary {
+    background: var(--c-accent);
+    border-color: var(--c-accent);
+    color: var(--c-on-accent);
+    font-weight: 600;
+}
+button.primary:hover { filter: brightness(.94); background: var(--c-accent) }
+button:disabled { opacity: .45; cursor: not-allowed }
+button:disabled:hover { background: transparent; filter: none }
+.actions { margin: var(--s-4) 0 0 }
+
+/* ── Згортки й лог ──────────────────────────────────────────────────────── */
+
+details { margin-top: var(--s-3) }
+details > summary {
+    cursor: pointer;
+    color: var(--c-muted);
+    font-size: 12px;
+    user-select: none;
+}
+details > summary:hover { color: var(--c-text) }
+pre.log {
+    background: var(--c-surface);
+    border-radius: var(--r-sm);
+    padding: var(--s-3);
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--c-muted);
+    max-height: 240px;
+    white-space: pre-wrap;
+}
+
+.hidden { display: none !important }
+
+/* ── Плитки лічильників (сторінка «Статистика») ──────────────────────────── */
+
+.tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--s-3);
+}
+.tile {
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    padding: var(--s-3) var(--s-4);
+    background: var(--c-surface);
+}
+.tile-num {
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+.tile-label { font-size: 12px; color: var(--c-muted); margin-top: 2px }
+.tile-note { font-size: 11px; color: var(--c-muted); margin-top: var(--s-1) }
+/* Чернетки й «чекає людину» -- ЗАВЖДИ окремою плиткою свого кольору:
+   правило продукту «чернетка ≠ факт» мусить бути видно оком, а не в підписі */
+.tile--draft { border-color: var(--c-warn); background: var(--c-warn-soft) }
+.tile--draft .tile-num { color: var(--c-warn) }
+.tile--pending { border-color: var(--c-pending); background: var(--c-pending-soft) }
+.tile--pending .tile-num { color: var(--c-pending) }
+.tile--ok .tile-num { color: var(--c-success) }
+
+/* Пари «назва -- число» (розбивки: за станом, за доменом, за типом черги) */
+.kv { margin: 0; font-size: 13px }
+.kv div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--s-3);
+    padding: 5px 0;
+    border-bottom: 1px solid var(--c-border);
+}
+.kv div:last-child { border-bottom: none }
+.kv dt { color: var(--c-muted) }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums }
+
+.asof {
+    font-size: 12px;
+    color: var(--c-muted);
+    margin: var(--s-4) 0 0;
+    text-align: center;
+}
+
+
+/* ═══ ТЕЛЕФОН ═══════════════════════════════════════════════════════════════
+ *
+ * Рішення Ані 27.08. До цього медіа-запитів у файлі не було ЖОДНОГО: сторінки
+ * лише обмежували ширину колонки, тобто на телефоні працювали «як вийде».
+ * Телефон при цьому головний пристрій демо -- посилання й QR відкривають саме
+ * з нього.
+ *
+ * Правило: на ноутбуці вигляд не змінюється. Усе нижче -- тільки для вузьких
+ * екранів.
+ */
+@media (max-width: 640px) {
+
+    /* 1. Шапка: бренд зверху, під ним три рівні таби на всю ширину.
+       Тачзона 48px -- бо палець, а не курсор. */
+    .appbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        padding: var(--s-3) var(--s-3) 0;
+    }
+    .appbar .brand { justify-content: flex-start; padding-bottom: var(--s-3) }
+    .appbar .brand-name { font-size: 15px }
+    .appbar .brand-sub { font-size: 12px }
+    .appbar nav {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border-top: 1px solid var(--c-border);
+    }
+    .appbar nav a {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        text-align: center;
+        border-radius: 0;
+        border-bottom: 2px solid transparent;
+        padding: 0 var(--s-2);
+    }
+    /* активна сторінка -- підкреслена, а не залита: заливка на телефоні
+       читається як натиснута кнопка */
+    .appbar nav a[aria-current="page"] {
+        border-bottom-color: var(--c-accent);
+        color: var(--c-accent);
+        background: transparent;
+        font-weight: 600;
+    }
+
+    /* 2. Типографіка: база 15px, підписи 13px. Дрібніше за 13px на телефоні
+       не лишаємо ніде. */
+    body { font-size: 15px }
+    main { padding: var(--s-4) var(--s-3) var(--s-6) }
+    h1 { font-size: 22px }
+    h2 { font-size: 13px }
+    h3 { font-size: 15px }
+    .lede { font-size: 14px }
+    .card, section { padding: var(--s-4) }
+    button, .btn { min-height: 48px; font-size: 15px }
+
+    /* 3. Завантаження: зона перетягування ховається, замість неї дві кнопки */
+    .dropzone { display: none }
+    .pick-mobile { display: block }
+
+    /* 4. Плитки цифр -- дві колонки (рішення Ані: один стовпець робить
+       сторінку на десять екранів) */
+    .tiles, .tile-row, #quality-tiles, #db-tiles {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--s-2);
+    }
+    .tile { padding: var(--s-3) }
+    .tile-num { font-size: 22px }
+    .tile-label { font-size: 12px; line-height: 1.25 }
+    .tile-note { font-size: 11px }
+
+    /* 5. Таблиці й довгі рядки: прокручуються всередині себе, а не рвуть
+       сторінку по горизонталі */
+    table { display: block; overflow-x: auto; white-space: nowrap }
+    pre, code { overflow-x: auto }
+}
+
+/* ── Телефонні кнопки завантаження ─────────────────────────────────────────
+ * За замовчуванням схованi: на ноутбуці працює зона перетягування.
+ */
+.pick-mobile { display: none }
+.pick {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s-2);
+    min-height: 56px;
+    margin-bottom: var(--s-2);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-bg);
+    color: var(--c-text);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.pick--camera {
+    background: var(--c-accent);
+    border-color: var(--c-accent);
+    color: var(--c-on-accent);
+}
+.pick input { position: absolute; width: 1px; height: 1px; opacity: 0 }
+.pick:active { transform: translateY(1px) }
+.pick-note {
+    margin: var(--s-2) 0 0;
+    color: var(--c-muted);
+    font-size: 13px;
+    text-align: center;
+}
+.dz-hint { display: block }
+
+
+/* ===== ШАР НАБОРУ ДИЗАЙН-СИСТЕМИ =========================
+ * Складається docs/design-system/build_kit.py -- той самий файл, що
+ * вивантажений у Claude Design (проєкт «AI-секретар — обличчя»).
+ * Правити тут не треба: правиться набір, потім перезбірка.
+ */
+/* ══ базове ══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box }
+body {
+    margin: 0; background: var(--c-bg); color: var(--c-text);
+    font-family: var(--font); font-size: var(--fs-body); line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+}
+.demo { max-width: 420px; margin: 0 auto; padding: 0 }
+h1, h2, h3 { font-family: var(--font-heading); font-weight: var(--w-heading);
+             letter-spacing: -.015em; line-height: 1.15; margin: 0 0 var(--s-2) }
+h1 { font-size: var(--fs-h1) }
+h3 { font-size: var(--fs-h2) }
+.kicker {
+    font-size: var(--fs-kicker); letter-spacing: .1em; text-transform: uppercase;
+    color: var(--c-muted); font-weight: 600; margin: 0 0 var(--s-2);
+}
+.muted { color: var(--c-muted) }
+.small { font-size: var(--fs-small) }
+.num, .display, td.n, .tile-num { font-variant-numeric: tabular-nums }
+code, pre { font-family: var(--font-mono); font-size: 12.5px }
+* { -webkit-tap-highlight-color: transparent }
+:focus { outline: none }
+:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: .001ms !important;
+                             animation-duration: .001ms !important }
+}
+
+/* ══ брендовий блок ═════════════════════════════════════════════════════ */
+.appbar { background: var(--c-brand); color: var(--c-brand-text) }
+.appbar .brand { display: flex; align-items: center; gap: var(--s-3);
+                 padding: var(--s-3) var(--s-4) }
+.appbar .mark {
+    width: 30px; height: 30px; flex: 0 0 auto; border-radius: var(--r-sm);
+    background: var(--c-brand-text); color: var(--c-brand);
+    display: grid; place-items: center; font-weight: 700; font-size: 13px;
+}
+.appbar .bname { font-weight: 700; font-size: 16px; letter-spacing: -.01em }
+.appbar .bsub { font-size: 12px; opacity: .72 }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr);
+        background: rgba(0,0,0,.14) }
+.tabs a {
+    min-height: 46px; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; text-decoration: none;
+    color: color-mix(in srgb, var(--c-brand-text) 72%, transparent);
+    border-bottom: 2px solid transparent; transition: color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease);
+}
+.tabs a:hover { color: var(--c-brand-text); background: rgba(255,255,255,.06) }
+.tabs a[aria-current="page"] {
+    color: var(--c-brand-text); background: rgba(255,255,255,.10);
+    border-bottom-color: var(--c-brand-text);
+}
+
+/* ══ полотно ════════════════════════════════════════════════════════════ */
+.body { padding: var(--s-5) var(--s-4) var(--s-6) }
+.card {
+    background: var(--c-canvas); border: 1px solid var(--c-border);
+    border-radius: var(--r-md); padding: var(--s-4); margin: var(--s-4) 0;
+    box-shadow: var(--shadow-sm);
+}
+.card--flat { box-shadow: none }
+.sunken { background: var(--c-surface); border: 1px solid var(--c-hairline);
+          border-radius: var(--r-sm); padding: var(--s-3) }
+.rule { height: 2px; border: 0; background: var(--c-divider);
+        margin: var(--s-5) 0 }
+
+/* ══ кнопки ═════════════════════════════════════════════════════════════ */
+.btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 48px; width: 100%; padding: 0 var(--s-4);
+    font-family: var(--font-heading); font-weight: 600; font-size: 15px;
+    border: 1px solid transparent; border-radius: var(--r-md); cursor: pointer;
+    background: var(--c-accent); color: var(--c-on-accent);
+    transition: background-color var(--dur) var(--ease),
+                border-color var(--dur) var(--ease),
+                transform 80ms var(--ease), box-shadow var(--dur) var(--ease);
+}
+.btn:hover { background: var(--c-accent-600); box-shadow: var(--shadow-md);
+             transform: translateY(-1px) }
+.btn:active { background: var(--c-accent-700); transform: translateY(1px);
+              box-shadow: none }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none;
+                box-shadow: none }
+.btn--ghost { background: var(--c-canvas); color: var(--c-text);
+              border-color: var(--c-divider) }
+.btn--ghost:hover { background: var(--c-surface); border-color: var(--c-text) }
+.btn--danger { background: transparent; color: var(--c-error);
+               border-color: color-mix(in srgb, var(--c-error) 40%, transparent) }
+.btn--danger:hover { background: var(--c-error-soft) }
+.btn + .btn { margin-top: var(--s-2) }
+.btn .ic { font-size: 17px; line-height: 1 }
+
+/* ══ позначки стану ═════════════════════════════════════════════════════ */
+.flag {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: var(--r-pill);
+    padding: 3px 10px; font-size: 12px; font-weight: 600; line-height: 1.5;
+}
+.flag--ok { background: var(--c-success-soft); color: var(--c-success) }
+.flag--pending { background: var(--c-pending-soft); color: var(--c-pending) }
+.flag--warn { background: var(--c-warn-soft); color: var(--c-warn) }
+.flag--error { background: var(--c-error-soft); color: var(--c-error) }
+.flag--muted { background: var(--c-surface); color: var(--c-muted) }
+
+/* ══ кроки обробки ══════════════════════════════════════════════════════ */
+.steps { list-style: none; margin: 0; padding: 0; font-size: 14px }
+.steps li { display: flex; align-items: center; gap: 10px; padding: 7px 0;
+            border-bottom: 1px solid var(--c-hairline) }
+.steps li:last-child { border-bottom: 0 }
+.dot { width: 9px; height: 9px; border-radius: var(--r-full); flex: 0 0 auto;
+       background: var(--c-success) }
+.dot--run { background: var(--c-accent); animation: pulse 1.2s var(--ease) infinite }
+.dot--wait { background: var(--c-border) }
+@keyframes pulse { 50% { opacity: .3 } }
+.steps .t { margin-left: auto; color: var(--c-muted); font-size: 13px;
+            font-variant-numeric: tabular-nums }
+
+/* ══ поля документа ═════════════════════════════════════════════════════ */
+.rows { font-size: 14.5px }
+.rows .row { display: flex; gap: var(--s-3); padding: 8px 0;
+             border-bottom: 1px solid var(--c-hairline) }
+.rows .row:last-child { border-bottom: 0 }
+.rows .k { color: var(--c-muted); flex: 0 0 40% }
+.rows .v { font-weight: 600 }
+
+/* ══ цифри ══════════════════════════════════════════════════════════════ */
+.display {
+    font-family: var(--font-heading); font-weight: 700; font-size: var(--fs-display);
+    letter-spacing: -.03em; line-height: 1;
+}
+.hero-num { background: var(--c-accent-soft); border: 1px solid var(--c-accent-line);
+            border-radius: var(--r-md); padding: var(--s-4); text-align: center }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2) }
+.tile { background: var(--c-canvas); border: 1px solid var(--c-border);
+        border-radius: var(--r-md); padding: var(--s-3);
+        transition: border-color var(--dur) var(--ease) }
+.tile:hover { border-color: var(--c-divider) }
+.tile-num { font-family: var(--font-heading); font-weight: 700; font-size: 24px;
+            letter-spacing: -.02em }
+.tile-label { font-size: 12.5px; color: var(--c-muted); line-height: 1.3;
+              margin-top: 2px }
+.tile--pending .tile-num { color: var(--c-pending) }
+.list-num { background: var(--c-canvas); border: 1px solid var(--c-border);
+            border-radius: var(--r-md) }
+.list-num div { display: flex; justify-content: space-between; gap: var(--s-3);
+                padding: 10px var(--s-3); border-bottom: 1px solid var(--c-hairline) }
+.list-num div:last-child { border-bottom: 0 }
+.list-num b { font-variant-numeric: tabular-nums }
+
+/* ══ таблиця ════════════════════════════════════════════════════════════ */
+table { width: 100%; border-collapse: collapse; font-size: 14px }
+th { text-align: left; font-size: var(--fs-kicker); letter-spacing: .08em;
+     text-transform: uppercase; color: var(--c-muted); font-weight: 600;
+     padding: var(--s-2); border-bottom: 2px solid var(--c-divider) }
+td { padding: var(--s-2); border-bottom: 1px solid var(--c-hairline) }
+tbody tr { transition: background-color var(--dur) var(--ease) }
+tbody tr:hover { background: var(--c-surface) }
+
+/* ══ чат ════════════════════════════════════════════════════════════════ */
+.msg { border-radius: var(--r-md); padding: var(--s-3); margin: var(--s-3) 0;
+       font-size: 14.5px }
+.msg--me { background: var(--c-accent); color: var(--c-on-accent);
+           margin-left: 18%; }
+.msg--bot { background: var(--c-canvas); border: 1px solid var(--c-border);
+            border-left: 3px solid var(--c-accent); box-shadow: var(--shadow-sm) }
+.msg--bot .lead { font-weight: 700; font-size: 15.5px }
+.msg--bot ul { margin: var(--s-2) 0 0; padding-left: 18px }
+.msg--bot li { margin: 3px 0 }
+.msg--refusal { border-left-color: var(--c-warn) }
+.src { margin-top: var(--s-3); padding-top: var(--s-2);
+       border-top: 1px dashed var(--c-border); font-size: 12.5px;
+       color: var(--c-muted) }
+.composer { display: flex; gap: var(--s-2); margin-top: var(--s-4) }
+.composer .in { flex: 1; min-height: 48px; display: flex; align-items: center;
+                padding: 0 var(--s-3); background: var(--c-canvas);
+                border: 1px solid var(--c-border); border-radius: var(--r-md);
+                color: var(--c-muted); font-size: 15px }
+.composer .go { width: 48px; min-height: 48px; display: grid; place-items: center;
+                background: var(--c-accent); color: var(--c-on-accent);
+                border-radius: var(--r-md); font-size: 18px; cursor: pointer;
+                transition: background-color var(--dur) var(--ease) }
+.composer .go:hover { background: var(--c-accent-600) }
+.chips { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3) }
+.chip { background: var(--c-canvas); border: 1px solid var(--c-border);
+        border-radius: var(--r-pill); padding: 7px 12px; font-size: 13px;
+        color: var(--c-muted); cursor: pointer;
+        transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease) }
+.chip:hover { border-color: var(--c-accent); color: var(--c-accent) }
+
+/* ══ службові стани ═════════════════════════════════════════════════════ */
+.note { border-left: 3px solid var(--c-border); padding: var(--s-2) var(--s-3);
+        font-size: 13.5px; color: var(--c-muted); background: var(--c-surface) }
+.note--warn { border-left-color: var(--c-warn); color: var(--c-warn);
+              background: var(--c-warn-soft) }
+.note--error { border-left-color: var(--c-error); color: var(--c-error);
+               background: var(--c-error-soft) }
+.note--ok { border-left-color: var(--c-success); color: var(--c-success);
+            background: var(--c-success-soft) }
+.skeleton { height: 12px; border-radius: var(--r-sm); background: var(--c-surface);
+            position: relative; overflow: hidden }
+.skeleton + .skeleton { margin-top: var(--s-2) }
+.skeleton::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent,
+        color-mix(in srgb, var(--c-canvas) 70%, transparent), transparent);
+    animation: shimmer 1.3s var(--ease) infinite;
+}
+@keyframes shimmer { 0% { transform: translateX(-100%) }
+                     100% { transform: translateX(100%) } }
+
+
+/* ===== ЗШИВКА З РОЗМІТКОЮ САЙТУ ==========================================
+ * Набір описує компоненти власними класами; частина класів на сторінках
+ * історично зветься інакше. Тут рівно ці відповідності й нічого більше.
+ */
+main { max-width: var(--col); margin: 0 auto; padding: var(--s-5) var(--s-4) var(--s-7) }
+h1 { font-size: var(--fs-h1) }
+h3 { font-size: var(--fs-h2) }
+h2 { font-size: var(--fs-kicker); letter-spacing: .1em; text-transform: uppercase;
+     color: var(--c-muted); font-weight: 600 }
+.lede { color: var(--c-muted); font-size: 14.5px; max-width: 66ch }
+section { background: var(--c-canvas); border: 1px solid var(--c-border);
+          border-radius: var(--r-md); padding: var(--s-4); margin: var(--s-4) 0;
+          box-shadow: var(--shadow-sm) }
+
+.appbar { display: block; padding: 0; border: 0; background: var(--c-brand);
+          color: var(--c-brand-text); position: sticky; top: 0; z-index: 20 }
+.appbar .brand { display: flex; align-items: center; gap: var(--s-3);
+                 padding: var(--s-3) var(--s-4); color: inherit;
+                 text-decoration: none }
+.appbar .brand img { width: 32px; height: 32px }
+.appbar .brand-name { font-weight: 700; font-size: 16px; letter-spacing: -.01em }
+.appbar .brand-sub { font-size: 12px; opacity: .72 }
+.appbar nav { display: grid; grid-template-columns: repeat(3, 1fr);
+              background: rgba(0,0,0,.14) }
+.appbar nav a { min-height: 46px; display: flex; align-items: center;
+                justify-content: center; font-size: 14px; font-weight: 600;
+                text-decoration: none; border-radius: 0;
+                color: color-mix(in srgb, var(--c-brand-text) 72%, transparent);
+                border-bottom: 2px solid transparent;
+                transition: color var(--dur) var(--ease),
+                            background-color var(--dur) var(--ease) }
+.appbar nav a:hover { color: var(--c-brand-text); background: rgba(255,255,255,.06) }
+.appbar nav a[aria-current="page"] { color: var(--c-brand-text);
+    background: rgba(255,255,255,.10); border-bottom-color: var(--c-brand-text) }
+
+.dropzone { display: block; background: var(--c-surface);
+            border: 1.5px dashed var(--c-divider); border-radius: var(--r-md);
+            padding: var(--s-6) var(--s-4); text-align: center; cursor: pointer;
+            transition: border-color var(--dur) var(--ease),
+                        background-color var(--dur) var(--ease) }
+.dropzone:hover, .dropzone:focus-within, .dropzone.drag {
+    border-color: var(--c-accent); background: var(--c-accent-soft) }
+.dropzone .big { display: block; font-family: var(--font-heading);
+                 font-weight: 700; font-size: 17px; margin-bottom: var(--s-1) }
+.dz-hint { color: var(--c-muted); font-size: 13.5px }
+
+.pick { display: flex; align-items: center; justify-content: center; gap: 8px;
+        min-height: 52px; width: 100%; margin-bottom: var(--s-2);
+        font-family: var(--font-heading); font-weight: 600; font-size: 15.5px;
+        border-radius: var(--r-md); border: 1px solid transparent;
+        background: var(--c-accent); color: var(--c-on-accent); cursor: pointer;
+        transition: background-color var(--dur) var(--ease),
+                    transform 80ms var(--ease), box-shadow var(--dur) var(--ease) }
+.pick:not(.pick--camera) { background: var(--c-canvas); color: var(--c-text);
+                           border-color: var(--c-divider) }
+.pick:hover { box-shadow: var(--shadow-md); transform: translateY(-1px) }
+.pick:active { transform: translateY(1px); box-shadow: none }
+.pick input { position: absolute; width: 1px; height: 1px; opacity: 0 }
+.pick-note { color: var(--c-muted); font-size: 13px; text-align: center;
+             margin: var(--s-2) 0 0 }
+.pick-mobile { display: none }
+
+button, .btn { display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px; min-height: 48px; padding: 0 var(--s-4);
+    font-family: var(--font-heading); font-weight: 600; font-size: 15px;
+    border: 1px solid transparent; border-radius: var(--r-md); cursor: pointer;
+    background: var(--c-accent); color: var(--c-on-accent);
+    transition: background-color var(--dur) var(--ease),
+                transform 80ms var(--ease), box-shadow var(--dur) var(--ease) }
+button:hover, .btn:hover { background: var(--c-accent-600);
+    box-shadow: var(--shadow-md); transform: translateY(-1px) }
+button:active, .btn:active { background: var(--c-accent-700);
+    transform: translateY(1px); box-shadow: none }
+button:disabled { opacity: .45; transform: none; box-shadow: none }
+
+/* ===== ТЕЛЕФОН ========================================================== */
+@media (max-width: 640px) {
+    main { padding: var(--s-4) var(--s-3) var(--s-6) }
+    body { font-size: 15px }
+    h1 { font-size: 24px }
+    .display { font-size: 40px }
+    section, .card { padding: var(--s-3) }
+    .dropzone { display: none }
+    .pick-mobile { display: block }
+    .tiles, #db-tiles, #quality-tiles { display: grid !important;
+        grid-template-columns: 1fr 1fr; gap: var(--s-2) }
+    table { display: block; overflow-x: auto; white-space: nowrap }
+}

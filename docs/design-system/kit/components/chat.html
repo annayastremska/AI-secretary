@@ -1,0 +1,38 @@
+<!-- @dsCard group="Компоненти" name="Чат" subtitle="відповідь із джерелом, відмова, підказки" viewport="420x760" -->
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-секретар — Чат</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<main class="demo">
+<header class="appbar">
+  <div class="brand"><span class="mark">AI</span><span>
+    <span class="bname">AI-секретар</span><br>
+    <span class="bsub">облік особового складу</span></span></div>
+  <nav class="tabs"><a href="#" aria-current="page">Документ</a>
+    <a href="#">Чат</a><a href="#">Цифри</a></nav>
+</header>
+<div class="body">
+<div class="msg msg--me">Хто у відпустці у 2 роті 30 серпня?</div>
+<div class="msg msg--bot"><div class="lead">2 особи у відпустці — 2-га механізована рота</div>
+<ul><li>Влох Святослав Олесьович — <span class="num">13.08 — 01.09</span>, документ <span class="num">№1030</span></li>
+<li>Приймак Єлисей Романович — <span class="num">29.08 — 11.09</span>, документ <span class="num">№112</span></li></ul>
+<div class="src">склад роти за штаткою <b class="num">90</b> · зріз на
+<b class="num">30.08</b> · чернеток <b class="num">0</b> ·
+<code>звернення 8f31c2</code></div></div>
+<div class="msg msg--me">А в 5 роті?</div>
+<div class="msg msg--bot msg--refusal"><div class="lead">Такої роти в штатці немає</div>
+<p class="small" style="margin:6px 0 0">Нуль тут означав би «нікого немає», а
+насправді немає самого підрозділу. У базі: 1-ша, 2-га, 3-тя роти, взвод
+забезпечення, управління батальйону.</p></div>
+<div class="composer"><span class="in">Ваше питання…</span><span class="go">↑</span></div>
+<div class="chips"><span class="chip">скільком зараз у відпустці</span>
+<span class="chip">хто повертається 31.08</span>
+<span class="chip">відсутні по підрозділах</span></div>
+</div></main>
+</body>
+</html>

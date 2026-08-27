@@ -1,0 +1,39 @@
+{
+  "name": "AI-секретар",
+  "palette": {
+    "band": "light",
+    "scheme": "mono",
+    "bg": "#f7f6f4",
+    "surface": "#efedea",
+    "text": "#1c1b19",
+    "accent": "#4a5d3a",
+    "accent2": "#2f3a26"
+  },
+  "fonts": {
+    "heading": {
+      "family": "IBM Plex Sans",
+      "class": "grotesque",
+      "weights": [
+        400,
+        600,
+        700
+      ]
+    },
+    "body": {
+      "family": "IBM Plex Sans",
+      "class": "grotesque",
+      "weights": [
+        400,
+        600,
+        700
+      ]
+    },
+    "headingWeight": 700
+  },
+  "density": 1,
+  "radius": 3,
+  "layoutStyle": "left",
+  "dividers": "strong",
+  "buttonAlign": "center",
+  "imageTreatment": "none"
+}

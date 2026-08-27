@@ -1,0 +1,47 @@
+<!-- @dsCard group="Компоненти" name="Завантаження" subtitle="вибір файла, кроки, витягнуті поля" viewport="420x820" -->
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-секретар — Завантаження</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<main class="demo">
+<header class="appbar">
+  <div class="brand"><span class="mark">AI</span><span>
+    <span class="bname">AI-секретар</span><br>
+    <span class="bsub">облік особового складу</span></span></div>
+  <nav class="tabs"><a href="#" aria-current="page">Документ</a>
+    <a href="#">Чат</a><a href="#">Цифри</a></nav>
+</header>
+<div class="body">
+<p class="kicker">Крок 1 · файл</p>
+<h1>Завантаження документа</h1>
+<p class="muted small">Система прочитає документ і покаже, що витягла. У базу це
+піде лише після вашого підтвердження.</p>
+<button class="btn"><span class="ic">◉</span> Зняти камерою</button>
+<button class="btn btn--ghost"><span class="ic">□</span> Вибрати файл</button>
+<p class="small muted" style="text-align:center;margin-top:8px">docx, pdf або фото</p>
+<div class="card"><p class="kicker">Крок 2 · обробка</p>
+<ul class="steps">
+  <li><span class="dot"></span> файл прийнято <span class="t">0,1 с</span></li>
+  <li><span class="dot"></span> текст прочитано <span class="t">2,6 с</span></li>
+  <li><span class="dot dot--run"></span> витяг полів <span class="t">1,4 с</span></li>
+  <li><span class="dot dot--wait"></span> запис у базу <span class="t">—</span></li>
+</ul></div>
+<div class="card"><p class="kicker">Крок 3 · що витягнуто</p>
+<div class="rows">
+  <div class="row"><span class="k">номер</span><span class="v num">№ 1030 · 05.08.2026</span></div>
+  <div class="row"><span class="k">особа</span><span class="v">Влох Святослав Олесьович</span></div>
+  <div class="row"><span class="k">відпустка</span><span class="v num">13.08 — 01.09 · 20 днів</span></div>
+  <div class="row"><span class="k">куди</span><span class="v">с. Соснова Гряда</span></div>
+  <div class="row"><span class="k">проїзний</span><span class="v num">4204/26</span></div>
+</div>
+<p style="margin:12px 0 0"><span class="flag flag--ok">✓ критичні поля прочитані</span></p>
+<button class="btn">Підтвердити — записати в базу</button>
+<button class="btn btn--ghost">Не підтверджувати</button></div>
+</div></main>
+</body>
+</html>

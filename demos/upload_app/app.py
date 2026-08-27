@@ -406,6 +406,10 @@ APP_THEME = os.environ.get("APP_THEME", "v1").strip().lower()
 _SKINS = {
     "v1": ("theme-tokens.css", "pages.css"),
     "v2": ("theme-tokens-v2.css", "pages-v2.css"),
+    # v3 читає ДВА файли токенів: у v2 лежать @font-face (файли шрифтів ті
+    # самі), у v3 -- палітра, ритм і брендовий блок. Дублювати @font-face у
+    # двох файлах означало б два джерела правди.
+    "v3": ("theme-tokens-v2.css", "theme-tokens-v3.css", "pages-v3.css"),
 }
 
 
@@ -416,9 +420,9 @@ def skin_css():
     Нащо маршрут, а не два <link>: інакше перемикання версії означало б
     правку розмітки обох сторінок, тобто ще одне місце, де версії можуть
     розійтись. Тут вибір робиться в одному рядку."""
-    tokens, pages = _SKINS.get(APP_THEME, _SKINS["v1"])
+    names = _SKINS.get(APP_THEME, _SKINS["v1"])
     parts = []
-    for name in (tokens, pages):
+    for name in names:
         with open(os.path.join(APP_DIR, "static", name), encoding="utf-8") as fh:
             parts.append("/* " + name + " */\n" + fh.read())
     return Response("\n".join(parts), media_type="text/css",

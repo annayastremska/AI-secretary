@@ -1744,14 +1744,19 @@ MARK = os.path.join(ASSETS, "mark.svg")
 #: Версія обличчя -- та сама змінна, що на сторінках (див. app.APP_THEME).
 #: Стара тема лишається на місці: перемикання й відкат -- одна змінна.
 _THEME_VERSION = os.environ.get("APP_THEME", "v1").strip().lower()
-THEME_CSS = os.path.join(
-    HERE, "theme-v2.css" if _THEME_VERSION == "v2" else "theme.css")
+THEME_CSS = os.path.join(HERE, {"v3": "theme-v3.css",
+                                 "v2": "theme-v2.css"}.get(_THEME_VERSION,
+                                                           "theme.css"))
 # Спільні токени обличчя апки (задача B3): один файл на чат і на дві звичайні
 # сторінки (/ і /stats). Лежить у static/, бо звідти його <link>-ом беруть
 # сторінки; чат підклеює його вмістом (див. make_head_css).
-TOKENS_CSS = os.path.join(
-    os.path.dirname(HERE), "static",
-    "theme-tokens-v2.css" if _THEME_VERSION == "v2" else "theme-tokens.css")
+#: v3 -- два файли токенів (шрифти в v2, палітра у v3), тому список.
+_STATIC = os.path.join(os.path.dirname(HERE), "static")
+TOKENS_CSS = {
+    "v3": [os.path.join(_STATIC, "theme-tokens-v2.css"),
+           os.path.join(_STATIC, "theme-tokens-v3.css")],
+    "v2": [os.path.join(_STATIC, "theme-tokens-v2.css")],
+}.get(_THEME_VERSION, [os.path.join(_STATIC, "theme-tokens.css")])
 
 TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
 
@@ -1812,7 +1817,7 @@ def make_head_css():
     # монтування, і відносний шлях під root_path=/chat не резолвиться;
     # вміст файлу від місця монтування не залежить.
     parts = []
-    for path in (TOKENS_CSS, THEME_CSS):
+    for path in list(TOKENS_CSS) + [THEME_CSS]:
         with open(path, encoding="utf-8") as fh:
             parts.append(fh.read())
     return "<style>" + "\n".join(parts) + "</style>"
@@ -1826,7 +1831,7 @@ _EXAMPLES_FALLBACK = [
     "Покажи відсутніх по підрозділах",
     "Скільки непідтверджених фактів?",
     "Що в черзі перевірки?",
-    "Скільком осіб у частині?",
+    "Скільки осіб у частині?",
 ]
 
 
@@ -1956,16 +1961,19 @@ def build_blocks():
                         'документ</a>'
                         '<a href="/stats" class="page-link">▤&nbsp; '
                         'Статистика</a>', elem_id="page-links")
-                gr.Markdown("Приклади питань", elem_classes="side-heading")
-                with gr.Column(elem_id="examples"):
-                    side_btns = [gr.Button(q) for q in EXAMPLES]
+                # Приклади питань стоять НА ЕКРАНІ ВІТАННЯ (hero) -- у
+                # бічній панелі вони дублювались один в один, і це зайве:
+                # той самий перелік двічі на одному екрані (зауваження Ані
+                # 27.08). Тут лишається порожній список, щоб решта коду
+                # (спільний обробник натиску) не змінювалась.
+                side_btns = []
                 dot, state_text = (("ok", f"модель {get_model()} — локально")
                                    if model_available()
                                    else ("rules", "модель недоступна — "
                                                   "працюють правила"))
-                gr.HTML(f'<div id="side-status"><p>У підрахунках — лише '
-                        f'підтверджені факти; чернетки окремим числом.'
-                        f'</p><p><span class="dot dot--{dot}"></span>'
+                gr.HTML(f'<div id="side-status">'
+                        f'<p>У підрахунках — лише підтверджені факти.</p>'
+                        f'<p><span class="dot dot--{dot}"></span>'
                         f'{state_text}</p></div>', elem_id="side-status")
 
             with gr.Column(scale=1, elem_id="main-col"):
@@ -1976,8 +1984,7 @@ def build_blocks():
                     gr.HTML(
                         '<div class="hero-title">Бажаю здоров\'я!</div>'
                         '<div class="hero-sub">Готовий доповідати за обліком '
-                        'особового складу. Питання звичайними словами — '
-                        'відповідь із документів, із джерелом.</div>')
+                        'особового складу.</div>')
                     with gr.Row(elem_id="hero-cards"):
                         hero_col_a = [gr.Button(q) for q in EXAMPLES[:3]]
                     with gr.Row(elem_id="hero-cards"):

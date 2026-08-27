@@ -1,0 +1,35 @@
+<!-- @dsCard group="Компоненти" name="Стани" subtitle="порожньо, вантажиться, помилка, відмова" viewport="420x620" -->
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-секретар — Стани</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<main class="demo">
+<header class="appbar">
+  <div class="brand"><span class="mark">AI</span><span>
+    <span class="bname">AI-секретар</span><br>
+    <span class="bsub">облік особового складу</span></span></div>
+  <nav class="tabs"><a href="#" aria-current="page">Документ</a>
+    <a href="#">Чат</a><a href="#">Цифри</a></nav>
+</header>
+<div class="body">
+<p class="kicker">Вантажиться</p>
+<div class="card"><div class="skeleton" style="width:60%"></div>
+<div class="skeleton"></div><div class="skeleton" style="width:80%"></div></div>
+<p class="kicker">Порожньо</p>
+<div class="note">Документів у черзі немає — усе перевірене.</div>
+<p class="kicker" style="margin-top:20px">Система не впевнена</p>
+<div class="note note--warn">У номері документа нецифровий символ: №3О4.
+Не виправляємо й схожого не підставляємо — це місце, де система не впевнена.</div>
+<p class="kicker" style="margin-top:20px">Збій доступу</p>
+<div class="note note--error">База зараз недоступна. Це не «нічого не
+знайшлося»: цифри на місці, але чат до них не дістає.</div>
+<p class="kicker" style="margin-top:20px">Готово</p>
+<div class="note note--ok">Записано: документ №1030, 8 фактів, зріз 27.08.</div>
+</div></main>
+</body>
+</html>

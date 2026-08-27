@@ -1,0 +1,786 @@
+/* Візуальний шар чата (/chat). Тільки представлення: логіки, правил і текстів
+   відповідей цей файл не знає й не змінює.
+
+   ТОКЕНИ ТУТ БІЛЬШЕ НЕ ЖИВУТЬ. Кольори, радіуси, відступи й шрифти -- у
+   ../static/theme-tokens.css, спільному з двома звичайними сторінками апки
+   (/ -- завантаження, /stats -- статистика). make_head_css() підклеює той
+   файл ПЕРЕД цим, в один <style> (задача B3: дві сторінки -- один продукт).
+   Тому тут лишається рівно те, що стосується Gradio.
+
+   Правило файлу те саме: жодного кольору чи радіуса inline. Треба нове
+   значення -- новий токен у theme-tokens.css.
+
+   Класи Gradio (.message, .message-row, .bubble-wrap, .icon-button-wrapper …)
+   зняті інспектуванням DOM Gradio 6.23, не з документації. */
+
+/* Gradio тримає власний набір змінних і під body.dark підмінює їх на темні.
+   Прив'язуємо їх до наших токенів — інакше компоненти живуть своїм життям. */
+body, body.dark, .gradio-container, .gradio-container.dark {
+    --body-text-color: var(--c-text);
+    --body-text-color-subdued: var(--c-muted);
+    --body-background-fill: var(--c-bg);
+    --background-fill-primary: var(--c-bg);
+    --background-fill-secondary: var(--c-surface);
+    --block-background-fill: var(--c-bg);
+    --block-label-text-color: var(--c-muted);
+    --border-color-primary: var(--c-border);
+    --input-background-fill: var(--c-bg);
+}
+
+/* ── Каркас ─────────────────────────────────────────────────────────────── */
+
+html, body {
+    background: var(--c-bg);
+    color: var(--c-text);
+    font-family: var(--font);
+    overflow: hidden;              /* єдиний скрол — усередині стрічки */
+}
+
+.gradio-container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    background: var(--c-bg);
+}
+
+footer,
+button[title="Use via API"],
+label.float,
+.icon-button-wrapper.top-panel {    /* кошик у правому верхньому куті */
+    display: none !important;
+}
+
+/* ── Сайдбар ────────────────────────────────────────────────────────────── */
+
+#sidebar {
+    background: var(--c-surface);
+    border-right: 1px solid var(--c-border);
+    padding: var(--s-4) var(--s-3);
+    gap: var(--s-1);
+    height: 100dvh;
+    overflow-y: auto;
+}
+
+#brand {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-1) var(--s-2) var(--s-4);
+}
+#brand img, #brand svg { width: 36px; height: 36px; flex: none }
+#brand .brand-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--c-text);
+    line-height: 1.3;
+}
+#brand .brand-sub { font-size: 12px; color: var(--c-muted) }
+
+/* Вторинна кнопка: бордер + прозорий фон, без насиченої заливки */
+#new-chat {
+    width: 100%;
+    justify-content: flex-start;
+    gap: var(--s-2);
+    background: transparent;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 10px var(--s-3);
+    box-shadow: none;
+    cursor: pointer;
+}
+#new-chat:hover { background: var(--c-accent-soft) }
+
+/* адаптація: переходи на інші сторінки тієї самої апки (/ -- завантаження,
+   /stats -- статистика). Виглядають як вторинна кнопка «Новий чат»: у чаті
+   це посилання, у шапці звичайних сторінок -- пункти nav, набір той самий. */
+.page-link {
+    display: block;
+    margin-top: var(--s-2);
+    background: transparent;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 10px var(--s-3);
+    text-decoration: none;
+    cursor: pointer;
+}
+.page-link:hover { background: var(--c-accent-soft) }
+
+.side-heading, .side-heading p {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--c-muted) !important;
+    margin: 0 !important;
+    padding: var(--s-4) var(--s-2) var(--s-2) !important;
+}
+
+/* Приклади — кнопки, не текст. Розділових ліній між ними немає */
+#examples { gap: 2px !important }
+#examples button {
+    width: 100%;
+    text-align: left;
+    justify-content: flex-start;
+    white-space: normal;
+    background: transparent;
+    border: none;
+    border-radius: var(--r-sm);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.45;
+    padding: 10px var(--s-3);
+    box-shadow: none;
+    min-height: 0;
+    cursor: pointer;
+}
+#examples button:hover { background: var(--c-accent-soft) }
+
+#side-status {
+    margin-top: auto !important;
+    padding: var(--s-3) var(--s-2) var(--s-1) !important;
+    border-top: 1px solid var(--c-border);
+}
+#side-status p {
+    margin: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.5;
+    color: var(--c-muted) !important;
+}
+.dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: var(--r-full);
+    margin-right: var(--s-2);
+    vertical-align: 1px;
+}
+.dot--ok { background: var(--c-success) }
+.dot--rules { background: var(--c-warn) }
+
+/* ── Шапка: лінія рівно по ширині колонки, не на все вікно ─────────────── */
+
+#topbar {
+    padding: var(--s-4) 0 !important;
+    background: var(--c-bg);
+    flex: none !important;
+}
+#topbar > * {
+    max-width: var(--col);
+    margin: 0 auto !important;
+    padding: 0 var(--s-5);
+    border-bottom: 1px solid var(--c-border);
+    padding-bottom: var(--s-4);
+}
+#topbar h3, #topbar p {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--c-muted) !important;
+    margin: 0 !important;
+}
+
+/* ── Стрічка повідомлень: єдиний скрол ──────────────────────────────────── */
+
+#chat-area {
+    max-width: var(--col) !important;
+    margin: 0 auto !important;
+    padding: var(--s-5) var(--s-5) 0 !important;
+    height: calc(100dvh - var(--header-h) - var(--composer-h)) !important;
+    border: none !important;
+    background: var(--c-bg) !important;
+    box-shadow: none !important;
+}
+.chatbot, .bubble-wrap {
+    background: var(--c-bg) !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+.bubble-wrap { padding: 0 !important }
+
+::-webkit-scrollbar { width: 8px; height: 8px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb {
+    background: var(--c-border);
+    border-radius: var(--r-sm);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--c-muted) }
+::-webkit-scrollbar-button { display: none }
+* { scrollbar-width: thin; scrollbar-color: var(--c-border) transparent }
+
+/* ── Ролі: бот — світлий із бордером, користувач — акцент 8%, без бордера ─ */
+
+/* Gradio дає рядку max-width: calc(100% - 60px) — через це права межа
+   бульбашки не сходилась із полем вводу на 20px. Знімаємо. */
+.message-row {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 0 var(--s-4) 0 !important;   /* Gradio додає бічні 20px */
+}
+.message-row.user-row { justify-content: flex-end !important }
+
+/* Обмежуємо міру тексту (68ch), а не саму бульбашку: інакше права межа
+   відповіді не сходиться з полем вводу, і колонка виглядає косою. */
+.message {
+    font-size: 15px !important;
+    line-height: 1.6 !important;
+    box-shadow: none !important;
+}
+.message.bot { flex: 1 1 auto !important }
+.message.user { max-width: 68ch !important }
+.message-content { max-width: 68ch }
+.message.bot {
+    background: var(--c-bg) !important;
+    border: 1px solid var(--c-border) !important;
+    border-radius: var(--r-lg) !important;
+    padding: var(--s-4) var(--s-4) !important;
+    color: var(--c-text) !important;
+}
+.message.user {
+    background: var(--c-accent-soft) !important;
+    border: none !important;
+    border-radius: var(--r-lg) !important;
+    padding: var(--s-3) var(--s-4) !important;
+    color: var(--c-text) !important;
+}
+
+.avatar-container {
+    width: 28px !important;
+    height: 28px !important;
+    border: none !important;
+    background: transparent !important;
+    align-self: flex-start;
+    margin-top: var(--s-1);
+}
+.avatar-container img { width: 28px !important; height: 28px !important }
+
+/* ── Типографіка відповіді ──────────────────────────────────────────────── */
+
+.message-content {
+    font-size: 15px !important;
+    line-height: 1.6 !important;
+    color: var(--c-text) !important;
+    font-variant-numeric: tabular-nums;   /* дати й номери не стрибають */
+}
+.message-content p { margin: 0 0 var(--s-2) !important }
+.message-content p:last-child { margin-bottom: 0 !important }
+.message-content ul, .message-content ol {
+    margin: var(--s-2) 0 !important;
+    padding-left: 20px !important;
+}
+.message-content li { margin: var(--s-1) 0 !important }
+.message-content li::marker { color: var(--c-muted) }
+.message-content strong { font-weight: 600 }
+.message-content em { color: var(--c-muted); font-style: normal; font-size: 13px }
+
+/* ── Блок джерела ───────────────────────────────────────────────────────── */
+
+details.src { margin-top: var(--s-3) !important }
+details.src summary {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    color: var(--c-muted);
+    list-style: none;
+    user-select: none;
+    padding: var(--s-1) 0;
+}
+details.src summary::-webkit-details-marker { display: none }
+details.src summary::before {
+    content: "";
+    width: 0; height: 0;
+    border-left: 4px solid currentColor;
+    border-top: 3px solid transparent;
+    border-bottom: 3px solid transparent;
+    transition: transform 0.18s ease;
+}
+details.src[open] summary::before { transform: rotate(90deg) }
+details.src summary:hover { color: var(--c-text) }
+details.src > *:not(summary) {
+    display: block;
+    margin-top: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    background: var(--c-surface);
+    border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--c-muted);
+    animation: reveal 0.18s ease;
+}
+@keyframes reveal {
+    from { opacity: 0; transform: translateY(-2px) }
+    to   { opacity: 1; transform: none }
+}
+
+/* ── Блоки-нотатки: попередження / інформація / помилка ─────────────────── */
+
+.note {
+    margin-top: var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    border-left: 3px solid var(--c-muted);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    font-size: 13px;
+    line-height: 1.55;
+}
+.note--warn  { border-color: var(--c-warn);    background: var(--c-warn-soft);    color: var(--c-text) }
+.note--info  { border-color: var(--c-accent);  background: var(--c-accent-soft);  color: var(--c-muted) }
+.note--error { border-color: var(--c-error);   background: var(--c-error-soft);   color: var(--c-text) }
+
+/* ── Кнопки дій під бульбашкою ──────────────────────────────────────────── */
+
+.icon-button-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    gap: var(--s-1) !important;
+}
+.message-row:hover .icon-button-wrapper,
+.icon-button-wrapper:focus-within { opacity: 1 }
+.message-row.bot-row .icon-button-wrapper { margin-left: 36px }
+.message-row.user-row .icon-button-wrapper { justify-content: flex-end }
+.icon-button-wrapper button.icon-button {
+    width: 28px !important;
+    height: 28px !important;
+    padding: 6px !important;
+    border-radius: var(--r-sm) !important;
+    color: var(--c-muted) !important;
+    background: transparent !important;
+    border: none !important;
+}
+.icon-button-wrapper button.icon-button:hover {
+    color: var(--c-text) !important;
+    background: var(--c-surface) !important;
+}
+
+/* ── Порожній екран ─────────────────────────────────────────────────────── */
+
+#hero {
+    max-width: var(--col);
+    margin: 0 auto !important;
+    padding: 12dvh var(--s-5) 0 !important;
+    gap: 0 !important;
+}
+#hero .hero-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--c-text);
+    text-align: center;
+    margin-bottom: var(--s-2);
+}
+#hero .hero-sub {
+    font-size: 14px;
+    color: var(--c-muted);
+    text-align: center;
+    margin-bottom: var(--s-6);
+    line-height: 1.6;
+}
+#hero-cards { gap: var(--s-2) !important }
+#hero-cards button {
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    justify-content: flex-start;
+    white-space: normal;
+    padding: var(--s-3);
+    box-shadow: none;
+    min-height: 0;
+    cursor: pointer;
+}
+#hero-cards button:hover {
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent-line);
+}
+
+/* ── Очікування відповіді: назва ярусу + секундомір ─────────────────────── */
+/*
+ * Було: три крапки на весь час обробки. При 43-47 с на виклик локальної
+ * моделі це читалось як «зависло» (задача B1, критерій Ш3). Стало: крапки
+ * лишились як рух, але поруч -- назва ярусу, який зараз працює, рухомий
+ * секундомір і, для модельних ярусів, одне речення «чому довго».
+ * Розмітку дає chat_gradio/progress.py (render), тут -- лише вигляд.
+ */
+
+.working {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-1) 0;
+}
+.working .typing { padding-top: 6px }
+.working-body { min-width: 0 }
+.working-now {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s-2);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--c-text);
+}
+.working-now b { font-weight: 600 }
+.working-time {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--c-muted);
+    font-variant-numeric: tabular-nums;   /* секунди не стрибають по ширині */
+}
+.working-trail, .working-hint {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--c-muted);
+    margin-top: 2px;
+}
+.working-hint { color: var(--c-warn) }
+
+.typing { display: inline-flex; gap: 5px; padding: var(--s-1) 0 }
+.typing i {
+    width: 6px; height: 6px;
+    border-radius: var(--r-full);
+    background: var(--c-muted);
+    animation: pulse 1.2s infinite ease-in-out;
+}
+.typing i:nth-child(2) { animation-delay: 0.16s }
+.typing i:nth-child(3) { animation-delay: 0.32s }
+@keyframes pulse {
+    0%, 80%, 100% { opacity: 0.25; transform: translateY(0) }
+    40%           { opacity: 1;    transform: translateY(-2px) }
+}
+
+/* ── Поле вводу: краї збігаються з краями бульбашок ─────────────────────── */
+
+#composer {
+    position: relative;
+    max-width: var(--col) !important;
+    margin: 0 auto !important;
+    padding: var(--s-2) var(--s-5) var(--s-3) !important;
+    background: var(--c-bg);
+    gap: 0 !important;
+}
+#composer .block, #composer .form, #composer .input-container {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+#composer textarea {
+    border: 1px solid var(--c-border) !important;
+    border-radius: var(--r-md) !important;
+    background: var(--c-bg) !important;
+    color: var(--c-text) !important;
+    box-shadow: var(--shadow-sm) !important;
+    font-family: var(--font) !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    /* правий відступ звільняє місце під кнопку, яка стоїть усередині поля */
+    padding: 12px 60px 12px var(--s-4) !important;
+    resize: none !important;
+}
+#composer textarea:focus {
+    border-color: var(--c-accent) !important;
+    outline: none !important;
+}
+#composer textarea::placeholder { color: var(--c-muted) !important }
+
+#send-btn {
+    position: absolute !important;
+    right: calc(var(--s-5) + var(--s-2));
+    bottom: 22px;
+    z-index: 2;
+    flex: none !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    border-radius: var(--r-sm) !important;
+    background: var(--c-accent) !important;
+    color: var(--c-on-accent) !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    font-size: 15px !important;
+    cursor: pointer;
+}
+#send-btn:hover { filter: brightness(0.94) }
+
+#retry-btn {
+    background: transparent;
+    border: 1px solid var(--c-error);
+    border-radius: var(--r-md);
+    color: var(--c-error);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: var(--s-2) var(--s-3);
+    box-shadow: none;
+    cursor: pointer;
+}
+#retry-btn:hover { background: var(--c-error-soft) }
+
+#hint {
+    max-width: var(--col);
+    margin: 0 auto;
+    padding: 0 var(--s-5) var(--s-3);
+    font-size: 11px;
+    color: var(--c-muted);
+    text-align: center;
+}
+
+
+/* ═══ ТЕЛЕФОН (рішення Ані 27.08) ══════════════════════════════════════════
+ * Тут медіа-запитів теж не було. На телефоні головне -- щоб поле питання не
+ * ховалось під клавіатурою, а відповідь читалась без прокручування вбік.
+ */
+@media (max-width: 640px) {
+    /* база 15px: дрібніше на телефоні не читається з рук */
+    .gradio-container, .gradio-container * { font-size: 15px }
+    .gradio-container .message p,
+    .gradio-container .message li { font-size: 15px; line-height: 1.45 }
+
+    /* колонка на всю ширину, без бічних полів у 24px */
+    .gradio-container { padding-left: var(--s-3); padding-right: var(--s-3) }
+
+    /* поле питання: висока тачзона й помітна кнопка відправки */
+    .gradio-container textarea { font-size: 16px; min-height: 52px }
+    .gradio-container button { min-height: 48px }
+
+    /* блок джерела під відповіддю -- згорнутий, розкривається натиском;
+       на телефоні він мусить бути помітним, а не сірим дрібним рядком */
+    .gradio-container details > summary { font-size: 14px; padding: var(--s-2) 0 }
+
+    /* довгі переліки прізвищ і SQL у джерелі не рвуть сторінку */
+    .gradio-container pre, .gradio-container code { overflow-x: auto }
+
+    /* приклади питань: у стовпець, повна ширина, велика тачзона */
+    .gradio-container .examples button,
+    .gradio-container .hero-examples button { width: 100%; min-height: 48px }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ШАР ВЕРСІЇ 2 для чата: та сама «строга» база, що на сторінках.
+   Файл -- копія theme.css плюс цей шар. Стара версія лишається недоторканою.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.gradio-container, .gradio-container * { font-family: var(--font) }
+.gradio-container { background: var(--c-bg); color: var(--c-text) }
+
+/* Повідомлення: прямі кути, межа лінією. Питання людини -- залите оливою,
+   відповідь -- на поверхні з лівою лінією-акцентом: видно, де чиє, навіть
+   у чорно-білому друку слайда. */
+.gradio-container .message {
+    border-radius: 0 !important;
+    font-size: 15px;
+    line-height: 1.5;
+}
+.gradio-container .message.user, .gradio-container .user .message {
+    background: var(--c-accent) !important;
+    color: var(--c-on-accent) !important;
+    border: 0 !important;
+}
+.gradio-container .message.bot, .gradio-container .bot .message {
+    background: var(--c-surface) !important;
+    border: 1px solid var(--c-border) !important;
+    border-left: 3px solid var(--c-accent-line) !important;
+}
+
+/* Блок джерела під відповіддю: капітельний підпис, моноширинний SQL. */
+.gradio-container details > summary {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--c-muted);
+    cursor: pointer;
+}
+.gradio-container details[open] > summary { color: var(--c-accent) }
+.gradio-container details pre, .gradio-container details code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+/* Поле питання й кнопка: прямокутні, з видимим фокусом. */
+.gradio-container textarea, .gradio-container input[type="text"] {
+    border-radius: 0 !important;
+    border: 1px solid var(--c-border) !important;
+    background: var(--c-bg) !important;
+    color: var(--c-text) !important;
+    font-size: 15px;
+}
+.gradio-container textarea:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 0;
+    border-color: var(--c-accent) !important;
+}
+.gradio-container button {
+    border-radius: 0 !important;
+    font-weight: 600;
+    transition: background-color .12s ease, color .12s ease;
+}
+
+/* Приклади питань: прямокутні «картки-підказки» з тихою межею. */
+.gradio-container .examples button,
+.gradio-container .hero-examples button {
+    border-radius: 0 !important;
+    border: 1px solid var(--c-border) !important;
+    background: var(--c-bg) !important;
+    color: var(--c-text) !important;
+    text-align: left;
+}
+.gradio-container .examples button:hover,
+.gradio-container .hero-examples button:hover {
+    background: var(--c-surface) !important;
+    border-color: var(--c-text) !important;
+}
+
+/* Цифри у відповідях не «стрибають» шириною. */
+.gradio-container .message strong, .gradio-container .message b {
+    font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gradio-container *, .gradio-container *::before, .gradio-container *::after {
+        animation-duration: .001ms !important;
+        transition-duration: .001ms !important;
+    }
+}
+
+
+/* ===== ШАР НАБОРУ v3 для чата ============================================ */
+.gradio-container { background: var(--c-bg) }
+.gradio-container .message.user, .gradio-container .user .message {
+    background: var(--c-accent) !important; color: var(--c-on-accent) !important;
+    border: 0 !important; border-radius: var(--r-md) !important }
+.gradio-container .message.bot, .gradio-container .bot .message {
+    background: var(--c-canvas) !important; border: 1px solid var(--c-border) !important;
+    border-left: 3px solid var(--c-accent) !important;
+    border-radius: var(--r-md) !important; box-shadow: var(--shadow-sm) }
+.gradio-container button { border-radius: var(--r-md) !important;
+    transition: background-color var(--dur) var(--ease),
+                transform 80ms var(--ease), box-shadow var(--dur) var(--ease) }
+.gradio-container button:hover { box-shadow: var(--shadow-md);
+    transform: translateY(-1px) }
+.gradio-container button:active { transform: translateY(1px); box-shadow: none }
+.gradio-container textarea { border-radius: var(--r-md) !important;
+    background: var(--c-canvas) !important }
+.gradio-container details > summary { font-size: var(--fs-kicker);
+    letter-spacing: .08em; text-transform: uppercase; color: var(--c-muted) }
+
+
+/* ═══ ВИПРАВЛЕННЯ ПО ЖИВОМУ ЧАТУ (скріншот Ані 27.08) ══════════════════════
+ *
+ * Три справжні дефекти й одна претензія до відчуття:
+ *   1. питання людини -- темний текст на темній оливі: не читалось. Причина --
+ *      Gradio ставить колір на ВНУТРІШНІХ вузлах повідомлення, а я фарбувала
+ *      лише контейнер;
+ *   2. у відповіді подвійна рамка: моя межа плюс власна межа внутрішнього
+ *      блоку Gradio;
+ *   3. кнопка відправки стояла абсолютно, з прив'язкою до низу в пікселях --
+ *      при іншій висоті поля вона з'їжджала;
+ *   4. поява відповіді була різкою -- тепер коротке проявлення.
+ */
+
+/* 1. Питання людини: колір ставимо на ВСІ внутрішні вузли. */
+#chat-area .message.user,
+#chat-area .user .message,
+#chat-area [data-testid="user"] .message {
+    background: var(--c-accent) !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+#chat-area .message.user, #chat-area .message.user *,
+#chat-area .user .message, #chat-area .user .message *,
+#chat-area [data-testid="user"] .message,
+#chat-area [data-testid="user"] .message * {
+    color: var(--c-on-accent) !important;
+}
+
+/* 2. Відповідь: одна межа -- зовнішня. Внутрішні блоки Gradio прозорі. */
+#chat-area .message.bot,
+#chat-area .bot .message,
+#chat-area [data-testid="bot"] .message {
+    background: var(--c-canvas) !important;
+    border: 1px solid var(--c-border) !important;
+    border-left: 3px solid var(--c-accent) !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+#chat-area .message > *,
+#chat-area .message .md,
+#chat-area .message .prose,
+#chat-area .message .message-content,
+#chat-area .message .container {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+/* блок джерела всередині відповіді -- єдина внутрішня рамка, і вона тонка */
+#chat-area .message details {
+    background: var(--c-surface) !important;
+    border: 1px solid var(--c-hairline) !important;
+    border-radius: var(--r-sm) !important;
+    padding: var(--s-2) var(--s-3) !important;
+    margin-top: var(--s-3) !important;
+}
+
+/* 3. Кнопка відправки: у потоці, однакової висоти з полем, без абсолюту. */
+#composer {
+    display: flex !important;
+    align-items: stretch !important;
+    gap: var(--s-2) !important;
+    padding: var(--s-3) var(--s-5) var(--s-4) !important;
+}
+#composer > *:first-child { flex: 1 1 auto !important; min-width: 0 }
+#composer textarea {
+    padding: 13px var(--s-4) !important;   /* місця під кнопку більше не треба */
+    min-height: 50px !important;
+    box-shadow: none !important;
+}
+#send-btn {
+    position: static !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 50px !important;
+    min-width: 50px !important;
+    height: 50px !important;
+    align-self: flex-end !important;
+    display: grid !important;
+    place-items: center !important;
+    border-radius: var(--r-md) !important;
+    font-size: 17px !important;
+    transition: background-color var(--dur) var(--ease),
+                transform 80ms var(--ease), box-shadow var(--dur) var(--ease);
+}
+#send-btn:hover { background: var(--c-accent-600) !important; filter: none;
+                  box-shadow: var(--shadow-md) !important;
+                  transform: translateY(-1px) }
+#send-btn:active { background: var(--c-accent-700) !important;
+                   transform: translateY(1px); box-shadow: none !important }
+
+/* 4. Плавність: коротке проявлення повідомлення й плавне прокручування. */
+@keyframes msg-in {
+    from { opacity: 0; transform: translateY(6px) }
+    to   { opacity: 1; transform: none }
+}
+#chat-area .message { animation: msg-in 200ms var(--ease) both }
+#chat-area { scroll-behavior: smooth }
+/* хто вимкнув анімації -- не отримує їх (шар набору теж це поважає) */
+@media (prefers-reduced-motion: reduce) {
+    #chat-area .message { animation: none }
+    #chat-area { scroll-behavior: auto }
+}
