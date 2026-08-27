@@ -594,24 +594,69 @@ def extract_doc_number(question):
     return None
 
 
+def name_pattern(name):
+    """ПІБ або слово з питання -> значення параметра `name_pattern` шаблонів.
+
+    Раніше це був підрядок `f"%{name}%"` у КОЖНОМУ з шести місць, які його
+    будували, а шаблони порівнювали через `ILIKE`. Дві біди відразу:
+
+      * «Богодар» як підрядок ловив «Богодарович» -- п. 6-7 звіту Дениса,
+        тобто впевнена відповідь про іншу людину;
+      * а коли обрізання прибрали, підрядок перестав ловити відмінок:
+        «Крижанівського» як `%Крижанівського%` не збігається з «Крижанівський»
+        у базі -- і чат почав заперечувати власні дані (п. 30, зворотний бік).
+
+    Тому шаблон -- РЕГУЛЯРКА по межі слова з допуском на відмінок, та сама, що
+    в картці особи. Шаблони каталогу порівнюють через `~*`. Одна функція на всі
+    місця: копії цього правила вже двічі розійшлися й двічі дали дефект.
+    """
+    try:
+        from . import db as _db
+    except ImportError:
+        import db as _db
+    return _db.name_word_regex(name) or r"(?!)"
+
+
 def extract_name(question):
-    """Слово з великої літери (не питальне), яке справді є в реєстрі осіб.
-    Відмінок ловимо обрізанням хвоста: «Усика» -> «Усик» -> ILIKE 'Усик%'."""
-    for tok in re.findall(r"[А-ЯІЇЄҐ][А-ЯІЇЄҐа-яіїєґ']{2,}", question):
+    """Слово з великої літери, яке справді є в реєстрі осіб. -> слово або None.
+
+    ЦЕ ДРУГА КОПІЯ пошуку особи, і саме вона пережила блок C 28.08 -- через що
+    п. 7 звіту Дениса лишався живим ще після правок. Мій же щит про це
+    попереджав («extract_name існує ДВІЧІ; полагодити одну й лишити другу
+    означає полагодити половину»), а прилад ідентифікації цього не побачив, бо
+    міряв ІНШИЙ шлях (картку особи), а не цей.
+
+    Що було: обрізання хвоста до двох літер плюс `ILIKE '%стем%'`. На «Голяш»
+    третій прохід давав `%Гол%`, а це підрядок у «гоголь-Яновський» -- і чат
+    упевнено доповідав про іншу людину, з посадою й записом у базі.
+    Заміряно живим слідом ходу: `name_pattern: "%Гол%"`, 3 рядки з бази.
+
+    Що стало: жодного обрізання, і збіг по МЕЖІ СЛОВА тією самою регуляркою,
+    якою шукає картка (`db.name_word_regex`). Допуск на відмінок робить сама
+    регулярка й робить його симетрично, тому «Крижанівського» знаходиться, а
+    «Гол» більше не існує як запит.
+
+    Регулярка НЕ дублюється: беремо ту саму функцію, бо дві копії одного
+    правила -- це рівно та причина, через яку цей дефект і дожив.
+    """
+    try:
+        from . import db as _db
+    except ImportError:                      # запуск із chat_gradio/ у sys.path
+        import db as _db
+    for tok in re.findall(r"[А-ЯІЇЄҐ][А-ЯІЇЄҐа-яіїєґ'ʼ-]{2,}", question):
         if tok in STOP_CAPS:
             continue
-        for cut in (0, 1, 2):
-            stem = tok[:len(tok) - cut] if cut else tok
-            if len(stem) < 3:
-                break
-            try:
-                rows = _run_template_sql(
-                    "SELECT 1 FROM objects WHERE canonical_name ILIKE %(p)s "
-                    "LIMIT 1", {"p": f"%{stem}%"})
-            except psycopg.Error:
-                return None
-            if rows:
-                return stem
+        rx = _db.name_word_regex(tok)
+        if rx is None:
+            continue
+        try:
+            rows = _run_template_sql(
+                "SELECT 1 FROM objects WHERE canonical_name ~* %(p)s LIMIT 1",
+                {"p": rx})
+        except psycopg.Error:
+            return None
+        if rows:
+            return tok
     return None
 
 
@@ -846,7 +891,7 @@ def rules_route(question):
         name = extract_name(question)
         if name:
             return "fact_provenance", {"name": name,
-                                       "name_pattern": f"%{name}%"}
+                                       "name_pattern": name_pattern(name)}
 
     # ГЕЙТ НОРМАТИВКИ -- теж ПЕРЕД підрахунками, і теж через живий дефект.
     #
@@ -935,9 +980,9 @@ def rules_route(question):
 
     name = extract_name(question)
     if name and re.search(r"що відомо|де зараз|стан|про ", low):
-        return "person_status", {"name_pattern": f"%{name}%", "name": name}
+        return "person_status", {"name_pattern": name_pattern(name), "name": name}
     if name and len(question.split()) <= 4:
-        return "person_status", {"name_pattern": f"%{name}%", "name": name}
+        return "person_status", {"name_pattern": name_pattern(name), "name": name}
 
     return None
 
@@ -1173,7 +1218,7 @@ def model_route(question, history=None):
         name = (data.get("name") or "").strip()
         if not name:
             return None
-        params["name_pattern"] = f"%{name}%"
+        params["name_pattern"] = name_pattern(name)
         params["name"] = name
     if tid == "doc_by_number":
         num = (data.get("doc_number") or "").strip().lstrip("№").strip()
@@ -1202,7 +1247,7 @@ def model_route(question, history=None):
         name = (data.get("name") or "").strip() or extract_name(question)
         if not name:
             return None
-        params["name_pattern"] = f"%{name}%"
+        params["name_pattern"] = name_pattern(name)
         params["name"] = name
     if "query" in need and "query" not in params:
         params["query"] = question
@@ -1265,7 +1310,7 @@ def params_for_template(template_id, question):
         name = extract_name(question)
         if not name:
             return None
-        params["name_pattern"] = f"%{name}%"
+        params["name_pattern"] = name_pattern(name)
         params["name"] = name
     if "doc_number" in need:
         num = extract_doc_number(question)

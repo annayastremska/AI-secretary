@@ -33,7 +33,11 @@
 #   state      -- leave | deployment | absent (обидва виміри)
 #   on_date    -- YYYY-MM-DD ("зараз"/"сьогодні" -> сьогодні)
 #   date_from / date_to -- період (місяць, діапазон)
-#   name_pattern -- ПІБ або його частина (ILIKE-шаблон, будує код)
+#   name_pattern -- ПІБ або його частина. РЕГУЛЯРКА по межі слова (`~*`),
+#                 будує код (`tiers.name_pattern` -> `db.name_word_regex`).
+#                 Був ILIKE-підрядок -- і «Богодар» ловив «Богодарович»,
+#                 тобто впевнену відповідь про іншу людину (п. 6-7 звіту
+#                 Дениса 27.08). Допуск на відмінок робить сама регулярка
 #   doc_number -- номер документа без «№»
 #   query      -- тема нормативного пошуку (текст у websearch_to_tsquery,
 #                 їде ЛИШЕ параметром)
@@ -211,7 +215,7 @@ templates:
         FROM facts f
         JOIN objects o ON o.id = f.object_id
         JOIN dimensions d ON d.id = f.dimension_id
-        WHERE o.canonical_name ILIKE %(name_pattern)s
+        WHERE o.canonical_name ~* %(name_pattern)s
         ORDER BY o.id, d.code, translate(f.value, '''', '’'), f.valid_from, f.valid_to, f.status,
                  f.source_doc_id
       ) t
@@ -720,7 +724,7 @@ templates:
         WHERE f2.source_doc_id = f.source_doc_id
           AND d2.code = 'document_date'
         LIMIT 1) dat ON true
-      WHERE o.canonical_name ILIKE %(name_pattern)s
+      WHERE o.canonical_name ~* %(name_pattern)s
       ORDER BY o.canonical_name, f.source_doc_id, d.id
 
   # Нащо: «які нормативні документи в базі» -- перелік актів.

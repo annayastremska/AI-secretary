@@ -441,6 +441,22 @@ def diag_unconfirmed(records, ctx):
 #: документ давав розбіжність одразу в чотирьох перевірках.
 #:
 #: Ознака не домен, а ПОХОДЖЕННЯ: домен вигадали ми, а контрольна сума -- це
+def _name_rx(surname):
+    """Той самий шаблон імені, що будує чат.
+
+    Прилад мусить питати базу ТАК САМО, як її питає апка: інакше він міряє
+    іншу систему й дає правдоподібне неправильне число. Саме тому тут не своя
+    копія регулярки, а функція чата.
+    """
+    # Імпорт саме такий: прилад запускається з кореня проєкту, але на sys.path
+    # у нього лежить `demos/upload_app` (звідти ж береться `dbconn`), тому
+    # пакета `demos.` тут не існує. Перша версія імпортувала його й падала --
+    # а звіт при цьому лишався зі СТАРИМ числом, тобто я майже зарахувала
+    # неперевірене за перевірене. Тому й важливо читати вивід, а не файл.
+    from chat_gradio import db as _db
+    return _db.name_word_regex(surname) or r"(?!)"
+
+
 #: факт. Перевірено на живій базі 27.08: 204 документи, 200 зійшлися за
 #: сумою, 4 -- ні, і це рівно штатка й три нормативні.
 OUTSIDE_SQL = """
@@ -465,7 +481,7 @@ FROM facts f
 JOIN documents d ON d.id = f.source_doc_id
 JOIN objects o ON o.id = f.object_id
 WHERE d.domain = 'staffing'
-  AND o.canonical_name ILIKE %(name_pattern)s
+  AND o.canonical_name ~* %(name_pattern)s
 """
 
 
@@ -481,7 +497,7 @@ def outside_person_facts(surname):
         return 0
     try:
         return int(run_sql(PERSON_OUTSIDE_SQL,
-                           {"name_pattern": f"%{surname}%"})[0]["n"] or 0)
+                           {"name_pattern": _name_rx(surname)})[0]["n"] or 0)
     except Exception:
         return 0
 
@@ -861,7 +877,7 @@ def build_checks(ctx):
             got=got_rowcount),
         "person_status": dict(
             kind="compare",
-            params={"name_pattern": f"%{ctx['surname']}%"},
+            params={"name_pattern": _name_rx(ctx["surname"])},
             expected=lambda rs: exp_person_status(rs, ctx),
             got=got_rowcount),
         "doc_by_number": dict(
@@ -925,7 +941,7 @@ def build_checks(ctx):
             got=got_rowcount),
         "fact_provenance": dict(
             kind="compare",
-            params={"name_pattern": f"%{ctx['surname']}%"},
+            params={"name_pattern": _name_rx(ctx["surname"])},
             expected=lambda rs: exp_provenance(rs, ctx),
             got=got_rowcount),
         "normative_list": dict(
