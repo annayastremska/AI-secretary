@@ -1751,9 +1751,15 @@ def answer(question, history=None):
         _CURRENT_ID.reset(token)
     out = _with_request_id(out, cid)
     spent = time.monotonic() - started
-    _journal.info("[%s] %.1f с | відповідь %d символів | питання: %.80s",
-                  cid, spent, len(out or ""), question or "")
-    livemetrics.record(spent, _road_of(out))
+    road = _road_of(out)
+    # ДОРОГА в журналі. Доти рядок казав «коли, скільком і що спитали»,
+    # але не «хто відповідав»: правила, вектори, модель чи вільний SQL.
+    # А це перше питання при розборі скарги «чат відповів дивно» -- і
+    # доводилось з'ясовувати його вручну, перезапускаючи те саме питання.
+    _journal.info("[%s] %.1f с | %s | відповідь %d символів | питання: %.80s",
+                  cid, spent, road or "дорога не визначена",
+                  len(out or ""), question or "")
+    livemetrics.record(spent, road)
     return out
 
 
@@ -1841,6 +1847,11 @@ def _bold_labels(text):
     return "\n".join(out)
 
 
+#: Номер звернення у вже складеній відповіді. Шість символів
+#: шістнадцяткою -- рівно те, що ставить `_request_id()`.
+_ID_IN_TEXT = re.compile(r"звернення:?\s*([0-9a-f]{6})")
+
+
 def render_reply(text):
     """Той самий текст answer(), розкладений на блоки.
 
@@ -1862,6 +1873,20 @@ def render_reply(text):
         else:
             body.append(line)
     out = _bold_labels("\n".join(body).strip())
+    # НОМЕР ЗВЕРНЕННЯ -- ВИДИМИМ РЯДКОМ, а не лише всередині «джерела».
+    #
+    # Просив Денис 27.08: «щоб було видно айді без акордеону, щоб по
+    # скріну можна було співставити». Це саме той випадок, коли номер
+    # і потрібен: людина присилає скріншот, і по номеру хід знаходиться
+    # у журналі за секунду. А доти номер лежав у ЗГОРНУТОМУ блоці --
+    # тобто на скріншоті його не було взагалі.
+    #
+    # Дублювання свідоме: у «джерелі» номер лишається (там він поруч зі
+    # шляхом і SQL, тобто в контексті розбору), а тут стоїть міткою ходу.
+    m = _ID_IN_TEXT.search(out) or _ID_IN_TEXT.search(text)
+    if m:
+        out += ('\n\n<div class="req-id">звернення '
+                + m.group(1) + '</div>')
     for kind, msg in notes:
         out += "\n\n" + _note(kind, msg)
     return out

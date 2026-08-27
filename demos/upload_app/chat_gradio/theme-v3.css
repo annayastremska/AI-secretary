@@ -1619,3 +1619,17 @@ details.src > *:not(summary) {
     gap: 6px 8px;
 }
 .access-badge .access-note, .access-badge .access-up { white-space: nowrap }
+
+/* 23. Номер звернення видимим рядком під відповіддю (просив Денис 27.08).
+ *     Тихо, моноширинним, дрібним: це мітка для розбору, а не частина
+ *     відповіді. Але вона МУСИТЬ бути на скріншоті -- по ній хід знаходиться
+ *     в журналі за секунду.
+ */
+#chat-area .req-id {
+    margin-top: var(--s-2);
+    font-family: var(--font-data, var(--font-mono));
+    font-size: 10.5px;
+    letter-spacing: .04em;
+    color: var(--c-muted);
+    user-select: all;   /* щоб номер можна було виділити одним дотиком */
+}
