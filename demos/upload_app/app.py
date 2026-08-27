@@ -26,7 +26,8 @@ import uuid
 
 import yaml
 from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import (FileResponse, JSONResponse,
+                               RedirectResponse, Response)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Кеш Gradio -- у НАШУ теку, а не в /tmp.
@@ -478,6 +479,12 @@ STATIC_FILES = {
     # локально, як і все інше -- зі сторінок назовні не йде жодного запиту.
     "theme-toggle.js": (os.path.join(APP_DIR, "static", "theme-toggle.js"),
                         "application/javascript"),
+    # Показ рівня доступу. Сторінки статичні, а чат Gradio будує один раз при
+    # запуску -- тобто рівень КОНКРЕТНОЇ людини вставити туди неможливо за
+    # побудовою. Один запит /api/whoami з браузера вирішує це однаково на
+    # всіх трьох екранах.
+    "access.js": (os.path.join(APP_DIR, "static", "access.js"),
+                  "application/javascript"),
 }
 
 # Шрифти обличчя v2 -- у підпапці, і маршрут статики їх спершу НЕ віддавав
@@ -529,6 +536,45 @@ def skin_css():
 #: `qrcode`, а ставити пакет у спільний venv -- рівно та дія, якою 25.08
 #: llama-cpp тихо стала процесорною. Файл гітігнорений: у ньому ключ.
 QR_PATH = os.path.join(PROJECT_ROOT, "data", "qr-guest.png")
+
+
+@app.get("/api/whoami")
+def whoami(request: Request):
+    """Яким рівнем зайшла ця людина. Потрібно СТОРІНКАМ: вони статичні й самі
+    про це не знають, а дізнатися про свій рівень із відмови 403 після
+    натискання кнопки -- найгірший спосіб."""
+    level = getattr(request.state, "access_level", LEVEL_OPERATOR)
+    return {"level": level,
+            "can_write": level == LEVEL_OPERATOR and not PUBLIC_MODE,
+            "guest_entry": bool(GUEST_TOKEN),
+            # Чому не можна писати -- окремо від того, чи можна: причини дві
+            # різні («ти гість» і «запис вимкнено на весь показ»), і плутати
+            # їх не можна.
+            "reason": ("запис вимкнено на весь показ" if PUBLIC_MODE
+                       else None if level == LEVEL_OPERATOR
+                       else "гостьовий вхід за посиланням")}
+
+
+@app.get("/operator")
+def become_operator(request: Request):
+    """Стати оператором: віддаємо 401, і БРАУЗЕР сам показує вікно пароля.
+
+    Нащо окремий маршрут. Людина, яка зайшла за QR, уже «всередині» -- вікна
+    пароля вона не побачить ніколи, бо гейт її пускає. Щоб перейти на вищий
+    рівень, потрібен запит, який СВІДОМО відмовляє: тоді браузер питає пароль,
+    і далі заголовок Basic їде з кожним запитом сам.
+
+    Гостьову cookie при цьому знімаємо: інакше вона й далі вигравала б у
+    людини, яка щойно ввела пароль... точніше не вигравала б (пароль
+    сильніший), але лишалась би сміттям, яке заплутує при відлагодженні.
+    """
+    if getattr(request.state, "access_level", None) == LEVEL_OPERATOR:
+        resp = RedirectResponse("/", status_code=302)
+        resp.delete_cookie(ACCESS_COOKIE)
+        return resp
+    return JSONResponse(
+        {"error": "введіть пароль оператора"}, status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="AI-sekretar operator"'})
 
 
 @app.get("/static/qr-guest.png")

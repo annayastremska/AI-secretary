@@ -1803,6 +1803,8 @@ TOKENS_CSS = {
 
 #: Перемикач світлої/темної теми -- один файл на всі три екрани апки.
 TOGGLE_JS = os.path.join(_STATIC, "theme-toggle.js")
+#: Показ рівня доступу -- той самий файл, що на звичайних сторінках.
+ACCESS_JS = os.path.join(_STATIC, "access.js")
 
 TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
 
@@ -1894,13 +1896,16 @@ def make_head_css():
             parts.append(fh.read())
     with open(TOGGLE_JS, encoding="utf-8") as fh:
         toggle = fh.read()
+    with open(ACCESS_JS, encoding="utf-8") as fh:
+        access = fh.read()
     # Скрипт перемикача теми -- тим самим способом, що CSS: інлайном, а
     # не <script src>. Причина та сама, що в коментарі вище: head
     # віддається до монтування, і відносний шлях під root_path=/chat не
     # резолвиться. Плюс інлайн ставить data-theme до першого малювання,
     # тобто без блимання світлою темою.
     return ("<style>" + "\n".join(parts) + "</style>"
-            + "<script>" + toggle + "</script>")
+            + "<script>" + toggle + "</script>"
+            + "<script>" + access + "</script>")
 
 
 #: Запасні приклади -- без дат і номерів, бо саме вони й «псуються» при зміні
@@ -2066,9 +2071,8 @@ def build_blocks():
                         '<div class="qr-title">Гостьовий доступ</div>'
                         '<img src="/static/qr-guest.png" alt="QR гостьового '
                         'входу" width="150" height="150">'
-                        '<div class="qr-note">Наведіть камеру — відкриється '
-                        'чат без пароля. Дивитись і питати можна, '
-                        'записувати в базу — ні.</div></div>',
+                        '<div class="qr-note">Вхід без пароля. '
+                        'Без доступу до запису в базу.</div></div>',
                         elem_id="guest-qr-block")
                 # Приклади питань стоять НА ЕКРАНІ ВІТАННЯ (hero) -- у
                 # бічній панелі вони дублювались один в один, і це зайве:

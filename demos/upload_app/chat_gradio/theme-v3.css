@@ -1145,37 +1145,132 @@ details.src > *:not(summary) {
    тулився до шапки, а поле вводу лишалось унизу з великою дірою. */
 #main-col > *:has(#hero) { flex: 1 1 auto; min-height: 0 }
 
-/* 13. Блок гостьового доступу в бічній панелі: QR під переходами.
- *     Дрібним і тихо: це не дія, а довідка. Рамка світла, підпис під кодом
- *     називає МЕЖУ доступу («записувати в базу -- ні»), бо саме вона й
- *     робить цей вхід допустимим.
+/* 13. Блок гостьового доступу: зелена рама, код на білій плашці, по центру.
+ *
+ *     Правка Ані 27.08: обіграти цікавіше -- менша рама, зелена, код по
+ *     центру панелі.
+ *
+ *     ЧОМУ САМ КОД НЕ ІНВЕРТОВАНО (білі модулі на зеленому). Стандарт QR
+ *     очікує ТЕМНІ модулі на СВІТЛОМУ тлі; інверсію більшість сучасних
+ *     сканерів читає, але не всі, і залежить це від застосунку камери, а не
+ *     від нас. На демо люди сканують своїми телефонами -- ризик не наш і не
+ *     керований. Тому зелене тут усе, крім самого коду: рама, підпис,
+ *     рубрика. Код лишається чорним на білій плашці, і плашка навмисно
+ *     біла, а не «майже біла»: контраст модулів -- єдине, від чого залежить,
+ *     чи прочитається код узагалі.
  */
 #guest-qr-block { margin-top: var(--s-4) !important }
 #guest-qr {
-    border: 1px solid var(--c-border);
-    background: var(--c-canvas);
-    padding: var(--s-3);
+    /* Рама менша за блок і по центру: код -- не банер, а довідка. */
+    max-width: 168px;
+    margin: 0 auto;
+    padding: var(--s-3) var(--s-3) var(--s-2);
+    background: var(--c-accent);
+    border: 0;
     text-align: center;
 }
 #guest-qr .qr-title {
     font-family: var(--font-data, var(--font-mono));
-    font-size: 10.5px;
-    letter-spacing: .09em;
+    font-size: 10px;
+    letter-spacing: .1em;
     text-transform: uppercase;
-    color: var(--c-muted);
+    color: color-mix(in srgb, var(--c-on-accent) 82%, transparent);
     margin-bottom: var(--s-2);
 }
 #guest-qr img {
-    width: 100%;
-    max-width: 150px;
-    height: auto;
-    image-rendering: pixelated;   /* QR мусить бути різким, не згладженим */
+    display: block;
+    width: 132px;
+    height: 132px;
+    margin: 0 auto;
+    /* Біла плашка під кодом: та сама рамка тишини, що в самій картинці, але
+       видима -- код не мусить торкатися зеленого. */
     background: #fff;
-    padding: 6px;
+    padding: 7px;
+    image-rendering: pixelated;   /* QR мусить бути різким, не згладженим */
 }
 #guest-qr .qr-note {
     margin-top: var(--s-2);
-    font-size: 11px;
-    line-height: 1.4;
-    color: var(--c-muted);
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: color-mix(in srgb, var(--c-on-accent) 88%, transparent);
+}
+
+/* 14. Позначка рівня доступу в бічній панелі чата: під переходами, над QR. */
+.gradio-container .access-badge {
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    margin-top: var(--s-3);
+    font-size: 11.5px;
+}
+.gradio-container .access-who {
+    font-family: var(--font-data, var(--font-mono));
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 3px 8px;
+    border: 1px solid currentColor;
+    border-radius: var(--r-pill, 999px);
+}
+.gradio-container .access-badge--guest .access-who { color: var(--c-pending) }
+.gradio-container .access-badge--operator .access-who { color: var(--c-success) }
+.gradio-container .access-note { color: var(--c-muted) }
+.gradio-container a.access-up {
+    color: var(--c-accent) !important;
+    text-decoration: underline !important;
+    background: transparent !important;
+    border: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    display: inline !important;
+}
+
+/* 15. Поле вводу опускалося вниз і зникало, коли стрічка росла.
+ *
+ *     Причина -- ГЛИБИНА ОБГОРТОК, а не висота вікна. У правилі 12 я
+ *     поставила стискання (`flex: 1 1 auto; min-height: 0`) на ПРЯМОГО
+ *     нащадка колонки. Але між ним і стрічкою Gradio має ще кілька своїх
+ *     шарів, і кожен із них -- елемент flex зі стандартним `min-height:
+ *     auto`. Такий елемент відмовляється стискатись нижче свого вмісту: він
+ *     росте разом зі стрічкою й виштовхує поле вводу за нижню межу колонки, а
+ *     `overflow: hidden` його там і ховає.
+ *
+ *     Тому правило накриває ВЕСЬ ЛАНЦЮГ предків стрічки, а не один рівень:
+ *     `*:has(#chat-area)` -- це кожен елемент усередині колонки, який містить
+ *     стрічку, на будь-якій глибині. Вгадувати кількість шарів Gradio не
+ *     треба, і наступне оновлення бібліотеки цього не зламає.
+ *
+ *     Прокручується САМА стрічка. Поле вводу лишається на місці завжди --
+ *     воно вже не частина того, що росте.
+ */
+#main-col *:has(#chat-area) {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+}
+#chat-area {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+}
+/* Внутрішня обгортка стрічки теж мусить стискатись: інакше прокрутка
+   з'являється не в неї, а в колонки -- і поле знову їде вгору разом із
+   повідомленнями. */
+#chat-area .bubble-wrap {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+}
+/* Поле вводу й підказка -- не стискаються й не ростуть. */
+#composer, #hint, #retry-btn {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+}
+/* Смуга поля вводу читається як окрема: власне тло й волосяна межа зверху.
+   Доти при довгій стрічці було незрозуміло, де закінчується розмова. */
+#composer {
+    background: var(--c-bg) !important;
+    border-top: 1px solid var(--c-hairline) !important;
 }

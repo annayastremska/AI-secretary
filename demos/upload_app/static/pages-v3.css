@@ -1121,3 +1121,49 @@ thead th {
     .tiles .tile { border-right: 0; border-bottom: 1px solid var(--c-hairline) }
     .tiles .tile:nth-child(odd) { border-right: 1px solid var(--c-hairline) }
 }
+
+/* ===== ПОЗНАЧКА РІВНЯ ДОСТУПУ ============================================
+ * Людина мусить бачити свою межу ДО того, як натисне кнопку. Дізнатися про
+ * рівень із відмови 403 після дії -- найгірший спосіб: час уже витрачений, і
+ * читається це як поломка, а не як правило.
+ * Тому позначка тиха, але постійна: рівень, межа, і спосіб піднятись.
+ */
+.access-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    line-height: 1;
+}
+.access-who {
+    font-family: var(--font-data, var(--font-mono));
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 3px 8px;
+    border: 1px solid currentColor;
+    border-radius: var(--r-pill, 999px);
+}
+.access-badge--guest .access-who { color: var(--c-pending) }
+.access-badge--operator .access-who { color: var(--c-success) }
+.access-note { color: var(--c-muted) }
+.access-up { color: var(--c-accent); text-decoration: underline }
+.access-up:hover { text-decoration: none }
+
+/* У брендовій смузі -- поряд із перемикачем теми, ліворуч від нього. */
+.access-badge--bar {
+    position: absolute;
+    top: 16px;
+    right: calc(var(--s-4, 16px) + 46px);
+}
+.access-badge--bar .access-note, .access-badge--bar .access-up {
+    color: color-mix(in srgb, var(--c-brand-text, var(--c-text)) 78%, transparent);
+}
+.access-badge--bar .access-who { color: var(--c-brand-text, var(--c-text)) }
+
+.access-commit-note { margin-top: var(--s-2) }
+
+@media (max-width: 640px) {
+    /* На телефоні смуга вузька: позначка переїжджає під нав-рядок, щоб не
+       налазити на перемикач теми. */
+    .access-badge--bar { position: static; margin: 0 var(--s-3) var(--s-2) }
+}
