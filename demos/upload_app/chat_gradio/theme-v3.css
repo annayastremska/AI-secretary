@@ -1876,3 +1876,39 @@ details.src > *:not(summary) {
         margin-bottom: 0 !important;
     }
 }
+
+/* 30. Іконка перемикача теми лишалась темною, хоч межа стала світлою.
+ *
+ *     Причина: колір я задав КНОПЦІ (`color`), і обвід фігур його підхопив --
+ *     він намальований як `stroke="currentColor"`. Але половина знака «як у
+ *     системі» -- це ЗАЛИВКА, і в ній стоїть `fill="currentColor"` атрибутом
+ *     розмітки. Атрибут presentation має найнижчу вагу, проте `currentColor`
+ *     у ньому бере колір із того самого `color` -- тобто мусив би працювати.
+ *     Не працював тому, що межу я перекрив, а `color` кнопки лишався
+ *     перекритим ІНШИМ правилом із вищою специфічністю.
+ *
+ *     Тому тут колір задається не лише кнопці, а й самим фігурам -- і
+ *     заливка окремо від обводу. Це той випадок, коли краще сказати двічі,
+ *     ніж покладатись на спадкування через чужі правила.
+ */
+@media (max-width: 860px) {
+    .gradio-container #theme-switch .theme-toggle,
+    .gradio-container #theme-switch .theme-toggle svg {
+        color: var(--c-brand-text) !important;
+    }
+    .gradio-container #theme-switch .theme-toggle svg [stroke="currentColor"],
+    .gradio-container #theme-switch .theme-toggle svg circle,
+    .gradio-container #theme-switch .theme-toggle svg path {
+        stroke: var(--c-brand-text) !important;
+    }
+    /* Заливка -- ЛИШЕ там, де вона є в розмітці: у півкола «як у системі».
+       Селектор за атрибутом, щоб не залити випадково контурні фігури. */
+    .gradio-container #theme-switch .theme-toggle svg [fill="currentColor"] {
+        fill: var(--c-brand-text) !important;
+    }
+}
+
+/* 31. Смуга рівня доступу в чаті не показується взагалі (рішення Ані раніше),
+ *     тому правил для неї тут немає -- цей номер лишений, щоб нумерація
+ *     правил не зсувалась і посилання в комітах не «поїхали».
+ */
