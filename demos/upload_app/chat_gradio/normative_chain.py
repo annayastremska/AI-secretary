@@ -314,7 +314,11 @@ def _gate(question, title, ident, addr, body):
         from . import tiers as _t
     except ImportError:
         import tiers as _t
-    data = _t.mamaylm_json(
+    # `_model_json`, а не «mamaylm_json»: другої назви в tiers ніколи не було,
+    # і ланцюг падав на AttributeError у ВОРОТАХ -- тобто після пошуку й
+    # реранкера, на останньому кроці. Знайдено живим прогоном 27.08, бо
+    # раніше ланцюг узагалі не доходив до цього місця.
+    data = _t._model_json(
         GATE_SYSTEM,
         GATE_USER.format(question=question, title=title, ident=ident,
                          addr=addr, body=body[:GATE_CHARS]),
