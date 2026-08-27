@@ -197,7 +197,10 @@ def correct_units(cur, doc_id, needle):
     одиниця, знайдена в копії, читалась би як «не знайдено» -- і прилад
     показував би поломку пошуку там, де поломка в ньому самому.
     """
-    cur.execute(f"""
+    # rf"""...""" -- рядок СИРИЙ навмисно: усередині є регулярка \s+ для
+    # Postgres, і у звичайному рядку Python це попередження про невідому
+    # escape-послідовність, яке в наступних версіях стане помилкою.
+    cur.execute(rf"""
         WITH мій AS (
             SELECT coalesce((SELECT canonical_id FROM {SU.GROUPS}
                               WHERE document_id = %(d)s), %(d)s) AS canon
