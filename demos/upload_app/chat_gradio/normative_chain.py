@@ -254,6 +254,48 @@ def _load_reranker():
     return score
 
 
+def _label(cur, su, doc_id, cache):
+    """Людська назва документа й його ідентифікатор. -> (назва, ідентифікатор).
+
+    Чому не просто `su.identity`. Та функція витягує назву З ТЕКСТУ документа
+    і, коли не знаходить, віддає «documents.id=252» та «—». На екрані виходило
+    «**documents.id=252** (—)» -- внутрішній ключ замість назви (видно живим
+    прогоном 27.08). Внутрішній ключ у відповіді людині не потрібен: він
+    нічого їй не каже й виглядає як поломка.
+
+    Тому спершу питаємо БАЗУ (`doc_title`, `doc_identifier` -- ті самі поля, з
+    яких живе решта чата), і лише якщо там порожньо, беремо витяг із тексту.
+    Якщо не вийшло ніде -- кажемо «нормативний документ №252»: це чесно
+    (номер запису справді єдине, що ми знаємо) і читається як мова, а не як
+    рядок з коду.
+    """
+    if doc_id in cache:
+        return cache[doc_id]
+    title = ident = None
+    try:
+        cur.execute("SELECT doc_title, doc_identifier FROM documents "
+                    "WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        if row:
+            title = (row[0] or "").strip() or None
+            ident = (row[1] or "").strip() or None
+    except Exception:
+        pass
+    if not title:
+        try:
+            got_title, got_ident = su.identity(cur, doc_id, {})
+            if got_title and not got_title.startswith("documents.id="):
+                title = got_title
+            if not ident and got_ident and got_ident != "—":
+                ident = got_ident
+        except Exception:
+            pass
+    if not title:
+        title = f"нормативний документ №{doc_id}"
+    cache[doc_id] = (title, ident)
+    return cache[doc_id]
+
+
 def _canon_map(cur):
     """document_id -> канонічний документ групи дублікатів.
 
@@ -374,7 +416,7 @@ def answer(question):
         cache = {}
         rejected = []
         for (doc_id, base), meta in ranked[:GATE_TOP]:
-            title, ident = su.identity(cur, doc_id, cache)
+            title, ident = _label(cur, su, doc_id, cache)
             body, was_split, trimmed = su.quote_of(cur, doc_id, base)
             addr = base + (" (фрагмент)" if was_split or trimmed else "")
             verdict = _gate(question, title, ident, addr, body)
@@ -399,7 +441,13 @@ def answer(question):
             mark = ("" if share >= MIN_OVERLAP
                     else " ⚠️ цитата слабко перетинається з питанням — "
                          "перечитайте документ")
-            lines = [f"**{title}** ({ident}), {addr}",
+            # Ідентифікатор у дужках -- лише коли він є. Раніше в дужках
+            # стояло «(—)» у кожній відповіді: порожнє місце, оформлене як
+            # дані.
+            head = f"**{_t._esc(title)}**"
+            if ident:
+                head += f" ({_t._esc(ident)})"
+            lines = [f"{head}, {addr}",
                      f"«{quote}»{mark}"]
             if verdict.get("why"):
                 lines.append(f"Чому це відповідь: {_t._esc(verdict['why'])}")
