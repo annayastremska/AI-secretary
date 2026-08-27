@@ -1144,3 +1144,38 @@ details.src > *:not(summary) {
 /* Екран вітання займає вільне місце так само, як стрічка: без цього він
    тулився до шапки, а поле вводу лишалось унизу з великою дірою. */
 #main-col > *:has(#hero) { flex: 1 1 auto; min-height: 0 }
+
+/* 13. Блок гостьового доступу в бічній панелі: QR під переходами.
+ *     Дрібним і тихо: це не дія, а довідка. Рамка світла, підпис під кодом
+ *     називає МЕЖУ доступу («записувати в базу -- ні»), бо саме вона й
+ *     робить цей вхід допустимим.
+ */
+#guest-qr-block { margin-top: var(--s-4) !important }
+#guest-qr {
+    border: 1px solid var(--c-border);
+    background: var(--c-canvas);
+    padding: var(--s-3);
+    text-align: center;
+}
+#guest-qr .qr-title {
+    font-family: var(--font-data, var(--font-mono));
+    font-size: 10.5px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--c-muted);
+    margin-bottom: var(--s-2);
+}
+#guest-qr img {
+    width: 100%;
+    max-width: 150px;
+    height: auto;
+    image-rendering: pixelated;   /* QR мусить бути різким, не згладженим */
+    background: #fff;
+    padding: 6px;
+}
+#guest-qr .qr-note {
+    margin-top: var(--s-2);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--c-muted);
+}

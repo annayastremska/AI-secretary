@@ -137,3 +137,7 @@ airflow/logs/
 data/postgres/
 data/originals/
 data/.gradio-cache/
+
+# QR гостьового входу: у картинці ключ доступу, тому вона НЕ в git.
+# Складається локально при розгортанні й копіюється на сервер.
+data/qr-guest.png

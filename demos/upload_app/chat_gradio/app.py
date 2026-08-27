@@ -1946,6 +1946,20 @@ def example_questions():
     return examples
 
 
+def guest_qr_available():
+    """Чи є що показувати в блоці гостьового доступу.
+
+    Дві умови, і обидві потрібні: ключ налаштований (інакше вхід за
+    посиланням не працює) і картинка на місці (її складають локально й
+    копіюють на сервер -- на сервері немає `qrcode`, а ставити пакет у
+    спільний venv ми не будемо).
+    """
+    if not os.environ.get("APP_GUEST_TOKEN"):
+        return False
+    root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    return os.path.exists(os.path.join(root, "data", "qr-guest.png"))
+
+
 def build_blocks():
     import gradio as gr
 
@@ -2041,6 +2055,21 @@ def build_blocks():
                         'документ</a>'
                         '<a href="/stats" class="page-link">▤&nbsp; '
                         'Статистика</a>', elem_id="page-links")
+                # QR гостьового входу -- під переходами (запит Ані 27.08).
+                # Показуємо ЛИШЕ якщо він налаштований: інакше на екрані
+                # висіла б порожня рамка з підписом про доступ, якого немає.
+                # Картинка приходить маршрутом /static/qr-guest.png; сам ключ
+                # у розмітку не потрапляє.
+                if guest_qr_available():
+                    gr.HTML(
+                        '<div id="guest-qr">'
+                        '<div class="qr-title">Гостьовий доступ</div>'
+                        '<img src="/static/qr-guest.png" alt="QR гостьового '
+                        'входу" width="150" height="150">'
+                        '<div class="qr-note">Наведіть камеру — відкриється '
+                        'чат без пароля. Дивитись і питати можна, '
+                        'записувати в базу — ні.</div></div>',
+                        elem_id="guest-qr-block")
                 # Приклади питань стоять НА ЕКРАНІ ВІТАННЯ (hero) -- у
                 # бічній панелі вони дублювались один в один, і це зайве:
                 # той самий перелік двічі на одному екрані (зауваження Ані

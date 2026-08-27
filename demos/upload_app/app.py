@@ -25,7 +25,7 @@ import time
 import uuid
 
 import yaml
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -126,33 +126,100 @@ app = FastAPI(title="AI-секретар")
 BASIC_USER = os.environ.get("APP_BASIC_USER") or ""
 BASIC_PASS = os.environ.get("APP_BASIC_PASS") or ""
 
+# ── Гостьовий вхід за посиланням із QR-коду ─────────────────────────────────
+#
+# Запит Ані 27.08: QR, який пропускає без набирання пароля -- на демо люди
+# сканують з екрана в залі, і диктувати їм пароль означає втратити половину.
+#
+# Ключ у посиланні (`?k=...`) -- це ТОЙ САМИЙ пароль, просто вписаний в
+# адресу. Так це й треба називати вголос: не «вхід без пароля», а «пароль у
+# посиланні». Для демо на синтетичних даних компроміс правильний; для реальних
+# документів -- ні, і в ТЗ це записано («простий логін, глибока кібербезпека
+# поза скоупом»).
+#
+# Рівень доступу визначається СПОСОБОМ ВХОДУ, а не роллю: ролей у демо немає,
+# і вдавати їх ми не будемо. Тому `access_level`, а не `role`.
+GUEST_TOKEN = os.environ.get("APP_GUEST_TOKEN") or ""
+#: Ім'я cookie й назви рівнів -- в одному місці, щоб не розійшлися між
+#: гейтом, сторінками й чатом.
+ACCESS_COOKIE = "ai_secretary_access"
+LEVEL_OPERATOR = "operator"
+LEVEL_GUEST = "guest"
+
+
+def _same(given, expected):
+    """Порівняння секретів за постійний час, БЕЗ падіння на кирилиці.
+
+    Знайдено власним тестом: `hmac.compare_digest` на рядках із неASCII
+    кидає TypeError -- тобто ключ із кирилицею в адресі давав би 500 замість
+    чесного 401. Порівнюємо БАЙТИ: тоді будь-який вхід -- це просто інші
+    байти, а не виняток. Постійний час лишається: саме він тут і потрібен,
+    бо звичайне `==` видає довжину спільного префікса через час відповіді.
+    """
+    import hmac
+    try:
+        return hmac.compare_digest(str(given).encode("utf-8"),
+                                   str(expected).encode("utf-8"))
+    except Exception:
+        return False
+
+
+def access_level(request):
+    """Рівень доступу цього запиту: оператор, гість або None (не пускати).
+
+    Порядок навмисний: пароль сильніший за посилання. Людина, яка ввела
+    пароль, лишається оператором навіть якщо в неї в браузері є гостьова
+    cookie від попереднього заходу за QR.
+    """
+    import base64
+    import hmac
+    if BASIC_USER and BASIC_PASS:
+        header = request.headers.get("authorization") or ""
+        if header.lower().startswith("basic "):
+            try:
+                raw = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8")
+                user, _, password = raw.partition(":")
+                # compare_digest на обох полях: порівняння рядків == видає
+                # довжину спільного префікса через час відповіді.
+                if (_same(user, BASIC_USER) and _same(password, BASIC_PASS)):
+                    return LEVEL_OPERATOR
+            except Exception:
+                pass
+    if GUEST_TOKEN:
+        given = (request.query_params.get("k")
+                 or request.cookies.get(ACCESS_COOKIE) or "")
+        if given and _same(given, GUEST_TOKEN):
+            return LEVEL_GUEST
+    if not (BASIC_USER and BASIC_PASS):
+        # Локально гейта немає зовсім -- і тоді все дозволено, як було.
+        return LEVEL_OPERATOR
+    return None
+
 
 @app.middleware("http")
 async def _basic_auth(request, call_next):
-    if not (BASIC_USER and BASIC_PASS):
-        return await call_next(request)
-    import base64
-    import hmac
-    header = request.headers.get("authorization") or ""
-    ok = False
-    if header.lower().startswith("basic "):
-        try:
-            raw = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8")
-            user, _, password = raw.partition(":")
-            # compare_digest на обох полях: порівняння рядків == видає
-            # довжину спільного префікса через час відповіді.
-            ok = (hmac.compare_digest(user, BASIC_USER)
-                  and hmac.compare_digest(password, BASIC_PASS))
-        except Exception:
-            ok = False
-    if not ok:
+    level = access_level(request)
+    if level is not None:
+        # Рівень їде далі у стані запиту: маршрут запису читає його, а не
+        # вгадує вдруге. Одне місце, де рівень визначається.
+        request.state.access_level = level
+        response = await call_next(request)
+        # Ключ із адреси -> у cookie, щоб він не світився в рядку браузера й
+        # не поїхав у скопійованому посиланні. Дальші сторінки (і XHR чата)
+        # ідуть уже з cookie.
+        if (level == LEVEL_GUEST and request.query_params.get("k")
+                and not request.cookies.get(ACCESS_COOKIE)):
+            response.set_cookie(ACCESS_COOKIE, GUEST_TOKEN, httponly=True,
+                                samesite="lax", max_age=12 * 3600)
+        return response
+    # Не пустили: 401 і запит пароля. Гостьовий ключ тут не згадуємо
+    # навмисно -- підказувати спосіб входу тому, хто його не має, не треба.
         # realm -- ЛАТИНКОЮ: HTTP-заголовки кодуються latin-1, і кириличний
         # realm валив увесь гейт у 500 замість 401 (перевірено curl-ом:
         # UnicodeEncodeError у starlette при формуванні raw_headers). Тіло
         # відповіді українською -- воно в UTF-8 і це дозволено.
-        return JSONResponse({"error": "потрібна авторизація"}, status_code=401,
-                            headers={"WWW-Authenticate": 'Basic realm="AI-sekretar"'})
-    return await call_next(request)
+    return JSONResponse({"error": "потрібна авторизація"}, status_code=401,
+                        headers={"WWW-Authenticate": 'Basic realm="AI-sekretar"'})
 
 
 def _now():
@@ -457,6 +524,22 @@ def skin_css():
                     headers={"Cache-Control": "no-store"})
 
 
+#: QR гостьового входу. Картинка ГОТОВА -- її складають локально при
+#: розгортанні й копіюють на сервер. Чому не генеруємо тут: на сервері немає
+#: `qrcode`, а ставити пакет у спільний venv -- рівно та дія, якою 25.08
+#: llama-cpp тихо стала процесорною. Файл гітігнорений: у ньому ключ.
+QR_PATH = os.path.join(PROJECT_ROOT, "data", "qr-guest.png")
+
+
+@app.get("/static/qr-guest.png")
+def qr_guest():
+    if not (GUEST_TOKEN and os.path.exists(QR_PATH)):
+        return JSONResponse(status_code=404,
+                            content={"error": "гостьовий вхід не налаштований"})
+    return FileResponse(QR_PATH, media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.get("/static/{name:path}")
 def static_file(name: str):
     entry = STATIC_FILES.get(name)
@@ -601,7 +684,19 @@ PUBLIC_MODE = os.environ.get("APP_PUBLIC_MODE", "0").strip().lower() in (
 
 
 @app.post("/api/jobs/{job_id}/commit")
-def commit(job_id: str):
+def commit(job_id: str, request: Request):
+    # Рівень читаємо зі СТАНУ ЗАПИТУ, який поставив гейт, а не визначаємо
+    # вдруге: два місця, де вирішується «можна писати», розійшлися б.
+    #
+    # PUBLIC_MODE лишається -- він вимикає запис для ВСІХ, і це інша річ:
+    # «показ без запису взагалі» проти «запис лише для оператора».
+    if getattr(request.state, "access_level", LEVEL_OPERATOR) != LEVEL_OPERATOR:
+        return JSONResponse(status_code=403, content={
+            "error": "Гостьовий доступ: обробку показуємо, а запис у базу "
+                     "робить оператор. Поля вище витягнуті з вашого файла "
+                     "по-справжньому — просто вони не стануть фактами в "
+                     "спільній базі. Так і задумано: підтвердити факт може "
+                     "не кожен, хто відкрив посилання."})
     if PUBLIC_MODE:
         return JSONResponse(status_code=403, content={
             "error": "Демонстраційний доступ: обробку показуємо, а запис у "
