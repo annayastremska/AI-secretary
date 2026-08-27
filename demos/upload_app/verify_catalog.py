@@ -1090,6 +1090,12 @@ def main():
 
     failures = 0
     checks_run = 0
+    # РОЗКОЛ ЗА ВИДОМ. Аудит 27.08: із 34 «перевірок» дев'ять не порівнюють
+    # ЖОДНОГО числа -- шість перевіряють лише факт виконання запиту, три
+    # читають той самий YAML, що дали й приладу. Підпис на сторінці казав
+    # «відповідей із правильним числом», тобто обіцяв більше, ніж прилад
+    # міряє. Тепер розкол їде у звіт, і сторінка може сказати правду.
+    kinds = {"compare": 0, "execute": 0, "blocked": 0}
     covered = set()
     for t in templates:
         tid = t["id"]
@@ -1110,6 +1116,7 @@ def main():
                   f"{('так' if ok else 'ні'):>28} "
                   f"{'OK' if ok else 'РОЗБІЖНІСТЬ'}")
             checks_run += 1
+            kinds["blocked"] += 1
             failures += 0 if ok else 1
             continue
 
@@ -1156,6 +1163,7 @@ def main():
                 for line in check["diag"](records):
                     print(f"      {line}")
             checks_run += 1
+            kinds["execute" if check["kind"] == "execute" else "compare"] += 1
             failures += 0 if ok else 1
 
     missing = covered.symmetric_difference({t["id"] for t in templates})
@@ -1165,6 +1173,11 @@ def main():
     if args.json and not args.expected_only:
         payload = {
             "checks": checks_run,
+            # Скільком перевірок СПРАВДІ порівнюють число з незалежним
+            # підрахунком. Решта корисна, але це інше твердження.
+            "checks_compare": kinds["compare"],
+            "checks_execute": kinds["execute"],
+            "checks_blocked": kinds["blocked"],
             "matched": checks_run - failures,
             "failures": failures,
             "templates": len(templates),

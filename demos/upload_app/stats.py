@@ -108,6 +108,13 @@ SQL_DOCS_PENDING_SUBSTANTIVE = ("SELECT COUNT(DISTINCT rq.document_id) AS n "
 # Підписи станів і черг українською. Код лишається кодом (він у базі), але на
 # сторінці людина мусить читати слова, а не `unknown_type`.
 DOC_STATUS_LABELS = {
+    # `extracted` -- те, що ставить завантажувач: текст витягнуто, факти
+    # записані. Його НЕ БУЛО в цьому словнику, і аудит 27.08 це показав: у
+    # базі всі документи мають саме цей статус, тобто розкладка за статусом
+    # віддавала б код латиницею, якби її показували. Словник підписів
+    # мусить знати кожен код, який СПРАВДІ є в базі, а не лише ті, які ми
+    # передбачили.
+    "extracted": "витягнуто",
     "processed": "оброблено",
     "confirmed": "підтверджено",
     "needs_review": "потребує перевірки",
@@ -129,6 +136,9 @@ DOMAIN_LABELS = {
     "leave": "відпустки",
     "deployment": "відрядження",
     "normative": "нормативні акти",
+    # Штатка. Її не було в словнику, тому в рядку «Типи документів» на екрані
+    # друкувалось `staffing 1` -- латиницею, серед українських підписів.
+    "staffing": "штатна книжка",
 }
 
 
@@ -404,6 +414,12 @@ def chat_quality():
         checks = catalog.get("checks") or 0
         out["catalog"] = {
             "checks": checks,
+            # Розкол за видом: скільком перевірок порівнюють ЧИСЛО, а скільком
+            # лише виконання запиту чи текст відмови. Без цього підпис
+            # обіцяв більше, ніж прилад міряє.
+            "checks_compare": catalog.get("checks_compare"),
+            "checks_execute": catalog.get("checks_execute"),
+            "checks_blocked": catalog.get("checks_blocked"),
             "matched": catalog.get("matched"),
             "failures": catalog.get("failures"),
             "pct": (round(100.0 * catalog["matched"] / checks, 1)

@@ -247,8 +247,13 @@ function renderChatQuality(cq) {
     host.appendChild(tile(
       (c.pct !== null ? c.pct + "%" : "—"),
       "шаблонів узгоджені із записами пайплайна",
-      c.matched + " з " + c.checks + " звірок" +
-      (c.measured_at ? " · звірено " + c.measured_at.replace("T", " ") : ""),
+      c.matched + " з " + c.checks + " звірок"
+      + (c.checks_compare
+          ? " (" + c.checks_compare + " порівнюють число, "
+            + ((c.checks_execute || 0) + (c.checks_blocked || 0))
+            + " — виконання й відмови)"
+          : "")
+      + (c.measured_at ? " · звірено " + c.measured_at.replace("T", " ") : ""),
       c.failures ? "tile--pending" : "tile--ok"));
   }
   if (r) {
