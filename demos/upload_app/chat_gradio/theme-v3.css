@@ -868,23 +868,75 @@ details.src > *:not(summary) {
 
 /* ===== ДРУГИЙ ПРОХІД ПО ЖИВОМУ ЧАТУ 27.08 ================================ */
 
-/* 6. Кнопка «відправити» з'їжджала НА НОВИЙ РЯДОК під полем.
- *    Причина: Gradio кладе кнопку у власну обгортку-блок, а обгортка -- це
- *    елемент flex зі стандартною шириною 100%, тому рядок переносився. Ми
- *    стилізували саму кнопку, а переносила рядок обгортка. Тому правила
- *    тепер на ОБГОРТКУ, і перенос заборонено явно. */
-#composer { flex-wrap: nowrap !important }
-#composer > *:last-child,
-#composer > *:has(#send-btn) {
-    flex: 0 0 auto !important;
-    width: auto !important;
-    min-width: 0 !important;
-    align-self: flex-end !important;
-    /* Обгортка Gradio несе власні відступи й межу -- вони тут зайві:
-       видимою мусить бути кнопка, а не рамка навколо кнопки. */
+/* 6. Кнопка «відправити» -- усередині поля вводу, справа.
+ *
+ *    Дві помилки, зроблені по черзі, і обидві варті записи.
+ *
+ *    Перша: у v3 я витягла кнопку з поля «у потік», щоб прибрати кривий
+ *    абсолют. Але обгортка Gradio -- це елемент flex зі стандартною шириною
+ *    100%, тому рядок переносився і кнопка з'їжджала ПІД поле.
+ *
+ *    Друга: я спробувала полагодити це правилом на `#composer > *:last-child`
+ *    -- і влучила не в обгортку, а в САМУ кнопку (elem_id Gradio сидить на
+ *    <button>, а не на обгортці). Правило зняло з неї фон і межу, тобто
+ *    кнопка не «зникла» -- вона стала прозорою.
+ *
+ *    Тому тут повернуто спосіб СТАРОЇ теми, який працював: кнопка стоїть
+ *    абсолютом усередині поля, праворуч, по центру висоти, а праве
+ *    доповнення текстового поля звільняє під неї місце. Абсолют «кривив» у
+ *    v3 не сам по собі, а через прив'язку до низу (`bottom`) при полі, що
+ *    росте; тут прив'язка до середини, і висота поля вже нічого не зсуває.
+ */
+#composer {
+    position: relative !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+}
+#composer > *:first-child { flex: 1 1 auto !important; min-width: 0 }
+/* Місце під кнопку -- саме тут, а не в геометрії кнопки: інакше текст
+   заїжджав би під неї на довгому питанні. */
+#composer textarea {
+    padding: 13px 58px 13px var(--s-4) !important;
+    min-height: 50px !important;
+    box-shadow: none !important;
+}
+#send-btn {
+    position: absolute !important;
+    right: calc(var(--s-5) + var(--s-2)) !important;
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+    z-index: 2;
+    flex: none !important;
+    align-self: auto !important;
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
     padding: 0 !important;
+    display: grid !important;
+    place-items: center !important;
     border: 0 !important;
-    background: transparent !important;
+    border-radius: var(--r-md) !important;
+    background: var(--c-accent) !important;
+    color: var(--c-on-accent) !important;
+    font-size: 16px !important;
+    cursor: pointer;
+    /* Рух -- лише кольором і тінню: підіймати кнопку на 1px не можна, бо
+       вертикальне центрування вже тримається на transform, і другий
+       transform його просто перебив би (кнопка стрибала б униз). */
+    transition: background-color var(--dur) var(--ease),
+                box-shadow var(--dur) var(--ease) !important;
+}
+#send-btn:hover {
+    background: var(--c-accent-600) !important;
+    box-shadow: var(--shadow-md) !important;
+    transform: translateY(-50%) !important;
+    filter: none;
+}
+#send-btn:active {
+    background: var(--c-accent-700) !important;
+    box-shadow: none !important;
+    transform: translateY(-50%) !important;
 }
 
 /* 7. Стрічка щільніша й спокійніша (запит Ані).
