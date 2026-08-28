@@ -64,6 +64,19 @@ MODELS = {
                    q="", p="", table=f"{SCHEMA}.unit_vec_bge_m3"),
     "arctic-l": dict(name="Snowflake/snowflake-arctic-embed-l-v2.0", dim=1024, pool="cls",
                      q="query: ", p="", table=f"{SCHEMA}.unit_vec_arctic_l"),
+    # Та сама модель, але одиниця векторизується РАЗОМ ІЗ ШЛЯХОМ: назва акта й
+    # адреса пункту перед текстом.
+    #
+    # Гіпотеза з діагностики золотого набору: провали N09 і N11 -- це короткі
+    # одиниці, у яких немає власного предмета. «1.3. Кількість оглянутих за
+    # робочий день не повинна перевищувати 50 чоловік» не містить слів
+    # «військово-лікарська комісія» -- вони в назві акта. Тому вектор такої
+    # одиниці далекий від питання, і вона стоїть на 26-й позиції.
+    #
+    # Контекст РЕРАНКЕРУ вже пробував -- нуль. Тут контекст іде в сам вектор.
+    "bge-m3-ctx": dict(name="BAAI/bge-m3", dim=1024, pool="cls",
+                       q="", p="", table=f"{SCHEMA}.unit_vec_bge_m3_ctx",
+                       with_path=True),
 }
 
 
@@ -127,14 +140,19 @@ def build(key, dsn):
     t0, done = time.time(), 0
     while True:
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-            cur.execute(f"""SELECT u.id, u.text FROM public.document_units u
+            cur.execute(f"""SELECT u.id, u.text, d.doc_title, u.base_label
+                              FROM public.document_units u
+                              JOIN public.documents d ON d.id = u.document_id
                              WHERE NOT EXISTS (SELECT 1 FROM {table} t WHERE t.unit_id = u.id)
                              ORDER BY u.id LIMIT %s""", (BATCH,))
             rows = cur.fetchall()
             if not rows:
                 break
-            vecs = encode([t for _, t in rows], "p")
-            for (uid, _), v in zip(rows, vecs):
+            if cfg.get("with_path"):
+                vecs = encode([f"{ttl or ''}, {lbl}: {t}" for _, t, ttl, lbl in rows], "p")
+            else:
+                vecs = encode([t for _, t, _ttl, _lbl in rows], "p")
+            for (uid, _t, _ttl, _lbl), v in zip(rows, vecs):
                 cur.execute(f"INSERT INTO {table} (unit_id, vec) VALUES (%s, %s::public.vector) "
                             f"ON CONFLICT (unit_id) DO UPDATE SET vec = EXCLUDED.vec",
                             (uid, str(v)))
