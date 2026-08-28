@@ -1270,6 +1270,36 @@ def model_route(question, history=None):
         params["date_from"] = _date("date_from") or _date("on_date") or r_from or r_on or today
     if "date_to" in need and "date_to" not in params:
         params["date_to"] = _date("date_to") or _date("on_date") or r_to or r_on or today
+    if "subdivision" in need and "subdivision" not in params:
+        # ПІДРОЗДІЛ ВІД МОДЕЛІ ДОСІ ВИКИДАВСЯ, і це найдорожча знахідка дня.
+        #
+        # Андрій додав `subdivision` у схему, я цей патч застосувала -- але
+        # склейка параметрів його не читала: тут були `dims`, `on_date`, дати,
+        # ім'я, запит, і не було підрозділу. Наслідок: шаблон
+        # `*_in_subdivision` лишався без ОБОВ'ЯЗКОВОГО параметра, SQL падав на
+        # відсутньому імені, `_model_catalog_tier` глушив виняток і віддавав
+        # None -- і людина бачила «За яку дату рахувати?».
+        #
+        # Тобто на «А у взводі забезпечення» модель відповідала ПРАВИЛЬНО
+        # (перевірено сирими полями двічі, детерміновано: шаблон
+        # `list_by_state_in_subdivision`, дата успадкована з попереднього ходу,
+        # підрозділ названий) -- а ми викидали половину її відповіді й питали
+        # те, що вона вже сказала. «Погана пам'ять моделі» була нашою.
+        #
+        # Значення нормалізуємо `extract_subdivision`: модель віддає слова
+        # («1 рота»), а SQL чекає шаблон ILIKE і лише той підрозділ, що є у
+        # штатці.
+        raw = (data.get("subdivision") or "").strip()
+        sub = extract_subdivision(question) or (extract_subdivision(raw)
+                                               if raw else None)
+        if sub == "невідомий":
+            # Названий, але такого у штатці немає -- це чесна відмова, а не
+            # «не зрозуміла». Нуль тут був би неправдою.
+            return "subdivision_unknown", {}
+        if not sub:
+            return None
+        params["subdivision"] = sub
+
     if "name_pattern" in need and "name_pattern" not in params:
         name = (data.get("name") or "").strip() or extract_name(question)
         if not name:

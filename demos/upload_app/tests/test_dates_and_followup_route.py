@@ -266,3 +266,54 @@ def test_history_reaches_model_route_through_the_real_call_path(monkeypatch):
 
     assert seen.get("history") == history, (
         "історія не дійшла до маршрутизатора реальним шляхом виклику")
+
+
+# ── Підрозділ від МОДЕЛІ мусить доїхати до параметрів шаблону ──────────────
+
+def test_subdivision_from_the_model_reaches_the_template(monkeypatch):
+    """Найдорожча знахідка 28.08, і вона була НЕ в моделі.
+
+    Аня: «то чому у моделі так погано із пам'яттю та логікою?». Прогін сирих
+    полів показав, що модель на «А у взводі забезпечення» віддає ПРАВИЛЬНО й
+    детерміновано: `list_by_state_in_subdivision`, дата успадкована з
+    попереднього ходу, підрозділ названий.
+
+    А склейка параметрів `subdivision` не читала -- там були `dims`, `on_date`,
+    дати, ім'я, запит. Шаблон лишався без ОБОВ'ЯЗКОВОГО параметра, SQL падав на
+    відсутньому імені, виняток глушився в `_model_catalog_tier`, і людина бачила
+    «За яку дату рахувати?» -- тобто система питала те, що модель уже сказала.
+    """
+    monkeypatch.setattr(tiers, "subdivisions",
+                        lambda: ["1-ша механізована рота", "Взвод забезпечення"])
+    monkeypatch.setattr(tiers, "_route_system", lambda: "промпт")
+    monkeypatch.setattr(tiers, "_model_json", lambda s, u, sch: {
+        "template": "list_by_state_in_subdivision", "state": "leave",
+        "on_date": "2026-09-02", "date_from": None, "date_to": None,
+        "name": None, "doc_number": None,
+        "subdivision": "взвод забезпечення",
+        "carried_over": ["state", "on_date"]})
+
+    tid, params = tiers.model_route("А у взводі забезпечення", [])
+
+    assert tid == "list_by_state_in_subdivision"
+    assert "subdivision" in params, (
+        "підрозділ від моделі викинуто -- шаблон впаде на відсутньому параметрі")
+    assert "забезпечення" in params["subdivision"].lower()
+    # І дата, яку модель успадкувала, теж мусить доїхати
+    assert str(params["on_date"]) == "2026-09-02"
+
+
+def test_unknown_subdivision_from_the_model_is_an_honest_refusal(monkeypatch):
+    """Названий підрозділ, якого у штатці немає -- чесна відмова, а не «не
+    зрозуміла». Нуль тут був би неправдою: немає самого підрозділу."""
+    monkeypatch.setattr(tiers, "subdivisions",
+                        lambda: ["1-ша механізована рота"])
+    monkeypatch.setattr(tiers, "_route_system", lambda: "промпт")
+    monkeypatch.setattr(tiers, "_model_json", lambda s, u, sch: {
+        "template": "count_by_state_in_subdivision", "state": "leave",
+        "on_date": "2026-09-02", "date_from": None, "date_to": None,
+        "name": None, "doc_number": None, "subdivision": "7 рота",
+        "carried_over": []})
+
+    tid, _ = tiers.model_route("а в 7 роті?", [])
+    assert tid == "subdivision_unknown", tid
