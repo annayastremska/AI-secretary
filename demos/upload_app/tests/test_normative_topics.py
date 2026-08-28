@@ -140,10 +140,12 @@ def test_render_names_other_with_a_number():
     assert re.search(r"інше\D{0,40}1|1\D{0,20}інше", text), text
 
 
-def test_render_has_examples_of_questions():
+def test_render_has_no_examples_of_questions():
+    """Рішення Ані 28.08: приклади в самій відповіді зайві -- вони переїхали в
+    готові кнопки на екрані вітання, де під рукою завжди, а не лише тоді, коли
+    людина вже спитала про склад корпусу."""
     text = "\n".join(nt.render(ROWS))
-    assert "?" in text
-    assert "приклад" in text.lower() or "спитати" in text.lower()
+    assert "приклад" not in text.lower()
 
 
 def test_render_stays_short():
@@ -289,3 +291,69 @@ def test_tests_do_not_write_into_the_production_trace():
     assert "logs" not in trace.TRACE_PATH.replace("\\", "/").split("/")[:-1], (
         trace.TRACE_PATH)
     assert "tests" in os.path.basename(trace.TRACE_PATH), trace.TRACE_PATH
+
+
+# ── Готові кнопки на екрані вітання ──────────────────────────────────────────
+
+
+def test_chips_exist():
+    assert len(nt.chips()) == 3, nt.chips()
+    for q in nt.chips():
+        assert q.endswith("?"), q
+
+
+def test_every_chip_is_a_known_example():
+    """Кнопка мусить бути серед `ask` якоїсь теми -- інакше вона розійдеться з
+    перевіркою «приклад має відповідь у корпусі» і поведе в порожнечу.
+
+    Рівно на цьому ми вже горіли: попередні зашиті кнопки питали про травень,
+    якого в базі немає."""
+    known = {q.strip().rstrip("?") for t in nt.load() for q in t["ask"]}
+    for q in nt.chips():
+        assert q.rstrip("?") in known, (q, sorted(known))
+
+
+def test_chips_are_in_the_chat_buttons():
+    from chat_gradio import app as chat_app
+    examples = chat_app.example_questions()
+    for q in nt.chips():
+        assert q in examples, (q, examples)
+
+
+def test_buttons_split_into_rows_of_three():
+    """Кнопок стало дев'ять. Розкладка рядками по три перевіряється тут, бо
+    інакше другий літерал `[3:]` зібрав би шість в один рядок."""
+    from chat_gradio import app as chat_app
+    n = len(chat_app.example_questions())
+    assert n % 3 == 0, f"кнопок {n} -- рядок по три не складеться"
+
+
+@pytest.mark.parametrize("n,want", [
+    (1, "1 акт"), (2, "2 акти"), (4, "4 акти"), (5, "5 актів"),
+    (11, "11 актів"), (12, "12 актів"), (14, "14 актів"),
+    (21, "21 акт"), (22, "22 акти"), (25, "25 актів"),
+])
+def test_acts_plural(n, want):
+    """У живій відповіді з'явилось «4 акт(и)». Дужки в тексті для людини --
+    видима недороблена робота, і відповідь чата читає не програміст."""
+    assert nt._acts(n) == want
+
+
+def test_render_has_no_parenthesised_endings():
+    text = "\n".join(nt.render(ROWS))
+    assert "(и)" not in text and "(ів)" not in text, text
+
+
+def test_render_does_not_claim_documents_were_loaded_twice():
+    """Формулювання перевіряється окремо, бо перше було НЕПРАВДОЮ.
+
+    Я написала «залиті двічі». Перевірка показала інше: файли різні за хешем
+    (тобто дедуплікація за файлом відпрацювала правильно), а в парі наказу
+    № 606 копії відрізняються переліком змін -- одна згадує наказ № 398 від
+    04.11.2020, друга ні. Це різні РЕДАКЦІЇ того самого акта, і тримати обидві
+    законно. Незаконно інше -- не знати, яка чинна, і саме це ми й кажемо.
+    """
+    text = "\n".join(nt.render(ROWS))
+    assert "залиті двічі" not in text, "недоведене твердження про дублікати"
+    assert "двох версіях" in text
+    assert "не встановлено" in text
