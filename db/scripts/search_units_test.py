@@ -225,14 +225,58 @@ def rrf_merge(*lists):
     return sorted(fused.items(), key=lambda kv: -kv[1]["rrf"])
 
 
-def quote_of(cur, doc_id, base_label):
-    """Цитата -- ціла логічна одиниця з ОРИГІНАЛУ, а не текст частини."""
+def quote_of(cur, doc_id, base_label, parts=None):
+    """Цитата -- ціла логічна одиниця з ОРИГІНАЛУ, а не текст частини.
+
+    ГОЛОВНЕ ТУТ -- не склеїти РІЗНІ пункти з однаковою міткою.
+
+    Було `min(char_start), max(char_end)` по всіх одиницях із цією міткою. Це
+    правильно для частин однієї одиниці, порізаної за довжиною (вони суміжні),
+    і НЕПРАВИЛЬНО, коли мітка неунікальна: у документі 205 (Положення про ВЛК)
+    мітка `1/1.3` є двічі -- у розділі I і в розділі II, -- і min/max давали
+    проміжок на 64 тисячі символів. Після обрізання до QUOTE_CAP воротам
+    подавався ПОЧАТОК чужого пункту («1.3. Основними завданнями...»), а
+    справжня відповідь («не більше 50 чоловік за робочий день») лишалась за
+    межею. Ворота чесно казали «інформації немає».
+
+    Заміряно: 1567 одиниць із 12123 (13%) мають мітку, неунікальну в межах
+    документа, тобто це не поодинокий випадок. Розділ у мітку не вивести:
+    у цього наказу заголовків «Розділ»/«Глава» в тексті НЕМАЄ взагалі -- вони
+    згадуються лише в примітках про зміни.
+
+    Тому одиниці з однаковою міткою розбиваються на СУМІЖНІ групи: нова група
+    починається там, де наступний початок стоїть далі за попередній кінець.
+    Частини одного розрізу перекриваються (OVERLAP), тому в одну групу
+    потрапляють саме вони.
+
+    `parts` -- id одиниць, які знайшла видача. Якщо передані, беремо ту групу,
+    у якій вони лежать: цитата мусить бути навколо того, що знайшлось. Без
+    `parts` беремо найбільшу групу -- це збереження старої поведінки для
+    викликів, які id не мають.
+    """
     cur.execute(f"""
-        SELECT min(char_start), max(char_end), bool_or(from_length_split)
+        SELECT id, char_start, char_end, from_length_split
           FROM {UNITS}
          WHERE document_id = %s AND base_label = %s
+         ORDER BY char_start
     """, (doc_id, base_label))
-    lo, hi, was_split = cur.fetchone()
+    rows = cur.fetchall()
+    if not rows:
+        return "", False, False
+    groups = []
+    for uid, cs, ce, split in rows:
+        if groups and cs <= groups[-1]["hi"]:
+            groups[-1]["hi"] = max(groups[-1]["hi"], ce)
+            groups[-1]["ids"].add(uid)
+            groups[-1]["split"] = groups[-1]["split"] or split
+        else:
+            groups.append({"lo": cs, "hi": ce, "ids": {uid}, "split": split})
+    chosen = None
+    if parts:
+        chosen = next((g for g in groups if g["ids"] & set(parts)), None)
+    if chosen is None:
+        chosen = max(groups, key=lambda g: len(g["ids"]))
+    lo, hi, was_split = chosen["lo"], chosen["hi"], chosen["split"]
     cur.execute("SELECT text_content FROM documents WHERE id = %s", (doc_id,))
     full = cur.fetchone()[0]
     body = full[lo:hi]

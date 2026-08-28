@@ -177,8 +177,59 @@ def named_act_absent(cur, question):
     return None
 
 
+def split_by_group(cur, fused):
+    """Розділяє записи склейки, у яких під однією адресою лежать РІЗНІ пункти.
+
+    Коренева причина провалу N11, знайдена після трьох хибних гіпотез. Ланцюг
+    складається так: `rrf_merge` збирає кандидатів у ключ `(документ, мітка)`, а
+    мітка в межах документа НЕ унікальна -- заміряно 1567 одиниць із 12123
+    (13%). У документі 205 (Положення про ВЛК) мітка `1/1.3` є двічі: у розділі
+    I («Основними завданнями...») і в розділі II («Кількість оглянутих за
+    робочий день... 50 чоловік»). Розділ у мітку не вивести: заголовків
+    «Розділ»/«Глава» в тексті цього наказу НЕМАЄ взагалі, вони згадуються лише в
+    примітках про зміни.
+
+    Через це в одному записі опинялись `parts = {1120, 1121, 1191}` -- частини
+    ОБОХ пунктів, -- і `quote_of` віддавав уривок першої за текстом групи,
+    тобто чужу норму. Ворота чесно казали «інформації немає». Перевірено
+    окремо: якщо дати воротам саму 188-символьну цитату розділу II, вони
+    відповідають правильно й дослівно.
+
+    Тому запис ділиться на стільки записів, скільки в ньому СУМІЖНИХ груп, і
+    кожен несе parts лише своєї групи. Оцінка RRF успадковується: ділення не
+    змінює того, наскільки добре знайшлось, лише розводить дві різні норми.
+    """
+    out = []
+    for key, meta in fused:
+        doc_id, base = key
+        parts = meta.get("parts") or set()
+        if len(parts) < 2:
+            out.append((key, meta))
+            continue
+        cur.execute(f"""
+            SELECT id, char_start, char_end FROM {UNITS}
+             WHERE document_id = %s AND base_label = %s ORDER BY char_start
+        """, (doc_id, base))
+        groups, hi = [], None
+        for uid, cs, ce in cur.fetchall():
+            if groups and hi is not None and cs <= hi:
+                groups[-1].add(uid)
+                hi = max(hi, ce)
+            else:
+                groups.append({uid})
+                hi = ce
+        mine = [g & parts for g in groups]
+        mine = [g for g in mine if g]
+        if len(mine) < 2:
+            out.append((key, meta))
+            continue
+        for g in mine:
+            out.append((key, {**meta, "parts": g}))
+    return out
+
+
 def chain(cur, encode, rescore, q, top=2, criterion=None, ctx=False,
-          vectors=None, guard=False):
+          vectors=None, guard=False, guard_branches=False):
     res = R.resolve(cur, q)
     if res["status"] == "absent":
         return [], "за номером документа в корпусі немає"
@@ -198,8 +249,30 @@ def chain(cur, encode, rescore, q, top=2, criterion=None, ctx=False,
     else:
         vec = str(encode(["query: " + sq])[0])
         sem = SU.semantic(cur, vec, docs=docs)
-    fused = SU.dedupe_by_text(
-        cur, SU.rrf_merge(SU.lexical(cur, sq, docs=docs), sem), SU.canon_map(cur))
+    lex = SU.lexical(cur, sq, docs=docs)
+    fused = SU.dedupe_by_text(cur, SU.rrf_merge(lex, sem), SU.canon_map(cur))
+    fused = split_by_group(cur, fused)
+    # Топ-1 КОЖНОЇ гілки отримує гарантоване місце.
+    #
+    # Заміряно на N11: правильна одиниця стоїть ПЕРШОЮ у векторній гілці, у
+    # лексичній її немає взагалі, а після склейки її група лише пʼята -- бо
+    # чотири одиниці присутні в ОБОХ гілках, і сума двох посередніх місць
+    # переважає одне перше. При K=10 це так само: 1/11 проти 1/11 + 1/30.
+    # Тобто питання, де одна гілка сліпа, RRF програє СТРУКТУРНО, а не через
+    # погано підібрану сталу.
+    #
+    # Попередня страховка (`guard`) брала топ-1 СКЛЕЙКИ -- тобто саме те, що вже
+    # й так перше, і тому не змінювала нічого. Тут гарантується по одному
+    # кандидату від кожного ранжувальника: вектор, лексика, реранкер.
+    branch_first = []
+    if guard_branches:
+        for rows in (sem, lex):
+            if not rows:
+                continue
+            uid = rows[0][0]
+            hit = next((e for e in fused if uid in e[1]["parts"]), None)
+            if hit is not None:
+                branch_first.append(hit)
     out_cache = {}
     if fused and rescore:
         from measure_rerank_lift import RERANK_CHARS
@@ -215,7 +288,7 @@ def chain(cur, encode, rescore, q, top=2, criterion=None, ctx=False,
         # окремими полями), а реранкер -- ні.
         texts = []
         for (d, b), _m in pool:
-            body = SU.quote_of(cur, d, b)[0]
+            body = SU.quote_of(cur, d, b, _m.get('parts'))[0]
             if ctx:
                 title, ident = SU.identity(cur, d, out_cache)
                 head = f"{title} ({ident}), {b}: "
@@ -246,10 +319,20 @@ def chain(cur, encode, rescore, q, top=2, criterion=None, ctx=False,
             fused = head
         else:
             fused = reranked
+        if guard_branches:
+            head, seen = [], set()
+            for cand in branch_first + fused:
+                if cand[0] not in seen:
+                    seen.add(cand[0])
+                    head.append(cand)
+            fused = head
     out, cache = [], out_cache
     for (doc_id, base), _meta in fused[:top]:
         title, ident = SU.identity(cur, doc_id, cache)
-        body, _w, _t = SU.quote_of(cur, doc_id, base)
+        # parts -- id одиниць, які знайшла видача: без них quote_of
+        # обирає групу на свій розсуд, а нам потрібна та, де влучили.
+        body, _w, _t = SU.quote_of(cur, doc_id, base,
+                                   (_meta or {}).get('parts'))
         data, _u, _dt, _raw, truncated = G.ask(
             q, title[:70], ident, base[:60], body,
             criterion=criterion or G.STRICT)
@@ -272,6 +355,8 @@ def main():
     ap.add_argument("--top", type=int, default=2)
     ap.add_argument("--criterion", choices=sorted(CRITERIA),
                     default="strict")
+    ap.add_argument("--guard-branches", action="store_true",
+                    help="гарантувати воротам топ-1 векторної й лексичної гілок")
     ap.add_argument("--guard-top1", action="store_true",
                     help="віддати воротам топ-1 склейки ПЛЮС топ реранкера")
     ap.add_argument("--rrf-k", type=int, default=0,
@@ -338,7 +423,8 @@ def main():
                               CRITERIA[args.criterion],
                               args.rerank_context,
                               args.vectors or None,
-                              args.guard_top1)
+                              args.guard_top1,
+                              args.guard_branches)
             said = [g for g in got if g["answers"]]
             usable = [g for g in said if g["exact"]]
 
