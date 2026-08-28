@@ -584,6 +584,58 @@ _PREV_ACT = re.compile(r"\((№[^)]{1,40}|НД\s+ТЗІ[^)]{1,30}|наказ[^)]
 _ASKED_POINT = re.compile(r"пункт(?:у|ом|і)?\s+(\d+(?:-\d+)?)", re.IGNORECASE)
 
 
+#: Ознака того, що ланцюг ВІДМОВИВ: жодного кандидата ворота не пропустили.
+_CHAIN_REFUSED = "жодне не відповідає на питання прямо"
+
+
+def _map_from_previous(question, history, answer):
+    """Карта документа з ПОПЕРЕДНЬОГО ходу, коли на цьому ланцюг відмовив.
+
+    Другий хід прогону Андрія 28.08: «я не питаю за скільки часу, я питаю
+    послідовність моїх дій, куди і як» -> відмова. Ворота відкинули кандидатів
+    по одному, і правильно: жоден фрагмент окремо на все питання не
+    відповідає. Але потрібний документ ВІДОМИЙ -- його назвала відповідь ходом
+    раніше, і в її блоці джерела стоїть «документ: запис №252 у базі».
+
+    Ланцюг історії не бачить (і не мусить), тому добір живе тут. Пошуку не
+    потрібно: запис документа точний, одиниці беруться за меткою.
+
+    -> доповнена відповідь або та сама, якщо додати нічого.
+    """
+    if not tier_chat.is_procedure_question(question):
+        return answer
+    if _CHAIN_REFUSED not in (answer or ""):
+        return answer
+    for msg in reversed(history or []):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        prev = tier_chat._history_text(msg.get("content")) or ""
+        doc_id = tier_chat._doc_record_id(prev.splitlines())
+        addr = tier_chat._quoted_address(prev.splitlines())
+        if not (doc_id and addr):
+            continue
+        lines = tier_chat._outline_lines(
+            tier_chat._fetch_sibling_units(doc_id, addr), addr)
+        if not lines:
+            return answer
+        # Кажемо ВГОЛОС, що документ узятий із попереднього ходу: інакше це
+        # виглядало б так, ніби система знайшла його на це питання.
+        head = ("Прямої відповіді одним пунктом немає. Але документ із "
+                "попередньої відповіді описує порядок цілком:")
+        block = "\n\n" + head + "\n" + "\n".join(lines[1:])
+        # КАРТА ЙДЕ ПЕРЕД БЛОКОМ ДЖЕРЕЛА, а не в кінець тексту.
+        #
+        # Перша версія дописувала в кінець -- і карта сідала ПІД «джерелом»,
+        # тобто після згортки, де її ніхто не читає. Я цього спершу не
+        # побачила, бо в перевірці різала вивід по «<details» і сама ж
+        # відрізала те, що перевіряла.
+        at = answer.find("\n\n<details")
+        if at == -1:
+            return answer.rstrip() + block
+        return answer[:at].rstrip() + block + answer[at:]
+    return answer
+
+
 def _direct_unit_answer(question, history=None):
     """Пункт акта ПРЯМО ЗА МЕТКОЮ, без пошуку. -> текст або None.
 
@@ -2092,6 +2144,19 @@ def _answer_inner(question, history=None):
         return ("Занадто довге питання (понад 500 символів)."
                 + footer("відмова"))
     merged, clarified = _merge_clarification(question, history)
+
+    def _done(text):
+        """Останній штрих перед віддачею, ОДИН на всі виходи.
+
+        Раніше карта документа дописувалась «в кінці `_answer_inner`» -- і не
+        дописувалась ніколи для дороги каталогу, бо та повертає відповідь
+        раніше (`return _as_report(cat)`). Це вже четвертий випадок за три дні,
+        коли умова стоїть не там, де приймається рішення: гейт корпусу, гейт
+        цитати, друга копія витягу номера -- і тепер ранній вихід.
+
+        Тому не «в кінці», а в одній функції, через яку проходять УСІ виходи.
+        """
+        return _as_report(_map_from_previous(merged, history, text))
     if is_quota_question(merged.lower()):
         # детерміновано, без моделі: причина відмови відома наперед
         return ANSWER_NO_QUOTA
@@ -2172,7 +2237,7 @@ def _answer_inner(question, history=None):
             if not _raw_fix.get("date") and _fix.get("date"):
                 out = (f"Перерахувала попереднє питання на {_fix['date']} — "
                        "дату взято з нього ж.\n\n" + out)
-            return _as_report(out) + _state_marker(_fix)
+            return _done(out) + _state_marker(_fix)
 
     try:
         _state_route = tier_chat.rules_route(merged)
@@ -2181,7 +2246,7 @@ def _answer_inner(question, history=None):
     if _state_route and _state_route[0] in _STATE_TEMPLATES:
         out = _catalog_tier(merged)
         if out is not None:
-            return _as_report(out)
+            return _done(out)
 
     # Швидкий шлях ПЕРЕД моделлю (скарга замовниці на латентність): якщо
     # правила впевнено впізнали підрахунок із власним наміром -- модель не
@@ -2225,7 +2290,7 @@ def _answer_inner(question, history=None):
     if route is None:
         cat = _catalog_tier(merged)
         if cat is not None:
-            return _as_report(cat)
+            return _done(cat)
 
     # Агрегати (середнє, мін/макс, суми) — шаблонів для них немає ні тут, ні
     # в каталозі: одразу ярус 2 (порядок із tiers.py), інакше маленька модель
@@ -2233,17 +2298,17 @@ def _answer_inner(question, history=None):
     if route is None and tier_chat._AGGREGATE.search(merged.lower()):
         t2 = _tier2_tier(merged)
         if t2 is not None:
-            return _as_report(t2)
+            return _done(t2)
         # Ярус 2 не впорався або моделі немає -- чесна відмова ТУТ, не далі:
         # інакше «скільки в середньому...» падає в підрахунок і успадковує
         # слоти минулого ходу (бачили відповідь про 4 травня на питання про
         # середню тривалість у режимі без моделі).
         if model_ok:
-            return _as_report(
+            return _done(
                 "Не знайшла: скласти безпечний запит для цього агрегатного "
                 "питання не вдалося. Спробуйте перефразувати."
                 + footer("ярус 2 (не склалось)"))
-        return _as_report(
+        return _done(
             "Не знайшла шаблону для цього агрегатного питання, а локальна "
             "модель недоступна — відповідаю лише за шаблонними питаннями."
             + footer("відмова (без моделі)"))
@@ -2430,7 +2495,13 @@ def _answer_inner(question, history=None):
         # під рейками); якщо і вони не впорались, відмова лишається відмовою
         out = _extra_tiers(merged, history) or ANSWER_REFUSE
 
-    out = _as_report(out)
+    # КАРТА ДОКУМЕНТА З ПОПЕРЕДНЬОГО ХОДУ -- тут, а не в трьох дорогах.
+    #
+    # Відповідь ланцюга приходить трьома шляхами (каталог, «довідник»,
+    # «цитата»), і умова, поставлена в одному з них, не спрацювала б на решті
+    # -- це вже траплялось тричі за три дні. Тут вона стоїть після того, як
+    # відповідь склалась, тобто одна на всі дороги.
+    out = _done(out)
 
     if fallback:
         if out.startswith(CLARIFY_MARK):

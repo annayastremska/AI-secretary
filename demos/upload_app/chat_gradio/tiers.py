@@ -897,6 +897,142 @@ def is_corpus_question(question):
     return False
 
 
+#: ПИТАННЯ ПРО ПОСЛІДОВНІСТЬ ДІЙ, а не про окреме число чи означення.
+#:
+#: Знайдено прогоном Андрія 28.08: «як подати рапорт про щорічну відпустку» дало
+#: цитату з пункту 1 (строки), а на «я питаю послідовність моїх дій, куди і як»
+#: прийшла відмова. Ворота відкинули кандидатів ПО ОДНОМУ, і це правильно:
+#: жоден фрагмент окремо на все питання не відповідає.
+#:
+#: Пошук теж не винен -- документ знайдений той, що треба. Винне те, скільком
+#: одиниць ми віддаємо людині.
+_PROCEDURE = re.compile(
+    r"як\s+(?:подати|оформити|отримати|звернутися|діяти|це\s+зробити)"
+    r"|послідовн\w*|порядок\s+ді\w*|як\w*\s+кроки|"
+    r"куди\s+(?:і|та)\s+як|що\s+робити|з\s+чого\s+почати|"
+    r"процедур\w*|як\s+це\s+(?:робиться|відбувається)",
+    re.IGNORECASE)
+
+#: Скільком пунктів карти показуємо і скільком символів на рядок. Ті самі
+#: причини, що в `RAW_ROWS_SHOWN`: карта -- допомога, а не інвентаризація.
+OUTLINE_UNITS_SHOWN = 12
+OUTLINE_LABEL_CHARS = 90
+
+#: Звідки беруться адреса й запис документа: рядок джерела, який пише сам
+#: ланцюг («документ: запис №252 у базі, адреса 1. Строки подання рапорту»).
+_REC_ID = re.compile(r"запис\s*№\s*(\d+)\s*у\s*базі")
+#: Адреса обмежується `<` і переносом рядка, а НЕ кінцем рядка.
+#:
+#: Перша версія брала `(.+?)\s*$` -- і в живому прогоні захопила півблока
+#: джерела разом: «1. Строки подання рапорту<br>збіг лем питання й цитати:
+#: 0.75<br>карта документа…». Причина в тому, що в готовій відповіді джерело
+#: склеєне в ОДИН рядок через `<br>`, а мій тест подавав його окремими
+#: елементами переліку -- тобто перевіряв форму, якої не буває.
+_REC_ADDR = re.compile(r"адреса\s+([^<\n]+)")
+
+
+def is_procedure_question(question):
+    """Чи питання про ПОСЛІДОВНІСТЬ дій. -> bool.
+
+    Вузько навмисно: звичайне нормативне питання («яка тривалість щорічної
+    відпустки») карти не отримує -- там одна цитата і є відповідь, а карта
+    роздула б її без користі.
+    """
+    return bool(_PROCEDURE.search(question or ""))
+
+
+def _doc_record_id(source_lines):
+    """Номер ЗАПИСУ документа з рядків джерела. -> int або None.
+
+    Саме запис, а не номер акта: у внутрішніх інструкцій частини
+    (`doc_identifier IS NULL`) номера акта немає взагалі, а запис є завжди.
+    """
+    for line in source_lines or []:
+        m = _REC_ID.search(str(line))
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _quoted_address(source_lines):
+    """Адреса одиниці, з якої взято цитату. -> рядок або None."""
+    for line in source_lines or []:
+        if "адреса" in str(line):
+            m = _REC_ADDR.search(str(line))
+            if m:
+                return m.group(1).strip()
+    return None
+
+
+def _fetch_sibling_units(doc_id, label):
+    """Сусідні одиниці ТОГО САМОГО рівня в тому самому документі.
+
+    Сусіди беруться за `parent_label` наведеної одиниці, а не «всі одиниці
+    документа». Різниця видна на законі: у «Стаття 10-1 / 2» батько -- «Стаття
+    10-1», тому сусіди це пункти ТІЄЇ САМОЇ статті. Без цього карта закону
+    була б переліком сотень статей і не допомогла б нікому.
+
+    Для внутрішньої інструкції батька немає (`NULL`), і тоді сусіди -- пункти
+    верхнього рівня, тобто рівно та послідовність, яку людина й просила.
+    """
+    try:
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH q AS (
+                      SELECT parent_label FROM document_units
+                       WHERE document_id = %s AND label = %s LIMIT 1)
+                    SELECT u.label, u.text
+                      FROM document_units u, q
+                     WHERE u.document_id = %s
+                       AND u.parent_label IS NOT DISTINCT FROM q.parent_label
+                     ORDER BY u.ord
+                    """, (doc_id, label, doc_id))
+                return cur.fetchall()
+    except Exception:
+        # Карта -- додаткове знання. Немає її -- цитата лишається цитатою.
+        return []
+
+
+def _outline_lines(rows, quoted_label):
+    """Рядки карти документа. -> перелік рядків (порожній = карти не буде).
+
+    Порожньо повертається у трьох випадках, і кожен свідомий:
+      * наведеної одиниці серед сусідів немає -- отже адреса не та, і карта
+        малювалась би не до тієї цитати;
+      * сусідів менше двох -- карта з одного пункту не карта;
+      * рядків немає взагалі.
+    """
+    units = [r for r in (rows or [])
+             if not (r.get("text") or "").lstrip().startswith("# ")]
+    labels = [(r.get("label") or "").strip() for r in units]
+    if len(units) < 2 or (quoted_label or "").strip() not in labels:
+        return []
+    out = [f"Цей документ описує порядок цілком, {_units_word(len(units))}:"]
+    for lab in labels[:OUTLINE_UNITS_SHOWN]:
+        short = lab if len(lab) <= OUTLINE_LABEL_CHARS \
+            else lab[:OUTLINE_LABEL_CHARS].rstrip() + "…"
+        mark = " ← щойно наведено" if lab == (quoted_label or "").strip() else ""
+        out.append(f"- {_esc(short)}{mark}")
+    if len(labels) > OUTLINE_UNITS_SHOWN:
+        out.append(f"- і ще {len(labels) - OUTLINE_UNITS_SHOWN} пунктів")
+    out.append("Питайте будь-який пункт — наведу дослівно.")
+    return out
+
+
+def _units_word(n):
+    """«шістьма пунктами» -- узгодження числа з іменником в орудному."""
+    tail, hundred = n % 10, n % 100
+    if tail == 1 and hundred != 11:
+        word = "пунктом"
+    elif tail in (2, 3, 4) and hundred not in (12, 13, 14):
+        word = "пунктами"
+    else:
+        word = "пунктами"
+    return f"{n} {word}"
+
+
 def is_topic_question(question):
     """Чи питання про ТЕМИ корпусу («а на які теми вони», «про що ці документи»).
 
@@ -2041,7 +2177,27 @@ def run_template(template_id, params):
     if template_id == "normative_search" and (params or {}).get("query"):
         out = _normative_chain_answer(params["query"])
         if out is not None:
-            return out
+            # КАРТА ДОКУМЕНТА -- лише на питання про послідовність дій.
+            #
+            # Вбудовано ТУТ, а не в трьох місцях, де відповідь ланцюга
+            # обгортається дорогою (каталог, «довідник», «цитата»): ланцюг
+            # викликається саме звідси, тому одна точка покриває всі дороги.
+            # Три копії цієї умови розійшлися б -- це вже траплялось із
+            # гейтами тричі за три дні.
+            text, source = out
+            q = params["query"]
+            if is_procedure_question(q):
+                doc_id = _doc_record_id(source)
+                addr = _quoted_address(source)
+                if doc_id and addr:
+                    lines = _outline_lines(_fetch_sibling_units(doc_id, addr),
+                                           addr)
+                    if lines:
+                        text = text.rstrip() + "\n" + "\n".join(lines)
+                        source = list(source) + [
+                            "карта документа: сусідні одиниці того самого "
+                            "рівня, порядок як у документі"]
+            return text, source
 
     sql_params, t = _sql_params(template_id, params)
     # blocked: true -- шаблон-відмова БЕЗ sql (subdivision_blocked): чесний
