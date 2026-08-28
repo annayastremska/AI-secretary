@@ -100,13 +100,33 @@ def test_normative_quote_is_translated_now():
         assert data[q] and data[q] != q
 
 
-def test_endpoint_contract():
-    """Маршрут мусить бути стійким до сміття: сторінка присилає, що присилає."""
+@pytest.fixture
+def client(monkeypatch):
+    """Свій клієнт із ВЛАСНИМ станом авторизації.
+
+    Тест мусить бути незалежним, і тут це не теорія: у наборі він падав, а
+    окремо проходив. Причина -- сусідній файл (`test_public_mode`) робить
+    `importlib.reload` модуля апки, поки в оточенні стоять тестові паролі, і
+    перезавантажений модуль запікає їх у себе. Мій запит ішов без авторизації
+    й отримував 401.
+
+    Тому я не покладаюсь на те, що лишив попередній файл: чищу оточення й
+    перезавантажую модуль сама.
+    """
+    import importlib
+
     from fastapi.testclient import TestClient
 
+    for var in ("APP_BASIC_USER", "APP_BASIC_PASS", "APP_GUEST_TOKEN",
+                "APP_PUBLIC_MODE"):
+        monkeypatch.delenv(var, raising=False)
     from demos.upload_app import app as web
+    importlib.reload(web)
+    return TestClient(web.app, raise_server_exceptions=False)
 
-    client = TestClient(web.app, raise_server_exceptions=False)
+
+def test_endpoint_contract(client):
+    """Маршрут мусить бути стійким до сміття: сторінка присилає, що присилає."""
     ok = client.post("/api/translate", json={"texts": ["Статистика"]})
     assert ok.status_code == 200
     assert ok.json()["texts"]["Статистика"] == "Statistics"
@@ -117,14 +137,9 @@ def test_endpoint_contract():
         assert r.json() == {"texts": {}}
 
 
-def test_request_size_is_bounded():
+def test_request_size_is_bounded(client):
     """Сторінка присилає десятки рядків. Межа стоїть, щоб один запит не міг
     попросити переклад усього корпусу."""
-    from fastapi.testclient import TestClient
-
-    from demos.upload_app import app as web
-
-    client = TestClient(web.app, raise_server_exceptions=False)
     r = client.post("/api/translate",
                     json={"texts": ["Статистика"] * 5000})
     assert r.status_code == 200
