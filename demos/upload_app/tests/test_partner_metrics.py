@@ -38,8 +38,18 @@ PAGE = os.path.join(APP_DIR, "static", "stats.html")
 
 
 def test_package_is_present_and_flat():
+    """Записів 10 -- пакет обрізаний Андрієм 28.08 «під вітрину».
+
+    Було 30. Він сам прибрав діагностичні лінії («без історії»), тавтологічні
+    (recall і precision 12/12 при 27/27 на бінарній задачі), нерепрезентативні
+    (8 питань), секундні (їх покриває наш живий лічильник латентності) і той,
+    що ми самі дискредитували у звіті (зазор реранкера 1.82). Розклад під
+    «правильних шаблонів обрано» переїхав у поле `how`.
+
+    Число тут жорстке навмисно: пакет -- вітрина, і поповзти вона може лише
+    свідомо."""
     data = json.load(io.open(PACKAGE, encoding="utf-8"))
-    assert isinstance(data, list) and len(data) == 30, len(data)
+    assert isinstance(data, list) and len(data) == 10, len(data)
 
 
 def test_every_metric_in_the_package_says_how_it_was_measured():
@@ -57,7 +67,7 @@ def test_shown_and_folded_split():
     got = stats_mod.partner_metrics(PACKAGE)
     assert got["error"] is None
     assert got["dropped"] == 0
-    assert len(got["shown"]) + len(got["folded"]) == 30
+    assert len(got["shown"]) + len(got["folded"]) == 10
     # Чотири метрики охоплення дублюють живий розділ.
     assert len(got["folded"]) == 4, [m["name"] for m in got["folded"]]
     for m in got["folded"]:
