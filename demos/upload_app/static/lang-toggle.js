@@ -217,12 +217,6 @@
     // моя версія з пробілами не збіглася жодним ключем.
     "Замір бази й нормативного пошуку":
       "Database and normative search: measured",
-    "Міряв Андрій, приладами зони бази й нормативного пошуку. Знаменники":
-      "Measured by Andriy, with the database and normative-search instruments. Denominators",
-    "тут свої: наприклад «без питань до людини» рахується від документів,":
-      "here are his own: for example «no questions for a human» is counted over documents,",
-    "з яких справді взялися факти, а не від усіх у базі.":
-      "that actually yielded facts, not over everything in the database.",
     "чим зміряно": "how it was measured",
     "· замір": "· measured",
     "метрик охоплення не показано окремо:":

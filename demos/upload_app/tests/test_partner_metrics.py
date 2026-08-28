@@ -147,8 +147,22 @@ def test_page_makes_no_external_requests():
         assert bad not in html, bad
 
 
-def test_lead_names_who_measured():
-    """К6: знаменники різні навмисно, і без підпису вони читаються як
-    суперечність нашим власним числам."""
+def test_who_measured_is_visible_per_number_not_as_a_lead():
+    """К6 у новій редакції: підпис над розділом Аня прибрала 28.08, і тест
+    мусив змінитись разом із критерієм.
+
+    Стара версія перевіряла «Міряв Андрій» у html -- і після прибирання вона
+    ПРОЙШЛА, бо знайшла ці слова в моєму ж комментарі про прибирання. Тобто
+    міряла текст файла, а не те, що бачить людина. Третій такий випадок за
+    день, тому тепер перевіряється саме зміст: хто і чим міряв, лишається
+    видним у полі «чим зміряно» під КОЖНИМ числом.
+    """
     html = io.open(PAGE, encoding="utf-8").read()
-    assert "Міряв Андрій" in html
+    body = "\n".join(ln for ln in html.splitlines()
+                     if "/*" not in ln and "*" != ln.strip()[:1]
+                     and "<!--" not in ln)
+    assert "Міряв Андрій" not in body, "підпис над розділом мусив зникнути"
+    # А джерело кожної цифри лишається: у пакеті `how` є в усіх записах, і
+    # плитка його показує (тест `test_page_shows_how_for_every_tile`).
+    for m in stats_mod.partner_metrics(PACKAGE)["shown"]:
+        assert m["how"].strip(), m

@@ -81,7 +81,6 @@
        непояснюваними. -->
   <section id="partner-sec">
     <h2>Замір бази й нормативного пошуку</h2>
-    <p class="hint" id="partner-lead"></p>
     <div class="tiles" id="partner-tiles"></div>
     <p class="hint" id="partner-note"></p>
   </section>
@@ -567,20 +566,17 @@ function renderPartner(pm) {
   const host = $("partner-tiles");
   if (!host) { return; }
   host.textContent = "";
-  $("partner-lead").textContent = "";
   $("partner-note").textContent = "";
   if (!pm) { return; }
   if (pm.error) {
     $("partner-sec").appendChild(note("warn", pm.error));
     return;
   }
-  /* Хто міряв і на чому -- перед числами, не після. Знаменники в двох
-     замірах різні навмисно, і без цього рядка вони читаються як суперечність
-     нашим власним. */
-  $("partner-lead").textContent =
-    "Міряв Андрій, приладами зони бази й нормативного пошуку. Знаменники "
-    + "тут свої: наприклад «без питань до людини» рахується від документів, "
-    + "з яких справді взялися факти, а не від усіх у базі.";
+  /* Підпис «Міряв Андрій, знаменники тут свої…» ПРИБРАНО (Аня 28.08).
+     Хто міряв, лишається видним там, де це перевірне: у полі «чим зміряно»
+     під кожним числом стоїть назва приладу й набору. Тобто пояснення не
+     зникло, а переїхало до тієї цифри, якої стосується, замість абзацу над
+     усім розділом. */
   for (const m of pm.shown || []) { host.appendChild(metricTile(m)); }
   const parts = [];
   if ((pm.folded || []).length) {
