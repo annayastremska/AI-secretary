@@ -64,6 +64,7 @@ const src = fs.readFileSync(process.argv[2], "utf8");
 eval(src);
 
 const api = global.window.__aiLang;
+const A = api;
 function texts() { return collectText(body).map((n) => n.nodeValue); }
 
 console.log("до перекладу:", JSON.stringify(texts().slice(0, 3), null, 0));
@@ -87,7 +88,14 @@ const verdict = {
   translated: en[0] === "Statistics",
   pattern: en.includes("35 of 35"),
   attr: attrAfterEn === "Theme: dark",
-  chat_untouched: en.some((t) => t.indexOf("Доповідаю:") === 0),
+  // РІШЕННЯ ПЕРЕВЕРНУТЕ (Аня 28.08): відповідь чата тепер ПЕРЕКЛАДАЄТЬСЯ.
+  // Спершу я захищала її як дослівну цитату норми; Аня скасувала це для
+  // демо -- дані синтетичні, сторінка відкрита, на демо іноземці.
+  chat_translated: en.some((t) => t.indexOf("Report:") === 0),
+  // А ось SQL і номер звернення не перекладаються НІКОЛИ: перший мусить
+  // збігатися з виконаним запитом, другий -- ключ у журналі.
+  sql_untouched: A.translate("SELECT COUNT(*) FROM facts f") === null,
+  reqid_untouched: A.translate("cd3433") === null,
   restored: uk[0] === "Статистика",
 };
 console.log("VERDICT " + JSON.stringify(verdict));

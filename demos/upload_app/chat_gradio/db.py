@@ -368,7 +368,8 @@ def subdivision_values():
         return []
 
 
-def absences_on_date(date, subdivision=None, doc_type=None, confirmed=True):
+def absences_on_date(date, subdivision=None, doc_type=None, confirmed=True,
+                     dim=None):
     """Хто поза частиною в цей день.
 
     confirmed=True -- лише facts.status='confirmed' (правило продукту:
@@ -386,11 +387,19 @@ def absences_on_date(date, subdivision=None, doc_type=None, confirmed=True):
     if subdivision:
         sql += _SUBDIVISION_FILTER
         params["subdivision"] = _subdivision_pattern(subdivision)
-    if doc_type:
-        dim = next((k for k, v in DOC_TYPE_BY_DIM.items() if v == doc_type),
-                   doc_type)
+    # ОДИН вимір замість обох. `dim` -- явний код виміру ('leave' /
+    # 'deployment_location'); `doc_type` лишається для старих викликів.
+    #
+    # Навіщо: п. 13 і 19 звіту Дениса. На питання ПРО ВІДПУСТКУ чат відповідав
+    # числом «поза частиною» -- тобто відпустка ПЛЮС відрядження. Звідси 12 і
+    # 15 на одну дату: обидві цифри правдиві, метрика різна, і ніде не сказано
+    # яка. Фільтр у цій функції був від початку і не передавався ЖОДНОГО разу
+    # (знахідка Андрія в контексті для дослідження).
+    one = dim or (next((k for k, v in DOC_TYPE_BY_DIM.items() if v == doc_type),
+                       doc_type) if doc_type else None)
+    if one:
         sql += " AND d.code = %(one_dim)s"
-        params["one_dim"] = dim
+        params["one_dim"] = one
     rows = _query(sql + " ORDER BY num.value NULLS LAST, o.canonical_name",
                   params)
     return [_absence_row(r) for r in rows]

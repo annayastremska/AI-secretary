@@ -182,3 +182,52 @@ def test_list_failure_does_not_break_the_number(monkeypatch):
     monkeypatch.setattr(tiers, "_run_template_sql", boom)
     assert tiers._names_with_count(
         {"dims": ["leave"], "on_date": datetime.date(2026, 10, 10)}, 2) == []
+
+
+# ── Названий стан рахується РІВНО як названий (рішення Ані 28.08) ──────────
+
+def _absent_call(monkeypatch, state):
+    """-> (текст відповіді, вимір, який поїхав у базу)."""
+    seen = {}
+
+    def fake(date, subdivision=None, doc_type=None, confirmed=True, dim=None):
+        seen["dim"] = dim
+        return _rows(["Ґоляш Богодар Святославович"])
+
+    monkeypatch.setattr(chat_app.db, "absences_on_date", fake)
+    monkeypatch.setattr(chat_app.db, "coverage_note", lambda date=None: "")
+    monkeypatch.setattr(chat_app.db, "unconfirmed_absences_on_date",
+                        lambda date: 0)
+    monkeypatch.setattr(chat_app.db, "people_total", lambda: 303)
+    out = chat_app.answer_absent("2026-09-02", None, state=state)
+    return out, seen.get("dim")
+
+
+def test_named_leave_counts_only_leave(monkeypatch):
+    """п. 13 і 19: на питання ПРО ВІДПУСТКУ чат відповідав числом «поза
+    частиною» -- відпустка ПЛЮС відрядження. Звідси 12 і 15 на одну дату."""
+    out, dim = _absent_call(monkeypatch, "leave")
+    assert dim == "leave", "у базу поїхали обидва виміри"
+    assert "у відпустці" in out, out
+    assert "поза частиною" not in out, out
+
+
+def test_named_deployment_counts_only_deployment(monkeypatch):
+    out, dim = _absent_call(monkeypatch, "deployment")
+    assert dim == "deployment_location"
+    assert "у відрядженні" in out, out
+
+
+def test_unnamed_state_still_says_what_it_counted(monkeypatch):
+    """Людина спитала «скільком відсутніх» -- метрика ширша, і саме тому її
+    треба назвати: «поза частиною» це не самоочевидне слово."""
+    out, dim = _absent_call(monkeypatch, None)
+    assert dim is None, "фільтр поставлено там, де про нього не просили"
+    assert "поза частиною (відпустка або відрядження)" in out, out
+
+
+def test_state_comes_from_the_question(monkeypatch):
+    """Наскрізь: стан мусить доїхати з тексту питання, а не задаватись рукою."""
+    assert tiers.extract_state("Скільком осіб у відпустці 2026-09-01?") == "leave"
+    assert tiers.extract_state("Хто у відрядженні 2026-09-01?") == "deployment"
+    assert tiers.extract_state("Скільком відсутніх 2026-09-01?") == "absent"

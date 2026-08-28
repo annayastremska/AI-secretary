@@ -728,15 +728,32 @@ def subdivision_exists(asked):
     return any(want.split()[0][:6] in v for v in known)
 
 
-def answer_absent(date, subdivision, not_returned=False):
+#: Стан, названий у питанні -> вимір і підпис метрики. Порожній стан означає
+#: «поза частиною» -- обидва виміри разом, і тоді це теж сказано вголос.
+_STATE_DIM = {"leave": ("leave", "у відпустці"),
+              "deployment": ("deployment_location", "у відрядженні")}
+
+
+def answer_absent(date, subdivision, not_returned=False, state=None):
+    """Перелік відсутніх. `state` -- те, що людина НАЗВАЛА в питанні.
+
+    Рішення Ані 28.08: назвала людина конкретний стан -- рахуємо рівно його.
+    Доти будь-яке таке питання йшло цією дорогою й отримувало «поза частиною»
+    = відпустка + відрядження. Саме звідси п. 13 і 19 звіту Дениса: «12 у
+    відпустці» і «15 поза частиною» на ту саму дату. Обидва числа правдиві,
+    метрика різна, і в жодній відповіді не сказано, яка саме.
+    """
     if subdivision and not subdivision_exists(subdivision):
         return no_such_subdivision(subdivision) + footer("відмова")
-    rows = db.absences_on_date(date, subdivision=subdivision)
+    dim, metric = _STATE_DIM.get(state or "", (None, None))
+    rows = db.absences_on_date(date, subdivision=subdivision, dim=dim)
     where = f" ({subdivision})" if subdivision else ""
     items = [f"- {person_label(r)} — {_esc(r['doc_type'])} {_esc(r['doc_number'])}, "
              f"до {_esc(r['date_to'])}" for r in rows]
     if not rows:
-        body = f"0 — на {date}{where} чинних документів про відсутність немає."
+        body = (f"0 — на {date}{where} чинних документів "
+                + (f"про стан «{metric}»" if metric else "про відсутність")
+                + " немає.")
         # Нуль поза покриттям -- це не «нікого немає», а «даних немає».
         note = db.coverage_note(date)
         if note:
@@ -755,8 +772,11 @@ def answer_absent(date, subdivision, not_returned=False):
         # немає (блок D, зона пайплайна). Тому кажемо обидві цифри й називаємо,
         # чому вони різні: сховати це означало б сховати дірку.
         people_n = len({(r.get("person_name_raw") or "").strip() for r in rows})
-        head = (f"**{plural_people(people_n)}** поза частиною "
-                f"(відпустка або відрядження) на {date}{where}")
+        # Метрика в заголовку -- РІВНО та, про яку питали.
+        head = (f"**{plural_people(people_n)}** "
+                + (metric if metric
+                   else "поза частиною (відпустка або відрядження)")
+                + f" на {date}{where}")
         if people_n and len(rows) != people_n:
             head += (f"; документів про це {len(rows)} — у когось їх кілька "
                      f"(наприклад, квиток і виданий замість нього новий)")
@@ -1032,8 +1052,11 @@ def dispatch_count(params, clarified, clarify_hint, question=""):
                     "YYYY-MM-DD, а підставляти дату самостійно система не має "
                     "права." + footer("відмова"))
         if intent == "хто_відсутній":
+            # Стан беремо з ПИТАННЯ: якщо людина назвала відпустку, рахуємо
+            # відпустку, а не «поза частиною» (рішення Ані 28.08).
             return answer_absent(date, sub,
-                                 not_returned="поверн" in question.lower())
+                                 not_returned="поверн" in question.lower(),
+                                 state=tier_chat.extract_state(question))
         if intent == "хто_повертається":
             return answer_returning(date, sub)
         return answer_summary(date)
@@ -2078,6 +2101,11 @@ TOKENS_CSS = {
 
 #: Перемикач світлої/темної теми -- один файл на всі три екрани апки.
 TOGGLE_JS = os.path.join(_STATIC, "theme-toggle.js")
+#: Перемикач мови -- той самий файл, що на звичайних сторінках. На демо будуть
+#: іноземці (Аня 28.08), тому чат перекладається теж: шапка, підписи й самі
+#: відповіді. Не перекладаються лише SQL у «джерелі» й номер звернення --
+#: перший мусить збігатися з виконаним запитом, другий є ключем у журналі.
+LANG_JS = os.path.join(_STATIC, "lang-toggle.js")
 #: Показ рівня доступу -- той самий файл, що на звичайних сторінках.
 ACCESS_JS = os.path.join(_STATIC, "access.js")
 #: Телефонна розкладка й вимірювання висот -- на них тримається розкладка чата.
@@ -2210,6 +2238,8 @@ def make_head_css():
             parts.append(fh.read())
     with open(TOGGLE_JS, encoding="utf-8") as fh:
         toggle = fh.read()
+    with open(LANG_JS, encoding="utf-8") as fh:
+        lang = fh.read()
     with open(ACCESS_JS, encoding="utf-8") as fh:
         access = fh.read()
     with open(MOBILE_JS, encoding="utf-8") as fh:
@@ -2235,6 +2265,7 @@ def make_head_css():
             'initial-scale=1, interactive-widget=resizes-content">'
             + "<style>" + "\n".join(parts) + "</style>"
             + "<script>" + toggle + "</script>"
+            + "<script>" + lang + "</script>"
             + "<script>" + access + "</script>"
             + "<script>" + mobile + "</script>")
 
@@ -2451,7 +2482,11 @@ def build_blocks():
                     # бічній панелі, і це було третє різне місце для однієї
                     # й тієї самої дії. Порожня кнопка навмисно: іконку й
                     # підписи ставить theme-toggle.js (підклеєний у head).
-                    gr.HTML('<button type="button" class="theme-toggle" '
+                    # Дві кнопки поруч: мова й тема. Порожні навмисно --
+                    # підписи ставлять скрипти, підклеєні в head.
+                    gr.HTML('<button type="button" class="lang-toggle" '
+                            'data-lang-mode="uk" aria-label="Мова">EN</button>'
+                            '<button type="button" class="theme-toggle" '
                             'data-mode="system" aria-label="Тема"></button>',
                             elem_id="theme-switch")
 

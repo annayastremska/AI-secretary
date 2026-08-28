@@ -660,6 +660,9 @@ def static_file(name: str):
 # мусить ПОКАЗУВАТИ, а не переказувати: підтверджені факти й чернетки --
 # окремі числа, які ніде не складаються в одне.
 from demos.upload_app import stats as stats_mod  # noqa: E402
+# Переклад підписів: локальна модель + кеш на диску. Розбір рішення й
+# відкинутих варіантів -- у самому модулі.
+from demos.upload_app import translate as translate_mod  # noqa: E402
 
 
 @app.get("/stats")
@@ -675,6 +678,37 @@ def stats_api():
     # Звіт прогону шукається у теці виходу ТОГО профілю, який читає апка.
     return stats_mod.collect(
         report_path=stats_mod.default_report_path(CONFIG_PATH))
+
+
+@app.post("/api/translate")
+async def translate_api(request: Request):
+    """Переклад підписів сторінки українською→англійською. -> {"texts": {...}}
+
+    Навіщо це на СЕРВЕРІ, а не в браузері. Вбудований перекладач Chrome
+    (`window.Translator`) працює лише в захищеному контексті, а сторінка
+    роздається по HTTP на IP -- тобто в браузері його немає за побудовою
+    (перевірено дослідженням 28.08). Віджет Google офіційно припинений для
+    нових сайтів. Тому переклад локальний: модель `nllb-200-distilled-600M`
+    плюс кеш на диску.
+
+    На демо працює КЕШ, а не модель: він у git і віддається за мілісекунди.
+    Модель потрібна лише щоб кеш поповнити (`prewarm_translations.py`), і
+    ввімкнена вона лише при `TRANSLATE_MODEL=1`. Немає перекладу для рядка --
+    рядок просто не повертається, і сторінка лишає його українською. Порожній
+    переклад був би гіршим за український текст: він читався б як поломка.
+
+    Доступно і гостю: це переклад підписів, а не доступ до даних.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"texts": {}}, status_code=400)
+    texts = payload.get("texts") if isinstance(payload, dict) else None
+    if not isinstance(texts, list):
+        return JSONResponse({"texts": {}}, status_code=400)
+    # Межа на розмір запиту: сторінка присилає десятки рядків, а не мегабайти.
+    texts = [t for t in texts if isinstance(t, str)][:400]
+    return JSONResponse({"texts": translate_mod.translate(texts)})
 
 
 @app.get("/api/chat-live")

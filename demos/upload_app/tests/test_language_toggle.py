@@ -156,10 +156,23 @@ def test_script_is_served():
 
 
 def test_no_external_requests():
-    """Правило проєкту: зі сторінок назовні не йде жодного запиту."""
+    """Правило проєкту: зі сторінок не йде жодного ЗОВНІШНЬОГО запиту.
+
+    Тест уточнений 28.08. Перша версія забороняла `XMLHttpRequest` узагалі --
+    і впала, коли переклад став двошаровим: другий шар питає НАШ власний
+    `/api/translate`. Заборона будь-якого запиту була надто широкою й ловила
+    не те: правило проєкту про ЧУЖІ хости (жодного CDN, жодного перекладача
+    назовні), а не про власний сервер.
+
+    Тому тепер перевіряється саме це: абсолютних URL немає, а єдина адреса
+    запиту -- наш маршрут.
+    """
     s = io.open(os.path.join(STATIC, "lang-toggle.js"), encoding="utf-8").read()
-    for bad in ("http://", "https://", "fetch(", "XMLHttpRequest", "import("):
-        assert bad not in s, bad
+    code = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+    for bad in ("http://", "https://", "import(", "//cdn", "googleapis"):
+        assert bad not in code, bad
+    urls = re.findall(r'\.open\(\s*"[A-Z]+"\s*,\s*"([^"]+)"', code)
+    assert urls == ["/api/translate"], urls
 
 
 def test_chat_answers_are_not_translated():
