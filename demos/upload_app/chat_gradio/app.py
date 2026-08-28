@@ -483,6 +483,10 @@ def rules_params(question):
         "name": None,
         "doc_number": extract_doc_number(question),
         "intent": None,
+        # Вимір -- такий самий слот, як дата й підрозділ, і зберігається так
+        # само. Доти він витягувався з питання на місці виклику, тобто існував
+        # рівно один хід і в наступний не потрапляв (див. INTENT_SLOTS).
+        "state": tier_chat.extract_state(question),
     }
     if params["doc_number"]:
         params["intent"] = "документ_за_номером"
@@ -734,7 +738,8 @@ _STATE_DIM = {"leave": ("leave", "у відпустці"),
               "deployment": ("deployment_location", "у відрядженні")}
 
 
-def answer_absent(date, subdivision, not_returned=False, state=None):
+def answer_absent(date, subdivision, not_returned=False, state=None,
+                  carried_state=False):
     """Перелік відсутніх. `state` -- те, що людина НАЗВАЛА в питанні.
 
     Рішення Ані 28.08: назвала людина конкретний стан -- рахуємо рівно його.
@@ -795,6 +800,13 @@ def answer_absent(date, subdivision, not_returned=False, state=None):
         else:
             body += ("\n\nЦе ті, у кого відсутність триває за документами; "
                      "відмітки про фактичне повернення ні в кого з них немає.")
+    if carried_state and metric:
+        # Успадковане мусить бути видним -- те саме правило, що для дати. Без
+        # цього рядка людина не бачить різниці між «система порахувала
+        # відрядження, бо я про них питала ходом раніше» і «система сама
+        # обрала вимір».
+        body += (f"\n\nВимір узято з попереднього питання: {metric}. "
+                 "Щоб порахувати інше — назвіть його в питанні.")
     return body + footer("підрахунок", doc_source(rows), unconfirmed_note(date))
 
 
@@ -1052,11 +1064,18 @@ def dispatch_count(params, clarified, clarify_hint, question=""):
                     "YYYY-MM-DD, а підставляти дату самостійно система не має "
                     "права." + footer("відмова"))
         if intent == "хто_відсутній":
-            # Стан беремо з ПИТАННЯ: якщо людина назвала відпустку, рахуємо
-            # відпустку, а не «поза частиною» (рішення Ані 28.08).
+            # Стан беремо зі СЛОТА, а не з тексту питання: у слоті він або
+            # названий тут, або успадкований з попереднього ходу (INTENT_SLOTS).
+            # Рішення Ані 28.08: назвала людина відпустку -- рахуємо відпустку,
+            # а не «поза частиною». Успадкований вимір мусить бути ВИДНИМ, тому
+            # передаємо окремою ознакою, а не тихо.
+            st = params.get("state")
             return answer_absent(date, sub,
                                  not_returned="поверн" in question.lower(),
-                                 state=tier_chat.extract_state(question))
+                                 state=st,
+                                 carried_state=bool(
+                                     st and tier_chat.extract_state(question)
+                                     is None))
         if intent == "хто_повертається":
             return answer_returning(date, sub)
         return answer_summary(date)
@@ -1220,13 +1239,22 @@ _history_text = tier_chat._history_text
 # «Хто у відпустці за квитком №301?» після питання з датою НЕ успадкує ту
 # дату: для документ_за_номером date не в списку.
 INTENT_SLOTS = {
-    "хто_відсутній": ("date", "subdivision"),
+    # `state` -- ВИМІР (відпустка / відрядження / обидва). Його тут не було, і
+    # це давало найгіршу з можливих помилок -- підміну метрики без жодного
+    # слова про підміну. Живий приклад Ані 28.08:
+    #   «Хто зараз у відрядженні?» -> 1 особа (вимір deployment, правильно)
+    #   «а завтра?»                -> 13 осіб «поза частиною (відпустка або
+    #                                 відрядження)» -- дата успадкувалась, а
+    #                                 вимір ТИХО розширився до обох.
+    # Людина читає це як «за добу стало 13 у відрядженні». Дата переносилась,
+    # бо вона у слотах; вимір -- ні, бо його у слотах не було взагалі.
+    "хто_відсутній": ("date", "subdivision", "state"),
     "хто_повертається": ("date", "subdivision"),
     "зведення_по_підрозділах": ("date",),
     "документи_людини": ("name",),
     "документ_за_номером": ("doc_number",),
 }
-SLOT_KEYS = ("intent", "date", "subdivision", "name", "doc_number")
+SLOT_KEYS = ("intent", "date", "subdivision", "name", "doc_number", "state")
 STATE_RE = re.compile(r"<!--slots:(.*?)-->", re.S)
 
 
@@ -1249,6 +1277,62 @@ def _state_marker(params):
 # не стане.
 BARE_DAY_RE = re.compile(
     r"^\W*(?:а|і|й|та|ну)?\s*(\d{1,2})\s*(?:-?[гґ]о|-?[ає]|числа)?\s*[?!.]*$")
+
+
+#: ВІДНОСНА дата від попереднього ходу: «а наступного дня», «через 2 дні»,
+#: «днем раніше». Це не те саме, що BARE_DAY_RE (там названо число) і не те
+#: саме, що «завтра» (те від СЬОГОДНІ, і його вміє extract_date).
+_NEXT_DAY_RE = re.compile(
+    r"наступн\w*\s+дн\w*|на\s+наступний\s+день|днем\s+пізніше|"
+    r"на\s+день\s+пізніше", re.IGNORECASE)
+_PREV_DAY_RE = re.compile(
+    r"попередн\w*\s+дн\w*|днем\s+раніше|на\s+день\s+раніше|"
+    r"день\s+до\s+того|за\s+день\s+до\s+цього", re.IGNORECASE)
+_IN_N_DAYS_RE = re.compile(r"через\s+(\d{1,2})\s*(?:дн|дoб|доб)", re.IGNORECASE)
+
+#: Маркер «дата тут ВІДНОСНА» -- ширший за форми, які ми вміємо порахувати.
+#: Потрібен як СТРАХОВКА: якщо форму не порахували, дату не переносимо
+#: буквально, а віддаємо хід тому ярусу, що читає розмову. Інакше «а
+#: наступного дня» тихо відповідає за той самий день.
+_RELATIVE_DATE_HINT = re.compile(
+    r"наступн|попередн|через\s+\d+\s*(?:дн|тижн|місяц|доб)|"
+    r"днем\s+(?:раніше|пізніше)|післязавтра|позавчора|"
+    r"на\s+день\s+(?:раніше|пізніше)", re.IGNORECASE)
+
+
+def _shift_from_prev(question, prev_date):
+    """«а наступного дня» після відповіді за 2026-10-10 -> 2026-10-11.
+
+    Знайдено власною регресією 28.08. Доти цей зсув робила МОДЕЛЬ: репліка не
+    давала дати, слотів після дороги каталогу не було, дата лишалась порожньою,
+    хід ішов у гілку уточнення й там його рятував модельний маршрутизатор із
+    розмовою -- за 15 с. Коли дорога каталогу почала лишати слоти, порожня дата
+    зникла: перенесення підставляло ТОЙ САМИЙ день, і «а наступного дня»
+    відповідало за 2026-10-10, не сказавши, що нічого не зсунуло.
+
+    Тому зсув робиться тут, детерміновано й за частки секунди. Форми, яких
+    немає в переліку, лишають дату порожньою (див. `_RELATIVE_DATE_HINT`) --
+    тоді хід, як і раніше, дістається моделі.
+    """
+    if not prev_date:
+        return None
+    base = extract_date(prev_date if isinstance(prev_date, str)
+                        else str(prev_date))
+    if not base:
+        return None
+    try:
+        day = datetime.date.fromisoformat(base)
+    except ValueError:
+        return None
+    text = question or ""
+    m = _IN_N_DAYS_RE.search(text)
+    if m:
+        return (day + datetime.timedelta(days=int(m.group(1)))).isoformat()
+    if _NEXT_DAY_RE.search(text):
+        return (day + datetime.timedelta(days=1)).isoformat()
+    if _PREV_DAY_RE.search(text):
+        return (day - datetime.timedelta(days=1)).isoformat()
+    return None
 
 
 def _refine_day(question, prev_date):
@@ -1448,7 +1532,59 @@ def _catalog_tier(question):
     note = tier_chat.two_entities_note(question, _answered_about(params))
     if note:
         text = text.rstrip() + "\n" + "\n".join(note)
-    return text + _fmt_source_block(source, f"каталог шаблонів ({tid})")
+    return (text + _fmt_source_block(source, f"каталог шаблонів ({tid})")
+            + _slots_of_catalog(tid, params))
+
+
+#: Шаблони каталогу -> намір старої дороги підрахунку. Потрібно рівно для
+#: ПЕРЕНЕСЕННЯ слотів у наступний хід: `_carry_over` тягне слоти за наміром.
+_CATALOG_INTENT = {
+    "count_by_state_on_date": "хто_відсутній",
+    "count_by_state_period": "хто_відсутній",
+    "list_by_state": "хто_відсутній",
+    "count_by_state_in_subdivision": "хто_відсутній",
+    "list_by_state_in_subdivision": "хто_відсутній",
+    "absent_breakdown_on_date": "зведення_по_підрозділах",
+    "subdivision_breakdown": "зведення_по_підрозділах",
+    "returning_on_date": "хто_повертається",
+    "person_status": "документи_людини",
+    "doc_by_number": "документ_за_номером",
+}
+
+
+def _slots_of_catalog(tid, params):
+    """Слоти ходу, який відповів ДОРОГОЮ КАТАЛОГУ -- у те саме приховане поле,
+    що й на старій дорозі підрахунку.
+
+    Відсутня ланка, знайдена живим прогоном 28.08. Маркер слотів дописувала
+    ЛИШЕ стара дорога (`route == "підрахунок"`), тому діалог, що почався на
+    каталозі, лишав наступний хід без пам'яті взагалі:
+
+        «Хто зараз у відрядженні?» -> каталог (`list_by_state`), слотів немає
+        «а завтра?»                -> переносити нічого, вимір падає в дефолт
+                                      `absent` -> 1 особа стає 13.
+
+    Тобто це не «модель не пам'ятає»: половина доріг просто не залишала по
+    собі сліду для наступного ходу. Перенесення в один бік уже було
+    (`_read_state` читає будь-який маркер) -- бракувало запису.
+
+    Порожній рядок для шаблонів, яких немає в `_CATALOG_INTENT`: намір
+    вигадувати не будемо, а слот без наміру `_carry_over` однаково не візьме.
+    """
+    intent = _CATALOG_INTENT.get(tid)
+    if not intent:
+        return ""
+    p = params or {}
+    date = p.get("on_date") or p.get("date_from")
+    return _state_marker({
+        "intent": intent,
+        "date": str(date) if date else None,
+        "subdivision": p.get("subdivision"),
+        "name": p.get("name"),
+        "doc_number": p.get("doc_number"),
+        # Вимір -- головне, чого тут бракувало.
+        "state": p.get("state"),
+    })
 
 
 def _answered_about(params):
@@ -1601,6 +1737,68 @@ _DBISH = re.compile(
     r"переві|підрозділ|баз[аіи]|скільки|хто\b|реєстр", re.I)
 
 
+#: Номер звернення у ВІДПОВІДІ бота (та сама форма, що ставить `_with_request_id`).
+_PREV_ID = re.compile(r"звернення:?\s*([0-9a-f]{6})")
+
+
+def _how_previous_answer_was_made(history):
+    """«Звідки ти це знаєш?» без імені -> як склалась ПОПЕРЕДНЯ відповідь.
+
+    п. 18 звіту Дениса: на це питання чат відповідав тим самим текстом, що на
+    питання про погоду в Києві («не лягає на жодну з доріг»). Він же назвав
+    чому це погано: для обліку особового складу «звідки цифра» -- нормальне
+    робоче питання.
+
+    ДАНІ ДЛЯ ВІДПОВІДІ ВЖЕ Є. Кожен хід пише машинний слід (`trace.py`): дорога,
+    шаблон, SQL шаблону, скільком рядків повернула база, скільком це тривало.
+    Бракувало лише дороги до нього -- і саме її просив Денис: «щоб по скріну
+    можна було автоматично прогнати аналіз».
+
+    Ключ -- номер звернення з ПОПЕРЕДНЬОЇ відповіді бота: він у ній видимим
+    рядком. Немає номера або сліду -- кажемо це прямо, а не вигадуємо.
+    """
+    prev = None
+    for m in reversed(history or []):
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        found = _PREV_ID.search(_history_text(m.get("content")) or "")
+        if found:
+            prev = found.group(1)
+            break
+    if not prev:
+        return ("Не можу показати, як склалась попередня відповідь: у розмові "
+                "немає жодної моєї відповіді з номером звернення. Спитайте "
+                "щось про облік, і я покажу шлях відповіді."
+                + footer("походження відповіді"))
+    row = trace.find(prev)
+    if not row:
+        return (f"Сліду для звернення {prev} немає — можливо, апку "
+                f"перезапускали після того ходу. Номер лишається дійсним для "
+                f"журналу." + footer("походження відповіді"))
+    lines = [f"**Доповідаю:** ось як склалась попередня відповідь "
+             f"(звернення {prev})."]
+    lines.append(f"**Дорога:** {_esc(row.get('road') or 'не визначена')}.")
+    steps = [st for st in (row.get("steps") or []) if st.get("template")]
+    if steps:
+        st = steps[0]
+        lines.append(f"**Шаблон:** {_esc(st.get('title') or '')} "
+                     f"({_esc(st.get('template'))}).")
+        if st.get("params"):
+            lines.append("**Параметри:** "
+                         + _esc(json.dumps(st["params"], ensure_ascii=False,
+                                           default=str)) + ".")
+        if st.get("rows") is not None:
+            lines.append(f"**Рядків із бази:** {st['rows']}.")
+    else:
+        lines.append("**Шаблон:** цією дорогою запит до бази не робився "
+                     "(правила, довідка або уточнення).")
+    if row.get("seconds") is not None:
+        lines.append(f"**Тривало:** {row['seconds']} с.")
+    lines.append("Повний слід цього ходу: "
+                 f"`python demos/upload_app/trace_lookup.py {prev}`.")
+    return "\n".join(lines) + footer("походження відповіді")
+
+
 def _extra_tiers(question, history=None):
     """Порядок доріг (етап 3 плану): каталог правилами → ВЕКТОРИ (найближчий
     шаблон за прикладами, мс) → модель-класифікатор у закритий перелік →
@@ -1608,6 +1806,16 @@ def _extra_tiers(question, history=None):
     безкоштовний, а розмовні фрази («дякую») інакше не дійшли б до свого
     маршруту. Модельна «відмова» зупиняє перебір: питання не про дані бази,
     ярус 2 не смикаємо."""
+    # ПИТАННЯ ПРО ДОКАЗ БЕЗ ІМЕНІ -- перед усіма ярусами.
+    #
+    # «Звідки ти це знаєш?» не має ні шаблона, ні імені, тому всі яруси його
+    # пропускали й лишалась відмова -- та сама, якою чат відповідає на питання
+    # про погоду (п. 18 звіту). Відповідь тут не в базі, а в СЛІДІ попереднього
+    # ходу, і тому вона потребує історії, а не шаблона.
+    if tier_chat.is_evidence_question(question) and not rules_params(
+            question)["name"]:
+        return _how_previous_answer_was_made(history)
+
     out = _catalog_tier(question)
     if out is not None:
         return out
@@ -1757,6 +1965,29 @@ def _answer_inner(question, history=None):
     # каталог. Решта питань (особа, документ, довідник, діагностика) лишається
     # на своїх дорогах: там стара дорога дає більше, ніж каталог, і ламати її
     # за три дні до демо немає причини.
+    # ── ПОПРАВКА до попереднього ходу -- перед усіма дорогами ────────────────
+    #
+    # «я питала про відрядження» після відповіді про обидва виміри. Ця репліка
+    # не має ні наміру, ні дати, зате має слово, яке чинне і в нормативному
+    # корпусі -- тому вона їхала в нормативний пошук (82.9 с і цитата про
+    # відрядження до державних органів). Правильна дія тут -- перерахувати те
+    # саме питання іншим виміром, тобто перенесення слотів, а не новий пошук.
+    #
+    # Гейт стоїть ДО каталогу навмисно: саме каталог її й забирав.
+    _prev_for_fix = _read_state(history) or {}
+    if (tier_chat.is_correction(merged) and _prev_for_fix.get("intent")
+            and tier_chat.extract_state(merged)):
+        _raw_fix = rules_params(merged)
+        _fix = _carry_over(_raw_fix, _prev_for_fix)
+        out = dispatch_count(_fix, True, None, question=merged)
+        if out is not None and not isinstance(out, tuple):
+            # Дата тут успадкована завжди (поправка її не називає) -- і мусить
+            # бути видною, як і на дорозі каталогу.
+            if not _raw_fix.get("date") and _fix.get("date"):
+                out = (f"Перерахувала попереднє питання на {_fix['date']} — "
+                       "дату взято з нього ж.\n\n" + out)
+            return _as_report(out) + _state_marker(_fix)
+
     try:
         _state_route = tier_chat.rules_route(merged)
     except Exception:
@@ -1778,6 +2009,10 @@ def _answer_inner(question, history=None):
     # відновлення маршруту без моделі.
     _prev_slots = _read_state(history) or {}
     _bare_day = _refine_day(merged, _prev_slots.get("date"))
+    # «а наступного дня», «через 2 дні» -- така сама сутність підрахунку, як
+    # оголений день: дата названа ВІДНОСНО попереднього ходу. Без цього рядка
+    # зсув лишався роботою моделі, і без моделі хід падав у відмову.
+    _rel_day = _shift_from_prev(merged, _prev_slots.get("date"))
     if rp["intent"] and rules_route(merged) == "підрахунок":
         # fallback лишається True, лише якщо моделі взагалі немає (чесна
         # позначка «працюють правила»); з моделлю це не деградація, а
@@ -1785,7 +2020,7 @@ def _answer_inner(question, history=None):
         route, params = "підрахунок", rp
     elif (route is None and not rp["intent"] and _prev_slots
             and (rp["date"] or rp["subdivision"] or rp["doc_number"]
-                 or rp["name"] or _bare_day)):
+                 or rp["name"] or _bare_day or _rel_day)):
         # Коротке допитування («а 4 травня?», «а по 2 роті?»): є сутність
         # підрахунку, немає власного наміру, а в історії лежать слоти
         # попереднього ходу -- намір добере _carry_over детерміновано, без
@@ -1853,9 +2088,14 @@ def _answer_inner(question, history=None):
         # у ньому є сутність підрахунку, але немає наміру. Якщо в історії є
         # збережені слоти -- перенесення (_carry_over нижче) добере намір
         # детерміновано, тож маршрут чесно лишається підрахунком.
+        # `_rel_day` -- поруч із `_bare_day` і з тієї самої причини. Без нього
+        # без моделі «а наступного дня» лишалось відмовою: швидкий шлях вище
+        # уже поставив «підрахунок», але цей рядок його перезаписує (fallback
+        # істинний, коли моделі немає), а страховка не знала про відносну дату.
         if (route == "відмова" and _prev_slots
                 and (extract_date(merged) or extract_doc_number(merged)
-                     or normalize_subdivision(merged) or _bare_day)):
+                     or normalize_subdivision(merged) or _bare_day
+                     or _rel_day)):
             route = "підрахунок"
     elif route == "відмова" and extract_doc_number(merged):
         # явна сутність підрахунку (№ документа) перемагає — див. шапку.
@@ -1881,7 +2121,19 @@ def _answer_inner(question, history=None):
         prev_state = _read_state(history)
         if not params["date"]:
             params["date"] = _refine_day(question, (prev_state or {}).get("date"))
-        params = _carry_over(params, prev_state)
+        if not params["date"]:
+            # ВІДНОСНА дата від попереднього ходу -- рахуємо самі.
+            params["date"] = _shift_from_prev(question,
+                                              (prev_state or {}).get("date"))
+        carry_from = prev_state
+        if not params["date"] and _RELATIVE_DATE_HINT.search(question or ""):
+            # Дата в питанні ВІДНОСНА, а порахувати цю форму ми не вміємо.
+            # Перенести попередню дату буквально -- значить відповісти за
+            # інший день і не сказати про це. Тому дату НЕ переносимо: хід
+            # дійде до гілки уточнення, а звідти -- до маршрутизатора з
+            # розмовою, який єдиний бачить обидві репліки.
+            carry_from = dict(prev_state or {}, date=None)
+        params = _carry_over(params, carry_from)
         own = rules_params(question)
         if not own["intent"] and (prev_state or {}).get("intent"):
             # Питання власного наміру не називає («а 22?») -- тримаємо
@@ -1971,8 +2223,15 @@ def _answer_inner(question, history=None):
             out = CLARIFY_MARK + "\n" + WARN_FALLBACK + out[len(CLARIFY_MARK):]
         else:
             out = WARN_FALLBACK + "\n\n" + out
-    if route == "підрахунок" and params is not None:
-        # у кінці, щоб не зачіпати startswith-перевірки вище
+    if route == "підрахунок" and params is not None and not STATE_RE.search(out):
+        # У кінці, щоб не зачіпати startswith-перевірки вище.
+        #
+        # `not STATE_RE.search(out)` -- бо маркер тепер пише й дорога каталогу
+        # (`_slots_of_catalog`), а дорога «підрахунок» може відповісти саме
+        # через неї (`_extra_tiers` -> `_catalog_tier`). Два маркери в одному
+        # повідомленні не падають, але `_read_state` бере ПЕРШИЙ, тобто
+        # наступний хід успадкував би слоти того яруса, який насправді не
+        # відповідав. Пише той, хто відповів.
         out += _state_marker(params)
     return out
 
@@ -2297,7 +2556,18 @@ def make_head_css():
     # клавіатури: браузер зменшує сам вьюпорт, тому наша розкладка стає на
     # місце без розрахунків у JS. Де він не підтримується (старі iOS),
     # працює запасний шлях -- заміри visualViewport у mobile.js.
-    return ('<meta name="viewport" content="width=device-width, '
+    # ІКОНКА ВКЛАДКИ. Питання Ані 28.08: «чому на вкладці іконка шолома на всіх
+    # сторінках, окрім чату?» -- бо дві звичайні сторінки мають `<link
+    # rel="icon">` у своїй розмітці, а head чата будує Gradio, і ми досі
+    # додавали туди лише viewport, стилі й скрипти.
+    #
+    # Шлях АБСОЛЮТНИЙ: чат змонтований під `/chat`, і відносний шлях звідти
+    # вирішувався б у `/chat/static/...`, чого не існує. Той самий файл, що на
+    # сторінках, -- інакше в однієї вкладки була б інша іконка, і це читалось
+    # би як два різні продукти.
+    return ('<link rel="icon" href="/static/mark-avatar.svg" '
+            'type="image/svg+xml">'
+            '<meta name="viewport" content="width=device-width, '
             'initial-scale=1, interactive-widget=resizes-content">'
             + "<style>" + "\n".join(parts) + "</style>"
             + "<script>" + toggle + "</script>"
