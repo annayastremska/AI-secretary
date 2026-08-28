@@ -1046,7 +1046,8 @@ details.src > *:not(summary) {
     background: transparent !important;
     z-index: 3;
 }
-#theme-switch .theme-toggle {
+#theme-switch .theme-toggle,
+#theme-switch .lang-toggle {
     /* Gradio ставить свої розміри кнопок із !important, тому тут потрібна
        вага id: у чаті перемикач виходив прямокутним саме через це. */
     display: inline-grid !important;
@@ -1065,7 +1066,8 @@ details.src > *:not(summary) {
     box-shadow: none !important;
 }
 #theme-switch .theme-toggle svg { display: block }
-#theme-switch .theme-toggle:hover {
+#theme-switch .theme-toggle:hover,
+#theme-switch .lang-toggle:hover {
     background: var(--c-accent-100, var(--c-accent-soft)) !important;
     border-color: var(--c-accent-200, var(--c-accent-line)) !important;
     color: var(--c-text) !important;
@@ -1097,7 +1099,30 @@ details.src > *:not(summary) {
  *     кнопка приймає. Тоді хоч якої вона ширини -- вона нікому не мішає.
  */
 #theme-switch { pointer-events: none !important }
-#theme-switch .theme-toggle { pointer-events: auto !important }
+/* ОБИДВІ кнопки приймають події.
+ *
+ * Обгортка їх не приймає навмисно (причина -- у комментарі вище), і поки в ній
+ * була ОДНА кнопка, це працювало. Мовна кнопка успадкувала
+ * `pointer-events: none` і тому НЕ НАТИСКАЛАСЬ узагалі -- рівно те, що
+ * побачила Аня. Дефект не в скрипті: обробник був підключений, до нього просто
+ * не доходив клік. */
+#theme-switch .theme-toggle,
+#theme-switch .lang-toggle { pointer-events: auto !important }
+
+/* Дві кнопки поруч у шапці чата. Тут вони стоять У ПОТОЦІ (а не позиційовані
+ * абсолютно, як на звичайних сторінках), тому потрібен flex і проміжок. */
+#theme-switch {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+/* Мовна кнопка: та сама кругла форма, але з текстом замість знака -- тому
+ * потрібен розмір і вага шрифта. Прапорця немає навмисно: прапорець позначає
+ * країну, а не мову. */
+#theme-switch .lang-toggle {
+    font: 600 11px/1 var(--font-ui, inherit) !important;
+    letter-spacing: .04em;
+}
 
 /* 13. Блок гостьового доступу: зелена рама, код на білій плашці, по центру.
  *
@@ -1598,6 +1623,35 @@ details.src > *:not(summary) {
  *     відповіді. Але вона МУСИТЬ бути на скріншоті -- по ній хід знаходиться
  *     в журналі за секунду.
  */
+/* 23а. ПРИМІТКИ ДО ВІДПОВІДІ -- тим самим дрібним, що номер звернення
+ *      (правка Ані 28.08: «зроби оцей текст-примітку знизу таким самим як код
+ *      звернення, щоб не займало стільько місця»).
+ *
+ *      Було: кожна примітка -- блок із рамкою, тлом і власними відступами.
+ *      «Узято з попереднього питання…» займало більше місця, ніж сама цифра,
+ *      до якої стосувалось, і читалось важливішим за неї.
+ *
+ *      Лишилась одна ознака рівня -- смужка збоку. Вона потрібна: попередження
+ *      («у переліку більше осіб, ніж число») не має виглядати як довідка.
+ *      Рамка й тло прибрані, бо саме вони й займали місце.
+ */
+#chat-area .note {
+    margin: var(--s-2) 0 0 !important;
+    padding: 0 0 0 var(--s-2) !important;
+    border: 0 !important;
+    border-left: 2px solid var(--c-divider) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--c-muted) !important;
+}
+#chat-area .note--warn  { border-left-color: var(--c-warn) !important }
+#chat-area .note--info  { border-left-color: var(--c-accent) !important }
+#chat-area .note--error { border-left-color: var(--c-error) !important }
+/* Номер звернення після приміток -- без подвійного відступу. */
+#chat-area .note + .req-id { margin-top: var(--s-2) }
+
 #chat-area .req-id {
     margin-top: var(--s-2);
     font-family: var(--font-data, var(--font-mono));
@@ -1816,13 +1870,17 @@ details.src > *:not(summary) {
     }
     /* Риски кнопки меню -- світлі, інакше на зеленому їх не видно. */
     #nav-toggle span { background: var(--c-brand-text) !important }
-    /* Перемикач теми -- світла межа й світлий знак. */
-    #theme-switch .theme-toggle {
+    /* Перемикачі теми Й МОВИ -- світла межа й світлий текст. Обидва: на
+       зеленому тлі темна кнопка це та сама половинчаста заміна, від якої тут
+       і застерігає комментар вище. */
+    #theme-switch .theme-toggle,
+    #theme-switch .lang-toggle {
         border-color: color-mix(in srgb, var(--c-brand-text) 40%,
                                 transparent) !important;
         color: var(--c-brand-text) !important;
     }
-    #theme-switch .theme-toggle:hover {
+    #theme-switch .theme-toggle:hover,
+    #theme-switch .lang-toggle:hover {
         background: rgba(255, 255, 255, .12) !important;
     }
 }
@@ -1850,6 +1908,7 @@ details.src > *:not(summary) {
     }
     /* Перемикач теми на зеленому -- світлий, у ЛЮБІЙ темі: тло тут завжди
        брендове, тому колір знака не залежить від світлої чи темної. */
+    .gradio-container #theme-switch .lang-toggle,
     .gradio-container #theme-switch .theme-toggle {
         border-color: color-mix(in srgb, var(--c-brand-text) 45%,
                                 transparent) !important;

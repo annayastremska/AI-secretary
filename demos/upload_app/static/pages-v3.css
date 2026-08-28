@@ -966,9 +966,7 @@ tbody tr:hover { background: var(--c-accent-soft) }
     font: 600 11px/1 var(--font-ui, inherit);
     letter-spacing: 0.04em;
 }
-/* Дві кнопки в смузі позиційовані АБСОЛЮТНО, тому другій потрібен свій зсув:
-   без нього вони лягли б одна на одну. 42px -- 34 ширини плюс 8 проміжку. */
-.appbar .lang-toggle { right: calc(var(--s-4, 16px) + 42px) }
+
 .theme-toggle:hover,
 .lang-toggle:hover {
     background: var(--c-accent-soft);
@@ -997,6 +995,19 @@ tbody tr:hover { background: var(--c-accent-soft) }
 }
 .appbar .theme-toggle:hover,
 .appbar .lang-toggle:hover { background: rgba(255, 255, 255, .12) }
+
+/* ЗСУВ МОВНОЇ КНОПКИ -- І САМЕ ТУТ, ПІСЛЯ ПРАВИЛА ВИЩЕ.
+ *
+ * Обидві кнопки позиційовані абсолютно від смуги, тому другій потрібен свій
+ * `right`. Спершу я поставила це правило ВИЩЕ -- і кнопки налізли одна на
+ * одну: специфічність однакова (два класи), тому вирішує ПОРЯДОК, і правило
+ * `right: var(--s-4)` перебивало мій зсув.
+ *
+ * Це вже третій раз, коли каскад ловить мене на тому самому: специфічність
+ * рівна -- виграє те, що нижче.
+ *
+ * 42px = 34 ширини кнопки + 8 проміжку. */
+.appbar .lang-toggle { right: calc(var(--s-4, 16px) + 42px) }
 @media (max-width: 640px) {
     .appbar .theme-toggle,
     .appbar .lang-toggle { top: 10px; width: 32px; height: 32px }

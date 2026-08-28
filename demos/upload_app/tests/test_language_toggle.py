@@ -1,23 +1,32 @@
 # -*- coding: utf-8 -*-
-"""Перемикач мови: механіка й ПОВНОТА словника.
+"""Перемикач мови: ВІДКЛЮЧЕНИЙ 28.08, і тест стежить саме за цим.
 
-Завдання Ані 28.08: кнопка перекладу на англійську, «як це дешево
-реалізувати». Обраний спосіб — словник по DOM, а не `t()` у 105 місцях
-(розбір — у самому `static/lang-toggle.js`).
+## Що сталося
 
-## Головний тест тут — не механіка, а повнота
+Реалізація була словником по вже намальованому DOM. На екрані це дало мішанку
+українського з англійським:
 
-Слабке місце вибраного способу одне: **напівперекладена сторінка**. Механіка
-працює, а новий підпис, доданий пізніше, лишається українським — і ніхто цього
-не помітить, доки не побачить на екрані.
+    «Скільки on leave 2026-10-10?»
+    «Покажи document no. 102»
+    «Відповідь формується з documents; source — під кожною відповіддю.»
 
-Тому тест витягає українські рядки з РОЗМІТКИ Й СКРИПТІВ сторінок і зіставляє
-зі словником. З'явився новий підпис без перекладу — тест червоний.
+Причина не в словнику й не в кількості рядків, а в ПІДХОДІ: рядок у DOM -- це
+вже склеєний із шаблона й даних текст, і підміняти в ньому фрагменти означає
+перекладати частину речення. Повний розбір і варіанти правильної реалізації --
+`docs/research/2026-08-28_ui-translation-options.md`.
 
-Те, що не є підписом для людини (діагностика в консоль, службові маркери,
-фрагменти коду, які ловить регулярка), виноситься в `NOT_UI` — **із причиною на
-кожен рядок**. Без цього переліку тест був би або нечесним (пропускав би все),
-або незручним настільки, що його вимкнули б.
+Рішення Ані: «якщо не виходить це зробити чисто і просто, то поки відкладаємо
+реалізацію».
+
+## Чому тести лишились, а не видалені разом із кнопкою
+
+Файли (`static/lang-toggle.js`), кеш перекладів і маршрут `/api/translate`
+лишаються -- вони знадобляться, коли робити переклад правильно. Тому тут
+перевіряється ДВА стани:
+
+  * кнопки й підключення скрипта на сторінках НЕМА (інакше мішанка вернеться
+    на екран непоміченою);
+  * самі файли цілі й не зіпсовані -- щоб продовжити роботу було з чого.
 
 Запуск:
     python -m pytest demos/upload_app/tests/test_language_toggle.py -q
@@ -135,22 +144,36 @@ def test_english_values_have_no_cyrillic():
     assert not bad, bad
 
 
-def test_button_and_script_are_wired_on_both_pages():
-    """Кнопка без скрипта -- мертва кнопка; скрипт без кнопки -- невидима
-    можливість. Обидві сторінки мусять мати обидва."""
+def test_toggle_is_not_wired_anywhere():
+    """ГОЛОВНИЙ тест тепер такий: перемикача на сторінках НЕМА.
+
+    Не «поки що немає», а перевіряється: якщо хтось підключить його назад, не
+    змінивши підходу, мішанка з екрана вернеться, і побачить її знову Аня, а
+    не тест.
+    """
     for name in PAGES:
         s = io.open(os.path.join(STATIC, name), encoding="utf-8").read()
-        assert 'class="lang-toggle"' in s, name
-        assert "/static/lang-toggle.js" in s, name
-        # Без defer: інакше сторінка блимне українською й перемалюється.
-        head = s.split("</head>", 1)[0]
-        assert "lang-toggle.js" in head, name
-        line = [ln for ln in head.splitlines() if "lang-toggle.js" in ln][0]
-        assert "defer" not in line, line
+        assert 'class="lang-toggle"' not in s, name
+        assert "lang-toggle.js" not in s, name
+    chat = io.open(os.path.join(os.path.dirname(STATIC), "chat_gradio",
+                                "app.py"), encoding="utf-8").read()
+    assert 'class="lang-toggle"' not in chat
+    # У коді чата шлях до файла лишився НАВМИСНО (з поясненням), а от
+    # підклеювання в head -- ні.
+    assert '"<script>" + lang + "</script>"' not in chat
 
 
-def test_script_is_served():
-    """Файл мусить бути в переліку статики, інакше кнопка отримає 404."""
+def test_the_pieces_are_kept_for_the_next_attempt():
+    """Файли цілі: продовжувати треба буде з них, а не з нуля."""
+    assert os.path.exists(os.path.join(STATIC, "lang-toggle.js"))
+    from demos.upload_app import translate as tr
+    assert os.path.exists(tr.CACHE_PATH)
+    assert len(tr.cache()) > 700
+
+
+def test_script_is_still_served():
+    """Маршрут лишається: файл віддається, просто сторінки його не просять.
+    Так наступна спроба почнеться з робочого стану, а не з відновлення."""
     from demos.upload_app import app as web
     assert "lang-toggle.js" in web.STATIC_FILES
 
@@ -186,3 +209,60 @@ def test_chat_answers_are_not_translated():
     for forbidden in ("Доповідаю:", "Зріз:", "Чернетки (не в підрахунку):",
                       "Поіменно:"):
         assert forbidden not in keys, forbidden
+
+
+# ── Кнопка мусить БУТИ НАТИСКАБЕЛЬНОЮ і не налазити на сусідню ─────────────
+#
+# Обидва дефекти знайшла Аня очима 28.08, і обидва були в CSS, не в скрипті.
+
+def _css(name):
+    if name.endswith("theme-v3.css"):
+        path = os.path.join(os.path.dirname(STATIC), "chat_gradio", name)
+    else:
+        path = os.path.join(STATIC, name)
+    return io.open(path, encoding="utf-8").read()
+
+
+def test_chat_button_receives_clicks():
+    """У чаті обгортка перемикачів має `pointer-events: none`, і клік ловить
+    лише те, що явно повертає `pointer-events: auto`.
+
+    Мовна кнопка успадкувала `none` і НЕ НАТИСКАЛАСЬ узагалі: обробник був
+    підключений, до нього просто не доходив клік. Тест перевіряє причину, а не
+    симптом.
+    """
+    css = _css("theme-v3.css")
+    # Беремо саме ПРАВИЛО з `pointer-events: auto` і дивимось його селектори.
+    # Перша версія тесту читала 400 символів після сусіднього правила -- і
+    # падала, хоч CSS був правильний: вікно в символах не є структурою.
+    rules = [chunk for chunk in css.split("}") if "pointer-events: auto" in chunk]
+    assert rules, "у чаті ніхто не повертає pointer-events -- клік не дійде"
+    selectors = " ".join(r.split("{")[0] for r in rules)
+    assert ".lang-toggle" in selectors, (
+        "мовна кнопка не повертає pointer-events -- вона не натискатиметься; "
+        f"селектори: {selectors.strip()[:160]}")
+
+
+def test_language_button_does_not_overlap_the_theme_button():
+    """На звичайних сторінках обидві кнопки позиційовані АБСОЛЮТНО від смуги,
+    тому другій потрібен свій `right`.
+
+    Спершу я поставила це правило ВИЩЕ за спільне `right: var(--s-4)` --
+    специфічність однакова, тому вирішує порядок, і кнопки налізли одна на одну.
+    Тест фіксує саме порядок: зсув мусить стояти ПІСЛЯ спільного правила.
+    """
+    css = _css("pages-v3.css")
+    shared = css.find(".appbar .lang-toggle {")
+    offset = css.find(".appbar .lang-toggle { right:")
+    assert shared >= 0 and offset >= 0, (shared, offset)
+    assert offset > shared, (
+        "зсув мовної кнопки стоїть ВИЩЕ за спільне правило -- при рівній "
+        "специфічності виграє те, що нижче, і кнопки налізуть одна на одну")
+
+
+def test_chat_button_is_styled_like_the_theme_button():
+    """Кнопка без стилів у чаті виглядає як звичайна кнопка Gradio. Форма й
+    розмір мусять браться з того самого правила, що в теми."""
+    css = _css("theme-v3.css")
+    assert "#theme-switch .theme-toggle,\n#theme-switch .lang-toggle {" in css
+    assert "#theme-switch .lang-toggle {" in css

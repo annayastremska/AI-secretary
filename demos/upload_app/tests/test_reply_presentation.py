@@ -87,3 +87,52 @@ def test_raw_answer_still_carries_the_number():
     assert "звернення: abc123" in filled
     # і повторний виклик не подвоює
     assert chat_app._with_request_id(filled, "abc123").count("abc123") == 1
+
+
+# ── Примітки: дрібним і НАД номером звернення (Аня 28.08) ──────────────────
+
+NOTE_SRC = ("Доповідаю: 0 осіб у відпустці.\n"
+            "⚠️ узято з попереднього питання: дата\n\n"
+            '<details class="src"><summary>джерело</summary>'
+            "дорога: каталог<br>звернення: f52454</details>")
+
+
+def test_notes_stand_above_the_request_id():
+    """Порядок читання зверху вниз: відповідь → застереження → мітка ходу.
+
+    Доти примітка стояла ПІСЛЯ номера, окремим блоком із рамкою й тлом, і на
+    екрані займала більше місця, ніж сама відповідь -- тобто рядок про те, що
+    дату взято з попереднього питання, виглядав важливішим за цифру, до якої
+    він стосується.
+    """
+    out = chat_app.render_reply(NOTE_SRC)
+    i_note = out.find('class="note')
+    i_id = out.find('class="req-id"')
+    assert 0 <= i_note < i_id, (i_note, i_id)
+
+
+def test_note_keeps_its_level_class():
+    """Вигляд дрібний, але ознака рівня лишається: попередження не має
+    виглядати як довідка. Колір смужки задає CSS за цим класом."""
+    out = chat_app.render_reply(NOTE_SRC)
+    assert "note--warn" in out
+
+
+def test_notes_appear_even_without_a_request_id():
+    """Гілка без номера теж мусить показати примітки: інакше застереження
+    зникло б саме там, де номера не буде (готові константи-відмови)."""
+    out = chat_app.render_reply("Відхилено.\n⚠️ щось важливе")
+    assert 'class="note' in out
+
+
+def test_note_style_is_compact_in_css():
+    """Компактність задана в CSS чата, а не в розмітці: рамку й тло прибрано,
+    смужку збоку лишено."""
+    import os
+    css_path = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(chat_app.__file__))), "chat_gradio", "theme-v3.css")
+    css = open(css_path, encoding="utf-8").read()
+    block = css.split("#chat-area .note {", 1)[1].split("}", 1)[0]
+    assert "border: 0" in block
+    assert "background: transparent" in block
+    assert "border-left" in block

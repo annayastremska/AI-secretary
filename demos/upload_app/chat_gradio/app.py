@@ -2101,11 +2101,17 @@ TOKENS_CSS = {
 
 #: Перемикач світлої/темної теми -- один файл на всі три екрани апки.
 TOGGLE_JS = os.path.join(_STATIC, "theme-toggle.js")
-#: Перемикач мови -- той самий файл, що на звичайних сторінках. На демо будуть
-#: іноземці (Аня 28.08), тому чат перекладається теж: шапка, підписи й самі
-#: відповіді. Не перекладаються лише SQL у «джерелі» й номер звернення --
-#: перший мусить збігатися з виконаним запитом, другий є ключем у журналі.
-LANG_JS = os.path.join(_STATIC, "lang-toggle.js")
+#: ПЕРЕМИКАЧ МОВИ ВІДКЛЮЧЕНИЙ 28.08 -- і це рішення, не забутий рядок.
+#:
+#: Переклад по вже намальованому DOM дав на екрані мішанку: «Скільки on leave
+#: 2026-10-10?», «Покажи document no. 102». Причина не в словнику, а в підході
+#: (розбір -- `docs/research/2026-08-28_ui-translation-options.md`). Аня:
+#: «якщо не виходить чисто і просто -- відкладаємо реалізацію».
+#:
+#: Файл `static/lang-toggle.js`, кеш перекладів і маршрут `/api/translate`
+#: лишаються: вони знадобляться, коли робити переклад правильно (через каталог
+#: повідомлень, а не через DOM). Тут вимкнено рівно підключення до сторінки.
+LANG_JS = os.path.join(_STATIC, "lang-toggle.js")   # noqa: F401 -- див. вище
 #: Показ рівня доступу -- той самий файл, що на звичайних сторінках.
 ACCESS_JS = os.path.join(_STATIC, "access.js")
 #: Телефонна розкладка й вимірювання висот -- на них тримається розкладка чата.
@@ -2197,13 +2203,24 @@ def render_reply(text):
     # при імпорті) і заборона дописувати щось після службового маркера стану
     # діалогу. Тобто інваріанти сирого тексту не зачеплені -- змінюється рівно
     # те, що бачить око.
+    # ПРИМІТКИ -- НАД НОМЕРОМ ЗВЕРНЕННЯ, і тим самим дрібним (Аня 28.08).
+    #
+    # Доти кожна примітка була блоком із рамкою й тлом і стояла ПІСЛЯ номера.
+    # На екрані вона займала більше місця, ніж сама відповідь: рядок «узято з
+    # попереднього питання…» виглядав важливішим за цифру, до якої стосується.
+    #
+    # Тепер порядок читання зверху вниз: відповідь → тихі застереження до неї →
+    # мітка ходу. Вигляд задає CSS (`#chat-area .note`): лишилась смужка збоку
+    # як ознака рівня, рамка й тло прибрані.
+    note_html = "".join("\n\n" + _note(kind, msg) for kind, msg in notes)
     m = _ID_IN_TEXT.search(out) or _ID_IN_TEXT.search(text)
     if m:
         out = _ID_LINE_IN_SOURCE.sub("", out)
+        out += note_html
         out += ('\n\n<div class="req-id">звернення '
                 + m.group(1) + '</div>')
-    for kind, msg in notes:
-        out += "\n\n" + _note(kind, msg)
+    else:
+        out += note_html
     return out
 
 
@@ -2238,8 +2255,6 @@ def make_head_css():
             parts.append(fh.read())
     with open(TOGGLE_JS, encoding="utf-8") as fh:
         toggle = fh.read()
-    with open(LANG_JS, encoding="utf-8") as fh:
-        lang = fh.read()
     with open(ACCESS_JS, encoding="utf-8") as fh:
         access = fh.read()
     with open(MOBILE_JS, encoding="utf-8") as fh:
@@ -2265,7 +2280,6 @@ def make_head_css():
             'initial-scale=1, interactive-widget=resizes-content">'
             + "<style>" + "\n".join(parts) + "</style>"
             + "<script>" + toggle + "</script>"
-            + "<script>" + lang + "</script>"
             + "<script>" + access + "</script>"
             + "<script>" + mobile + "</script>")
 
@@ -2482,11 +2496,7 @@ def build_blocks():
                     # бічній панелі, і це було третє різне місце для однієї
                     # й тієї самої дії. Порожня кнопка навмисно: іконку й
                     # підписи ставить theme-toggle.js (підклеєний у head).
-                    # Дві кнопки поруч: мова й тема. Порожні навмисно --
-                    # підписи ставлять скрипти, підклеєні в head.
-                    gr.HTML('<button type="button" class="lang-toggle" '
-                            'data-lang-mode="uk" aria-label="Мова">EN</button>'
-                            '<button type="button" class="theme-toggle" '
+                    gr.HTML('<button type="button" class="theme-toggle" '
                             'data-mode="system" aria-label="Тема"></button>',
                             elem_id="theme-switch")
 
