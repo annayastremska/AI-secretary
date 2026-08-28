@@ -243,12 +243,29 @@ def quote_of(cur, doc_id, base_label):
 
 
 def identity(cur, doc_id, cache):
+    """Реквізити для підвалу відповіді -- зі СТОВПЦІВ documents, і лише потім
+    повторним розбором тексту.
+
+    Було навпаки: розбір щоразу заново, а `doc_identifier` не читався взагалі.
+    Знайдено на золотому наборі Дениса: правильна відповідь із наказу № 606
+    (документ 216) підписувалась як «—», хоч номер у базі стоїть. Тобто
+    міграція b5f1c7a92d63 додала ці стовпці саме для підвалу, а підвал їх
+    ігнорував -- і цитата виходила без джерела, що для цього продукту гірше за
+    відсутність цитати.
+
+    Розбір лишається запасним шляхом: у трьох внутрішніх інструкцій номера
+    немає взагалі, і для них «—» -- правда, а не збій.
+    """
     if doc_id in cache:
         return cache[doc_id]
-    cur.execute("SELECT text_content FROM documents WHERE id = %s", (doc_id,))
-    info = E.extract(cur.fetchone()[0])
-    cache[doc_id] = (info.get("title") or f"documents.id={doc_id}",
-                     info.get("identifier") or "—")
+    cur.execute("SELECT doc_title, doc_identifier, text_content "
+                "FROM documents WHERE id = %s", (doc_id,))
+    title, ident, text = cur.fetchone()
+    if not (title and ident):
+        info = E.extract(text or "")
+        title = title or info.get("title")
+        ident = ident or info.get("identifier")
+    cache[doc_id] = (title or f"documents.id={doc_id}", ident or "—")
     return cache[doc_id]
 
 
