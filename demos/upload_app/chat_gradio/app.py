@@ -93,6 +93,10 @@ import trace  # noqa: E402
 # (той самий файл, де вони перевіряються на «відповідь у корпусі є»).
 import normative_topics  # noqa: E402
 
+# Режим створення документа (задача C1). Важкі бібліотеки він тягне ЛІНИВО,
+# усередині своїх функцій, тому імпорт тут безпечний для старту процесу.
+import docgen  # noqa: E402
+
 # Живий лічильник часу відповіді. Лежить на рівень вище (demos/upload_app),
 # бо його ЧИТАЄ сторінка статистики, а не лише чат. Імпорт мусить бути
 # однаковий в обох місцях: `import livemetrics` тут і
@@ -2955,7 +2959,7 @@ def build_blocks():
 
     EXAMPLES = example_questions()
 
-    def respond(message, history):
+    def respond(message, history, dg=None):
         """Генератор: кадри ВИДИМОГО СТАНУ на місці відповіді, потім сама
         відповідь.
 
@@ -2973,16 +2977,43 @@ def build_blocks():
         message = (message or "").strip()
         history = history or []
         if not message:
-            yield "", history, gr.update(), gr.update(visible=False), message
+            yield ("", history, gr.update(), gr.update(visible=False), message,
+                   dg, gr.update())
             return
         asked = history + [{"role": "user", "content": message}]
 
-        def frame(content, failed=False):
+        def frame(content, failed=False, state=None, file_update=None):
             return ("", gr.update(value=asked + [{"role": "assistant",
                                                   "content": content}],
                                   visible=True),
                     gr.update(visible=False), gr.update(visible=failed),
-                    message)
+                    message,
+                    dg if state is None else state,
+                    gr.update() if file_update is None else file_update)
+
+        # РЕЖИМ СТВОРЕННЯ ДОКУМЕНТА: моделі тут немає взагалі, тому й
+        # прогресу немає -- відповідь миттєва. Стан живе в сеансі (gr.State),
+        # не в модулі: модульна змінна дала б «один увімкнув -- у всіх
+        # увімкнулось», і на демо це виглядало б як зламаний чат.
+        if dg and not docgen.is_done(dg):
+            try:
+                state, reply, path = docgen.step(dg, message)
+            except Exception as exc:      # режим не має права валити чат
+                yield frame(_note("error", "Створення документа перервано: "
+                                          f"{type(exc).__name__}."),
+                            state={"done": True})
+                return
+            if path:
+                done_text = (
+                    "Документ готовий. " + docgen.STAMP + "\n\n"
+                    "Підпишіть його й завантажте звичайним шляхом — тоді він "
+                    "пройде розпізнавання й ляже в базу як усі інші. Сам "
+                    "режим у базу нічого не пише.")
+                yield frame(render_reply(done_text), state=state,
+                            file_update=gr.update(value=path, visible=True))
+                return
+            yield frame(render_reply(reply), state=state)
+            return
 
         rendered, failed = None, False
         for kind, payload in progress.stream(lambda: answer(message, history)):
@@ -3010,11 +3041,29 @@ def build_blocks():
             return str(m.get("content") or "")
         return str(getattr(m, "content", "") or "")
 
+    def start_docgen(history):
+        """Увійти в режим створення документа. -> ті самі виходи, що respond.
+
+        Кнопка лише ПОЧИНАЄ розмову: перше питання ставить сам режим, тому
+        текст питання живе в одному місці (`docgen`), а не дублюється тут.
+        """
+        state = docgen.start()
+        state, reply, _ = docgen.step(state, "")
+        head = ("Режим створення документа. Питаю по одному полю; у базу "
+                "нічого не пишеться. Вихід — «скасувати».")
+        asked = (history or []) + [
+            {"role": "assistant",
+             "content": render_reply(head + "\n" + reply)}]
+        return ("", gr.update(value=asked, visible=True),
+                gr.update(visible=False), gr.update(visible=False), "",
+                state, gr.update(value=None, visible=False))
+
     def reset():
         """Порожній екран назад: стрічка ховається цілком, інакше під героєм
         лишається порожня сіра область, а поле вводу з'їжджає за екран."""
         return ("", gr.update(value=[], visible=False),
-                gr.update(visible=True), gr.update(visible=False), "")
+                gr.update(visible=True), gr.update(visible=False), "",
+                None, gr.update(value=None, visible=False))
 
     # Gradio 6.23 скоупить усе, що прийшло через css_paths: `:root` переписується
     # в `.gradio-container… .contain :root` і не збігається ні з чим, тому токени
@@ -3038,6 +3087,10 @@ def build_blocks():
                     f'<div class="brand-sub">облік особового складу</div>'
                     f'</div></div>')
                 new_chat = gr.Button("Очистити чат", elem_id="new-chat")
+                # СТВОРЕННЯ ДОКУМЕНТА -- окремий режим чата (задача C1).
+                # Кнопка стоїть під «Очистити чат», як просила Аня.
+                docgen_btn = gr.Button("Створити документ",
+                                       elem_id="docgen-btn")
                 # Переходи між сторінками апки -- ті самі три, що в шапці
                 # звичайних сторінок (/ і /stats): один продукт означає, що
                 # набір переходів не змінюється від екрана до екрана.
@@ -3149,6 +3202,11 @@ def build_blocks():
                     send = gr.Button("➤", elem_id="send-btn")
                 retry = gr.Button("Спробувати ще", elem_id="retry-btn",
                                   visible=False)
+                # Готовий документ. Ховається доти, доки його немає: порожня
+                # рамка «завантажити файл» на екрані читалась би як ще одне
+                # місце, куди щось треба покласти.
+                docfile = gr.File(label="Готовий документ", visible=False,
+                                  elem_id="docgen-file", interactive=False)
                 # Названі клавіші (дрібниця 8): Enter надсилає вже
                 # зараз, але про це ніде не було сказано, і люди шукали
                 # кнопку. Нової поведінки не додається -- лише названа наявна.
@@ -3165,20 +3223,24 @@ def build_blocks():
                         # те, що бібліотека справді ставить у потік.
                         elem_id="hint-block")
 
-        outs = [box, chat, hero, retry, last_q]
-        box.submit(respond, [box, chat], outs)
-        send.click(respond, [box, chat], outs)
-        retry.click(respond, [last_q, chat], outs)
+        # Стан режиму -- у СЕАНСІ. `gr.State` існує рівно для цього: модульна
+        # змінна зробила б режим спільним для всіх, хто відкрив чат.
+        docgen_state = gr.State(None)
+        outs = [box, chat, hero, retry, last_q, docgen_state, docfile]
+        box.submit(respond, [box, chat, docgen_state], outs)
+        send.click(respond, [box, chat, docgen_state], outs)
+        retry.click(respond, [last_q, chat, docgen_state], outs)
         new_chat.click(reset, None, outs)
+        docgen_btn.click(start_docgen, [chat], outs)
         # Кнопки й питання зв'язуються ПОЗИЦІЙНО, і тепер це видно: hero_btns
         # збиралися тим самим циклом по EXAMPLES, тому порядок збігається за
         # побудовою. Доти тут стояло `EXAMPLES * 3` -- перелік, помножений на
         # три, щоб «вистачило на всі кнопки»; з дев'ятьма кнопками така
         # арифметика мовчки повісила б на кнопку чуже питання.
         for btn, q in zip(side_btns, EXAMPLES):
-            btn.click(respond, [gr.State(q), chat], outs)
+            btn.click(respond, [gr.State(q), chat, docgen_state], outs)
         for btn, q in zip(hero_btns, EXAMPLES):
-            btn.click(respond, [gr.State(q), chat], outs)
+            btn.click(respond, [gr.State(q), chat, docgen_state], outs)
 
     # черга: виклик моделі не блокує інші запити (сам виклик серіалізований
     # локом у tiers.py, але шаблонні відповіді йдуть паралельно)

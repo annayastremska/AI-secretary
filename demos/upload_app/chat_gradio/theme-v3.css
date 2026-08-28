@@ -2095,3 +2095,45 @@ details.src > *:not(summary) {
         min-height: 0 !important;
     }
 }
+
+/* 35. Кнопка «Створити документ» -- під «Очистити чат» (задача C1).
+ *
+ *     Вигляд той самий, що в «Очистити чат»: це два входи в режим роботи, і
+ *     різний вигляд читався б як різна важливість. Відступ згори -- щоб вони
+ *     не злипались в один блок; у панелі це вже траплялось із розділювачами.
+ *
+ *     Зелений акцент тут НЕ ставимо: акцентною в панелі лишається одна
+ *     кнопка, інакше око не знає, куди дивитись першим.
+ */
+/*     `!important` тут не для надійності «на всяк випадок»: Gradio ставить
+ *     власні розміри й фони кнопок саме з ним, і сусідня `#new-chat` через це
+ *     має точно такий самий блок (рядок 1007). Без нього кнопка виходить
+ *     прямокутною й іншого кольору -- це вже було з перемикачем теми.
+ */
+#docgen-btn {
+    width: 100% !important;
+    justify-content: center !important;
+    background: transparent !important;
+    border: 1px solid var(--c-border) !important;
+    border-radius: var(--r-md) !important;
+    color: var(--c-text) !important;
+    font-family: var(--font) !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    min-height: 44px !important;
+    margin-top: var(--s-2) !important;
+    box-shadow: none !important;
+}
+#docgen-btn:hover {
+    background: var(--c-accent-soft) !important;
+    border-color: var(--c-accent-line) !important;
+}
+
+/* Готовий документ: показується лише коли він є. Рамку Gradio знімаємо --
+   у чаті вона читається як ще одне поле вводу. */
+#docgen-file {
+    border: 1px solid var(--c-border) !important;
+    background: var(--c-bg) !important;
+    border-radius: var(--r-md) !important;
+    margin-top: var(--s-2) !important;
+}
