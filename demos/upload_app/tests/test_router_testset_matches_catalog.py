@@ -38,14 +38,44 @@ def _load():
     return catalog, items
 
 
+#: Єдине значення `expected`, яке НЕ є id шаблону: «правильна відповідь тут --
+#: відмова». Перелічене тут дослівно, а не пропущене шаблоном на два підкреслення:
+#: сентинел мусить бути один і названий, інакше цей контракт перестане ловити
+#: одруківки в `expected` -- а він для цього й стоїть.
+REFUSAL = "__refusal__"
+
+
 def test_every_expected_template_exists():
     catalog, items = _load()
-    ids = {t["id"] for t in catalog}
+    ids = {t["id"] for t in catalog} | {REFUSAL}
     unknown = sorted({q["expected"] for q in items} - ids)
     assert not unknown, (
         "тест-сет чекає шаблонів, яких немає в каталозі: " + str(unknown)
         + ". Так було з subdivision_blocked: шаблон розібрали, тест-сет "
           "лишили -- і прилад падав замість того, щоб дати цифру.")
+
+
+def test_the_refusal_sentinel_is_not_a_catalog_template():
+    """Сентинел мусить лишатись ПОЗА каталогом.
+
+    Якщо колись у каталозі з'явиться шаблон із таким id, замір відмов тихо
+    перетвориться на звичайне «влучив у шаблон» -- тобто прилад показував би
+    цифру, яка нічого не міряє. Тест тримає саме цю межу."""
+    catalog, _ = _load()
+    assert REFUSAL not in {t["id"] for t in catalog}
+
+
+def test_the_refusal_group_is_measured():
+    """Група існує й непорожня.
+
+    Без цього тесту сентинел можна прибрати з набору, не зламавши нічого
+    видимого: прилад просто перестав би міряти відмови й показував би ті самі
+    числа -- рівно та дірка, задля закриття якої він і з'явився."""
+    _, items = _load()
+    refusals = [q for q in items if q["expected"] == REFUSAL]
+    assert len(refusals) >= 3, refusals
+    for q in refusals:
+        assert q.get("group") == "refusal", q
 
 
 def test_example_group_is_verbatim_from_catalog():

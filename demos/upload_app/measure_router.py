@@ -58,6 +58,12 @@ THRESHOLDS = ([round(0.30 + 0.05 * i, 2) for i in range(11)]      # 0.30..0.80
               + [round(0.82 + 0.02 * i, 2) for i in range(8)])    # 0.82..0.96
 
 
+#: Значення `expected`, яке означає «правильна відповідь -- відмова», а не
+#: якийсь шаблон каталогу. Не id: такого шаблону в каталозі немає й не мусить
+#: бути -- відмова це відсутність привласнення, а не ще один маршрут.
+REFUSAL = "__refusal__"
+
+
 def rules_covered(questions):
     """Продовий пре-фільтр: які питання тест-сету ловлять ПРАВИЛА
     (rules_route у tiers.py) ще до векторного ярусу. Реєстр осіб
@@ -193,9 +199,17 @@ def measure(encoder_name, questions):
                 # приклад не має відповідати сам собі: виймаємо з індексу
                 mask = raw_utts.index(q["q"])
             route, score = classify(S[i], route_of, mask_idx=mask, agg=agg)
+            # СЕНТИНЕЛ ВІДМОВИ: для питання з `__refusal__` правильним є
+            # НЕ влучити -- жоден маршрут не мусить набрати порогу. Порівняння
+            # `route == expected` тут не працює за побудовою: маршруту
+            # «відмова» в каталозі немає й не має бути.
+            if q["expected"] == REFUSAL:
+                ok = score < THRESHOLD
+            else:
+                ok = route == q["expected"]
             results.append(dict(q=q["q"], expected=q["expected"],
                                 group=q["group"], got=route, score=score,
-                                ok=route == q["expected"]))
+                                ok=ok))
 
         crosscheck(encoder_name, encoder, utter_texts, route_of, questions,
                    agg=agg)
@@ -297,12 +311,23 @@ def main():
     if args.production_view:
         covered = rules_covered(questions)
         caught = [q for q in questions if covered[q["q"]] is not None]
-        n_rules_ok = sum(covered[q["q"]] == q["expected"] for q in caught)
+        # Правило, яке схопило питання-відмову, -- помилка: система
+        # привласнила шаблон питанню, на яке даних немає.
+        n_rules_ok = sum(
+            (covered[q["q"]] is None) if q["expected"] == REFUSAL
+            else (covered[q["q"]] == q["expected"])
+            for q in caught)
         print(f"продовий вид: правила ловлять {len(caught)}/{len(questions)} "
               f"(з них правильно {n_rules_ok}); векторному ярусу лишається "
               f"{len(questions) - len(caught)}")
+        def _rule_is_wrong(q):
+            got = covered[q["q"]]
+            if q["expected"] == REFUSAL:
+                return got is not None
+            return got != q["expected"]
+
         wrong_rules = [(q["q"], covered[q["q"]], q["expected"])
-                       for q in caught if covered[q["q"]] != q["expected"]]
+                       for q in caught if _rule_is_wrong(q)]
         for qq, got, exp in wrong_rules:
             print(f"  УВАГА, правила неправильно: «{qq}» -> {got} "
                   f"(чекали {exp})")

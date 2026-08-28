@@ -297,7 +297,10 @@ def test_tests_do_not_write_into_the_production_trace():
 
 
 def test_chips_exist():
-    assert len(nt.chips()) == 3, nt.chips()
+    #: Одна, не три: Аня 28.08 скоротила готові кнопки з дев'яти до шести, і
+    #: нормативна дорога представлена однією -- решта п'ять показують різні
+    #: види підрахунку.
+    assert len(nt.chips()) == 1, nt.chips()
     for q in nt.chips():
         assert q.endswith("?"), q
 
@@ -321,11 +324,51 @@ def test_chips_are_in_the_chat_buttons():
 
 
 def test_buttons_split_into_rows_of_three():
-    """Кнопок стало дев'ять. Розкладка рядками по три перевіряється тут, бо
-    інакше другий літерал `[3:]` зібрав би шість в один рядок."""
+    """Шість кнопок -- два повні рядки по три.
+
+    Тримає не саме число, а ділимість: сітка в CSS має три колонки, і кнопка,
+    що не добирає рядок, лишає на екрані дірку. Тобто додавати їх можна лише
+    по три."""
     from chat_gradio import app as chat_app
     n = len(chat_app.example_questions())
+    assert n == 6, f"кнопок {n}, а Аня просила шість"
     assert n % 3 == 0, f"кнопок {n} -- рядок по три не складеться"
+
+
+def test_buttons_cover_different_kinds_of_answer():
+    """Шість обрані за ВИДОМ підрахунку, а не за темою (вимога Ані: «візьми
+    різні за типом обрахунку, типами доків, найбільш різноманітні»).
+
+    Перевіряється на тому наборі, який реально видно, і одне місце -- за кодом.
+    Причина: четверта кнопка -- це СЛОТ, у який підставляється справжній номер
+    документа з бази (`examples[3] = ...`). Без бази там лишається питання
+    «скільки непідтверджених фактів», і в цьому немає біди: відкатний набір
+    показується лише тоді, коли база лежить, а тоді не працює жодна кнопка --
+    вони всі підрахункові. Тобто «безпечний» зашитий номер там нічого не
+    рятує, а зіпсуватись може (рівно на цьому ми горіли з «5 травня»).
+    """
+    from chat_gradio import app as chat_app
+    qs = [q.lower() for q in chat_app.example_questions()]
+    joined = " | ".join(qs)
+    #: Дороги, які не залежать від бази й мусять бути представлені завжди.
+    assert any("відпустц" in q and "скільки" in q for q in qs), joined
+    assert any(q.startswith("хто") for q in qs), joined
+    assert any("підрозділ" in q for q in qs), joined
+    assert any("черз" in q for q in qs), joined
+    assert any("тривалість" in q for q in qs), joined
+
+    #: Слот документа: або він уже заповнений із бази, або в коді стоїть рядок,
+    #: який його заповнить. Одне з двох мусить бути правдою.
+    src = io.open(os.path.join(APP_DIR, "chat_gradio", "app.py"),
+                  encoding="utf-8").read()
+    filled = any("документ" in q for q in qs)
+    assert filled or 'examples[3] = f"Покажи документ' in src, joined
+
+    #: І жодна дорога не з'їдає більше половини набору. З живою базою «скільки»
+    #: лишається двоє; без бази -- троє, і це межа.
+    assert sum(q.startswith("скільки") for q in qs) <= 3, joined
+    if filled:
+        assert sum(q.startswith("скільки") for q in qs) <= 2, joined
 
 
 @pytest.mark.parametrize("n,want", [

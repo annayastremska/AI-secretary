@@ -318,6 +318,10 @@ def collect(query=None, report_path=None):
         # окремим підписом: знаменники в нас різні НАВМИСНО, і змішувати їх
         # означало б зробити обидва числа непояснюваними.
         "partner_metrics": partner_metrics(),
+        # Перетини відсутностей однієї особи. Окремо від лічильників
+        # навмисно: недоступна база тут мусить дати «не зміряно», а
+        # не нуль.
+        "conflicts": conflicts(),
         "run_report": report,
         "run_report_error": report_error,
         "run_report_path": os.path.relpath(path, PROJECT_ROOT).replace("\\", "/"),
@@ -397,6 +401,185 @@ def _read_json(path):
         # Немає звіту -- це не помилка сторінки, а відсутність заміру.
         # Показуємо прочерк і кажемо, чим його заповнити.
         return None
+
+
+# ── Перетини відсутностей: плитка «Конфлікти» ────────────────────────
+#
+# Пропозиція Андрія 28.08 («створити на сторінці статистика нову штучку --
+# конфлікти, і там писати їхню кількість»), погоджена Анею того ж дня.
+#
+# ЩО САМЕ ВВАЖАЄТЬСЯ ПЕРЕТИНОМ, і чому це не те саме, що «конфлікт»:
+#
+# Перетин -- це два ПІДТВЕРДЖЕНІ факти відсутності ОДНІЄЇ особи, чиї періоди
+# накладаються. Дві умови тут несуть усю вагу:
+#
+#   «однієї особи» -- бо різні люди одночасно у відпустці це норма, а без цієї
+#                     умови плитка показала б сотні «конфліктів» на штатці зі
+#                     153 людей і зробилась би шумом за перший день;
+#   «підтверджені» -- бо чернетка ≠ факт: непевний факт у підрахунки не
+#                     входить, доки людина його не бачила.
+#
+# А «конфлікт» -- це вже висновок, і він не завжди правдивий: у базі на 28.08
+# рівно дві пари, і одна з них ЗАКОННА (наказ №118 анульований, №131 виданий
+# замість нього). Тому плитка називає перше число «пар, що перетинаються», а
+# друге -- скільком із них записана підстава заміни. Друге зараз нуль, бо
+# `documents.superseded_by_doc_id` не заповнюється, хоча схема витягу має
+# `supersedes_document_number`. Тобто плитка заодно робить видимою цю дірку --
+# і це навмисно: доки її не видно, законна заміна й справжня суперечність
+# виглядають зовні однаково.
+#
+# ПІБ у переліку є. Це рішення Ані 28.08 дослівно: «чат і так функціонує ДЛЯ
+# ТОГО щоб буквально надавати особисту інформацію. це ок -- все синтетичне».
+# Обмеження в нас не на сторінку, а на СПРАВЖНІ дані, і воно лишається
+# правилом репозиторію.
+
+#: Виміри відсутності беремо з режиму створення документа, а НЕ повторюємо
+#: переліком тут. Дві копії означали б, що плитка й фіча колись розійдуться в
+#: тому, що вважають конфліктом -- і розійдуться тихо.
+def _absence_dims():
+    if CHAT_DIR not in sys.path:
+        sys.path.insert(0, CHAT_DIR)
+    from chat_gradio import docgen  # noqa: PLC0415
+    return docgen._ABSENCE_DIMS
+
+
+try:
+    ABSENCE_DIMS = _absence_dims()
+except Exception:                                  # noqa: BLE001
+    #: Режим створення зламався -> плитка не мусить валити сторінку. Перелік
+    #: тут відкатний і навмисно ідентичний тому, що в docgen: якщо вони
+    #: розійдуться, це зловить `test_conflicts_tile.py`.
+    ABSENCE_DIMS = ["leave", "deployment_location"]
+
+#: Скільком парам показувати подробиці. Перелік розкривається під плиткою (без
+#: окремої сторінки -- рішення Ані), і довгий список там нічого не додасть:
+#: якщо пар стане більше двадцяти, це вже не «подивитись», а робота в базі.
+CONFLICT_ROWS_SHOWN = 20
+
+#: «Підтверджений» тут НЕ вживається навмисно, і це не стилістика:
+#: на цій сторінці слово читається як «людина підтвердила», а в базі
+#: немає ні confirmed_by, ні confirmed_at. Те саме обмеження вже
+#: прибрало з неї три інші твердження 27.08, і воно стосується цієї
+#: плитки так само -- зловив `test_removed_claims_stay_removed`.
+CONFLICTS_HOW = ("перетин періодів двох фактів відсутності однієї особи "
+                 "(відпустка або відрядження), що входять у підрахунки; "
+                 "запит по базі в момент відкриття сторінки")
+
+
+def conflicts(dsn=None):
+    """Пари відсутностей однієї особи, що перетинаються. Винятків не кидає.
+
+    -> {"pairs": N|None, "with_supersession": N|None, "rows": [...],
+        "how": текст, "error": текст|None}
+
+    `pairs is None` означає «НЕ ЗМІРЯНО», і це не те саме, що нуль. Нуль тут --
+    найдорожча брехня на цій сторінці: він читається як «усе чисто», тобто
+    рівно навпаки до правди про недоступну базу.
+
+    `dsn` -- лише для тестів (перевірка поведінки при недоступній базі).
+    Бойовий шлях свого DSN не має: він той самий, що в чата, read-only.
+
+    ЗАПИТ ТІЛЬКИ ЧИТАЄ. База -- зона Андрія; на це є окремий тест, який
+    шукає в тексті цієї функції INSERT/UPDATE/DELETE.
+    """
+    sql = """
+        SELECT p.last_name, p.first_name, p.patronymic, p.service_id,
+               da.code AS dim_a, db_.code AS dim_b,
+               a.valid_from AS from_a, a.valid_to AS to_a,
+               b.valid_from AS from_b, b.valid_to AS to_b,
+               a.source_doc_id AS doc_a_id, b.source_doc_id AS doc_b_id,
+               (SELECT btrim(n.value) FROM facts n
+                  JOIN dimensions nd ON nd.id = n.dimension_id
+                 WHERE n.source_doc_id = a.source_doc_id
+                   AND nd.code = 'document_number' LIMIT 1) AS number_a,
+               (SELECT btrim(n.value) FROM facts n
+                  JOIN dimensions nd ON nd.id = n.dimension_id
+                 WHERE n.source_doc_id = b.source_doc_id
+                   AND nd.code = 'document_number' LIMIT 1) AS number_b,
+               (da.id <> db_.id) AS cross_kind,
+               (doc_a.superseded_by_doc_id IS NOT NULL
+                OR doc_b.superseded_by_doc_id IS NOT NULL) AS supersession
+          FROM facts a
+          JOIN facts b ON a.object_id = b.object_id AND a.id < b.id
+          JOIN dimensions da ON da.id = a.dimension_id
+          JOIN dimensions db_ ON db_.id = b.dimension_id
+          JOIN people p ON p.object_id = a.object_id
+          LEFT JOIN documents doc_a ON doc_a.id = a.source_doc_id
+          LEFT JOIN documents doc_b ON doc_b.id = b.source_doc_id
+         WHERE da.code = ANY(%(dims)s) AND db_.code = ANY(%(dims)s)
+           AND a.status = 'confirmed' AND b.status = 'confirmed'
+           AND a.valid_from IS NOT NULL AND b.valid_from IS NOT NULL
+           AND a.valid_from <= COALESCE(b.valid_to, b.valid_from)
+           AND b.valid_from <= COALESCE(a.valid_to, a.valid_from)
+         ORDER BY p.last_name, a.valid_from
+    """
+    out = {"pairs": None, "with_supersession": None, "rows": [],
+           "how": CONFLICTS_HOW, "error": None}
+    try:
+        if dsn:
+            import psycopg                         # noqa: PLC0415
+            from psycopg.rows import dict_row      # noqa: PLC0415
+
+            def query(q, params=None):
+                with psycopg.connect(dsn + " connect_timeout=1",
+                                     row_factory=dict_row,
+                                     autocommit=True) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(q, params)
+                        return cur.fetchall()
+        else:
+            query = _chat_query()
+        rows = query(sql, {"dims": ABSENCE_DIMS})
+    except Exception as exc:                        # noqa: BLE001
+        out["error"] = str(type(exc).__name__) + ": " + str(exc)
+        return out
+
+    labels = {"leave": "відпустка", "deployment_location": "відрядження"}
+    out["pairs"] = len(rows)
+    out["with_supersession"] = sum(1 for r in rows if r.get("supersession"))
+    for r in rows[:CONFLICT_ROWS_SHOWN]:
+        name = " ".join(x for x in (r.get("last_name"), r.get("first_name"),
+                                    r.get("patronymic")) if x)
+        out["rows"].append({
+            "person": name or "—",
+            #: Готова фраза, а не два слова й сполучник у JS. Причина --
+            #: переклад: комбінацій усього три, і кожна перекладається як
+            #: ціла фраза, тоді як склейка «X і Y» дала б у словнику ключ
+            #: «і», який не є одиницею перекладу.
+            "kinds": _kinds_phrase(labels.get(r.get("dim_a"), "відсутність"),
+                                   labels.get(r.get("dim_b"), "відсутність")),
+            "cross_kind": bool(r.get("cross_kind")),
+            "period_a": _period(r.get("from_a"), r.get("to_a")),
+            "period_b": _period(r.get("from_b"), r.get("to_b")),
+            "number_a": r.get("number_a") or "без номера",
+            "number_b": r.get("number_b") or "без номера",
+            "supersession": bool(r.get("supersession")),
+        })
+    if out["pairs"] > CONFLICT_ROWS_SHOWN:
+        #: Обрізання НЕ мовчазне: сторінка мусить сказати, скільком парам вона
+        #: подробиць не показала. Тихе обрізання читається як «оце все».
+        out["truncated"] = out["pairs"] - CONFLICT_ROWS_SHOWN
+    return out
+
+
+def _kinds_phrase(a, b):
+    """«відпустка двічі», «відпустка і відрядження». -> рядок.
+
+    Комбінацій рівно три, і всі три перелічені в словнику перекладу:
+    сторінка мусить бути англійською цілком, а не наполовину.
+    """
+    return a + " двічі" if a == b else a + " і " + b
+
+
+def _period(a, b):
+    """Період словами для сторінки. Один день -- одна дата, не «з X по X»."""
+    if not a:
+        return "—"
+    a = a.isoformat() if hasattr(a, "isoformat") else str(a)
+    if not b:
+        return "з " + a + ", без дати завершення"
+    b = b.isoformat() if hasattr(b, "isoformat") else str(b)
+    return a if a == b else a + " — " + b
 
 
 def partner_metrics(path=None):

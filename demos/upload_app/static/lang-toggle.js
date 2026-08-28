@@ -227,6 +227,37 @@
     "метрик відкинуто: без поля «чим зміряно»":
       "metrics were dropped: without the «how it was measured» field",
     "цифра не показується": "a number is not shown",
+    // Плитка «Конфлікти» (28.08). Рядки додані ТИМ САМИМ рухом, що й розмітка.
+    //
+    // Кожен ключ -- ЦІЛА ФРАЗА. Перша версія рендера складала речення з
+    // уламків («ще», «) і №», «двічі»), і цей тест упав по праву: уламок не є
+    // одиницею перекладу, тобто англійська сторінка вийшла б
+    // напівукраїнською. Рендер переписаний, а не словник розширений уламками.
+    "Конфлікти: перетини відсутностей":
+      "Conflicts: overlapping absences",
+    "пар, що перетинаються": "overlapping pairs",
+    "з них із записаною підставою заміни":
+      "of these, with a recorded ground for replacement",
+    "які саме": "which ones exactly",
+    "Перетинів немає.": "There are no overlaps.",
+    "Перетини не зміряні: база недоступна.":
+      "Overlaps not measured: the database is unavailable.",
+    "пар без подробиць:": "pairs shown without details:",
+    "підстава заміни записана": "a ground for replacement is recorded",
+    "перетином вважається накладання періодів двох фактів відсутності однієї особи, що входять у підрахунки":
+      "an overlap means two absence facts of ONE person, both counted in the totals, whose periods overlap",
+    "різні люди, відсутні одночасно, перетином не є":
+      "different people absent at the same time are not an overlap",
+    "поле documents.superseded_by_doc_id: нуль означає, що законна заміна документа й справжня суперечність зовні виглядають однаково":
+      "the documents.superseded_by_doc_id field: zero means a lawful replacement of a document and a genuine contradiction look identical from outside",
+    // Комбінації видів відсутності: їх рівно три, і вони приходять готовою
+    // фразою з Python (`stats._kinds_phrase`) саме для того, щоб перекладались
+    // цілком, а не через ключ «і».
+    "відпустка двічі": "leave twice",
+    "відрядження двічі": "deployment twice",
+    "відпустка і відрядження": "leave and deployment",
+    "відрядження і відпустка": "deployment and leave",
+
     "База недоступна — цифр показати не можу.":
       "The database is unavailable — I cannot show any numbers.",
     "Сторінка не змогла отримати цифри:": "The page could not fetch the numbers:",
