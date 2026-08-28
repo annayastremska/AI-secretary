@@ -427,22 +427,42 @@ def next_free_number(taken):
 
 _DIM = {"leave": "leave", "deployment": "deployment_location"}
 
+#: ОБА ВИДИ ВІДСУТНОСТІ, а не лише той самий (Аня 28.08).
+#:
+#: Спершу перетин шукався в межах ОДНОГО виміру: відпустка проти відпустки,
+#: відрядження проти відрядження. Це дірка, і Аня її назвала: фізично людина не
+#: може бути одночасно у відпустці й у відрядженні, тому накладення цих двох --
+#: така сама суперечність.
+#:
+#: Найгірше в цій історії те, що мій власний тест її ЗАКРІПЛЮВАВ: він
+#: стверджував «різні виміри, перетин шукається в межах одного» -- тобто
+#: описував не правило продукту, а те, як я випадково написала запит.
+_ABSENCE_DIMS = ["leave", "deployment_location"]
+
+#: Як називаємо знайдений документ людині. «Вже є документ №1077» на питання
+#: про відрядження читається як помилка системи, поки не сказано, що №1077 --
+#: це відпустка.
+_DIM_LABEL = {"leave": "відпустка", "deployment_location": "відрядження"}
+
 
 def find_conflicts(service_id, kind, start, end):
-    """Чинні факти цієї особи того самого виміру, які перетинаються з періодом.
+    """Чинні факти цієї особи, які перетинаються з періодом. -> перелік рядків.
 
     Мова про ОДНУ людину: двоє різних одночасно у відпустці -- норма. Дотик
-    день-у-день перетином не вважається (`<` і `>` на межах), бо документ, що
-    починається наступного дня після завершення попереднього, суперечності не
-    створює.
+    день-у-день перетином не вважається, бо документ, що починається наступного
+    дня після завершення попереднього, суперечності не створює.
+
+    `kind` тут потрібен НЕ для фільтра (шукаємо обидва види відсутності), а
+    щоб не плутати виклик: він лишається в підписі, бо режим його знає, і
+    прибирати параметр означало б переписувати виклики без потреби.
     """
-    dim = _DIM[kind]
     try:
         with _t._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT f.valid_from, f.valid_to, f.source_doc_id,
+                           d.code AS dim,
                            (SELECT btrim(n.value) FROM facts n
                               JOIN dimensions nd ON nd.id = n.dimension_id
                              WHERE n.source_doc_id = f.source_doc_id
@@ -450,13 +470,20 @@ def find_conflicts(service_id, kind, start, end):
                       FROM facts f
                       JOIN dimensions d ON d.id = f.dimension_id
                       JOIN people p ON p.object_id = f.object_id
-                     WHERE p.service_id = %s AND d.code = %s
+                     WHERE p.service_id = %s AND d.code = ANY(%s)
                        AND f.status = 'confirmed'
                        AND f.valid_from IS NOT NULL
                        AND f.valid_from <= %s
                        AND COALESCE(f.valid_to, f.valid_from) >= %s
-                    """, (service_id, dim, end, start))
-                return [dict(r) for r in cur.fetchall()]
+                     ORDER BY f.valid_from
+                    """, (service_id, _ABSENCE_DIMS, end, start))
+                out = []
+                for r in cur.fetchall():
+                    row = dict(r)
+                    row["kind_label"] = _DIM_LABEL.get(row.get("dim"),
+                                                       "відсутність")
+                    out.append(row)
+                return out
     except Exception:
         return []
 
@@ -805,9 +832,15 @@ def _conflict_note(st):
         return None
     first = clash[0]
     num = first.get("number") or f"запис №{first.get('source_doc_id')}"
-    return (f"У цієї особи вже є документ №{num} на період "
-            f"{first.get('valid_from')} — {first.get('valid_to')}, і він "
-            f"перетинається з {start_} — {end_}.\n"
+    # ВИД ДОКУМЕНТА НАЗИВАЄМО. «Вже є документ №1077» у відповідь на питання
+    # про відрядження читається як помилка системи, поки не сказано, що №1077
+    # -- це відпустка. А після розширення перевірки на обидва види відсутності
+    # такий випадок став звичайним.
+    what = first.get("kind_label") or "відсутність"
+    return (f"У цієї особи вже є {what} №{num} на період "
+            f"{first.get('valid_from')} — {first.get('valid_to')}, і вона "
+            f"перетинається з {start_} — {end_}. Одночасно у відпустці й у "
+            "відрядженні людина бути не може.\n"
             "Якщо новий документ видається ЗАМІСТЬ нього — скажіть «замість "
             f"№{num}». Якщо це інша підстава — скажіть «формуй усе одно». "
             "Або «скасувати».")

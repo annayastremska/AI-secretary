@@ -249,13 +249,40 @@ def test_touching_days_are_not_a_conflict():
 
 
 @db_only
-def test_no_conflict_for_a_different_dimension():
-    """Відпустка й відрядження -- різні виміри; перетин шукається в межах
-    одного."""
+def test_leave_and_deployment_overlap_is_also_a_conflict():
+    """ОБИДВА види відсутності разом (Аня 28.08).
+
+    Цей тест раніше стверджував протилежне -- «різні виміри, перетин
+    шукається в межах одного» -- і тим закріплював дірку: фізично людина не
+    може бути одночасно у відпустці й у відрядженні. Мій власний тест
+    описував не правило продукту, а те, як я випадково написала запит.
+
+    Ґоляш: відпустка 2026-09-21 — 2026-10-10. Відрядження всередині цього
+    періоду -- суперечність.
+    """
     rows, _ = docgen.find_person("Ґоляш")
     sid = rows[0]["service_id"]
-    assert docgen.find_conflicts(sid, "deployment", "2026-10-01",
-                                 "2026-10-05") == []
+    clash = docgen.find_conflicts(sid, "deployment", "2026-10-01", "2026-10-05")
+    assert clash, "перетин відрядження з відпусткою мусить ловитись"
+    assert any("1077" in str(c.get("number") or "") for c in clash), clash
+
+
+@db_only
+def test_conflict_names_the_kind_of_the_existing_document():
+    """Людина мусить бачити, ЩО саме перетинається: інакше «вже є документ
+    №1077» на питання про відрядження читається як помилка системи."""
+    rows, _ = docgen.find_person("Ґоляш")
+    sid = rows[0]["service_id"]
+    clash = docgen.find_conflicts(sid, "deployment", "2026-10-01", "2026-10-05")
+    assert clash[0].get("kind_label") == "відпустка", clash[0]
+
+
+@db_only
+def test_still_no_conflict_outside_the_period():
+    rows, _ = docgen.find_person("Ґоляш")
+    sid = rows[0]["service_id"]
+    assert docgen.find_conflicts(sid, "deployment", "2026-11-01",
+                                 "2026-11-05") == []
 
 
 # ── Побудова файла ──────────────────────────────────────────────────────────
