@@ -520,3 +520,19 @@ def test_summary_shows_the_person_by_name_not_by_code():
     text = docgen._summary(st)
     assert "UNIT-0001" not in text, text
     assert "Гавриш" in text, text
+
+
+def test_request_id_is_not_duplicated_on_screen():
+    """Аня побачила «звернення bcf37d» двічі в одному повідомленні.
+
+    Причина: `render_reply` виносить номер у дрібний підпис знизу, а з тіла
+    вирізає його регуляркою, де ДВОКРАПКА стоїть у шаблоні. Мій рядок був без
+    двокрапки, тому не вирізався -- і номер лишався в тексті плюс додавався
+    підписом. Формат рядка тут -- частина стику з рендером, а не оформлення.
+    """
+    from chat_gradio import app as chat_app
+    st = docgen.start()
+    st, reply, _ = docgen.step(st, "")
+    out = chat_app.render_reply(reply)
+    assert out.count(st["id"]) == 1, out
+    assert 'class="req-id"' in out, out
