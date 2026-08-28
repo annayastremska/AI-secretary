@@ -21,6 +21,25 @@ sys.path.insert(0, os.path.join(APP_DIR, "chat_gradio"))
 import tiers  # noqa: E402
 
 
+#: Розмовні форми, які знайшов ПРИЛАД, а не я. `measure_router
+#: --production-view` показав, що правила ведуть «Розкажи анекдот» і «Розкажи
+#: щось цікаве» в `person_status` -- тобто на прохання пожартувати чат
+#: відповідав «не знайшла такої особи». А «привіт, є хтось живий?» пролітало
+#: моє ж правило, бо `хто` збігалося всередині `хтось`.
+#:
+#: Обидві дірки мій перший набір не мав за побудовою: у ньому були лише ті
+#: фрази, які я сама придумала, а придумати «хтось» у переліку слів-заперечень
+#: неможливо -- це видно тільки на чужому наборі.
+CHITCHAT = [
+    "привіт, є хтось живий?",
+    "як ти?",
+    "Як справи?",
+    "ти бот чи людина?",
+    "Розкажи анекдот",
+    "Розкажи щось цікаве",
+    "Хто ти і що ти вмієш?",
+]
+
 GREETINGS = [
     "Доброго ранку!",
     "Доброго дня",
@@ -54,6 +73,28 @@ PLAIN = [
 def test_greetings_are_recognised():
     for q in GREETINGS:
         assert tiers.is_greeting(q), q
+
+
+def test_chitchat_found_by_the_instrument_is_recognised():
+    """Форми з заміру маршрутизатора -- окремим тестом, щоб було видно, що їх
+    знайшов прилад, а не автор тесту."""
+    for q in CHITCHAT:
+        assert tiers.is_greeting(q), q
+
+
+def test_chitchat_goes_to_smalltalk_too():
+    for q in CHITCHAT:
+        route = tiers.rules_route(q)
+        assert route and route[0] == "smalltalk", (q, route)
+
+
+def test_question_words_match_whole_words_only():
+    """Пряма перевірка тієї помилки: `хто` не мусить збігатися в `хтось`.
+
+    Тримається саме на цьому слові, а не на фразі: фразу легко полагодити
+    списком винятків, а помилка була в межах слова."""
+    assert tiers.is_greeting("привіт, є хтось живий?")
+    assert not tiers.is_greeting("привіт, хто у відпустці?")
 
 
 def test_a_greeting_with_a_question_is_not_a_greeting():
