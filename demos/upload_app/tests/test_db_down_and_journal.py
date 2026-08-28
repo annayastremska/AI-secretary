@@ -14,7 +14,9 @@
 Запуск:
     python -m pytest demos/upload_app/tests/test_db_down_and_journal.py -q
 """
+import io
 import logging
+import os
 
 import psycopg
 import pytest
@@ -130,3 +132,32 @@ def test_id_not_duplicated_when_footer_already_has_it(monkeypatch):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_weather_gets_a_refusal_not_a_greeting():
+    """Погода — НЕ розмовна фраза, а прохання даних, яких у нас немає.
+
+    Суперечність знайшов Андрій замірами 28.08: `prompts/route.md` велить
+    відмовляти на погоду, а каталог мав її прикладом до шаблону `smalltalk`.
+    Модель отримувала дві протилежні вказівки про одне питання, і його маршрут
+    залежав від того, яка переважить.
+
+    Розв'язано на користь промпта: відповідати «Вітаю! Я — чат обліку
+    документів» на питання про погоду означало б вітатися замість того, щоб
+    сказати «таких даних немає».
+
+    Очікування живе ТУТ, а не в `router_testset.yaml`: той набір міряє вибір
+    шаблона, і значення «шаблона немає» виразити не може.
+    """
+    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    catalog = io.open(os.path.join(app_dir, "query_catalog.yaml"),
+                      encoding="utf-8").read()
+    smalltalk = catalog.split("- id: smalltalk", 1)[1].split("- id: ", 1)[0]
+    # КОМЕНТАРІ ГЕТЬ перед перевіркою: у блоці лишилось пояснення, ЧОМУ погоду
+    # звідти прибрано, і воно теж містить слово «погода». Перша версія тесту
+    # цього не врахувала й упала на власному комментарі -- тобто міряла текст
+    # файла, а не його зміст.
+    body = "\n".join(ln for ln in smalltalk.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert "погода" not in body, (
+        "погода знову стоїть прикладом до smalltalk — суперечність із route.md")

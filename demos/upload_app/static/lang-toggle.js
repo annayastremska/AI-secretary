@@ -208,6 +208,31 @@
     "База зараз": "The database right now",
     "Робота чата": "How the chat performs",
     "Виміряна якість обробки": "Measured processing quality",
+
+    // Розділ метрик Андрія (28.08). Рядки додані ТИМ САМИМ рухом, що й сама
+    // розмітка: тест повноти інакше падає, і це правильно -- він і стоїть,
+    // щоб нові рядки не з'являлись без перекладу.
+    //
+    // Ключі -- БЕЗ пробілів на краях: витяжка тесту рядки обрізає, і перша
+    // моя версія з пробілами не збіглася жодним ключем.
+    "Замір бази й нормативного пошуку":
+      "Database and normative search: measured",
+    "Міряв Андрій, приладами зони бази й нормативного пошуку. Знаменники":
+      "Measured by Andriy, with the database and normative-search instruments. Denominators",
+    "тут свої: наприклад «без питань до людини» рахується від документів,":
+      "here are his own: for example «no questions for a human» is counted over documents,",
+    "з яких справді взялися факти, а не від усіх у базі.":
+      "that actually yielded facts, not over everything in the database.",
+    "чим зміряно": "how it was measured",
+    "· замір": "· measured",
+    "метрик охоплення не показано окремо:":
+      "coverage metrics are not shown separately:",
+    "ті самі величини є вище, у розділі «База зараз», і там":
+      "the same quantities appear above, in «The database right now», and there",
+    "вони живі": "they are live",
+    "метрик відкинуто: без поля «чим зміряно»":
+      "metrics were dropped: without the «how it was measured» field",
+    "цифра не показується": "a number is not shown",
     "База недоступна — цифр показати не можу.":
       "The database is unavailable — I cannot show any numbers.",
     "Сторінка не змогла отримати цифри:": "The page could not fetch the numbers:",

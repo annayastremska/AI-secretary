@@ -357,3 +357,21 @@ def test_render_does_not_claim_documents_were_loaded_twice():
     assert "залиті двічі" not in text, "недоведене твердження про дублікати"
     assert "двох версіях" in text
     assert "не встановлено" in text
+
+
+def test_hero_cards_are_one_grid_not_three_rows():
+    """Зауваження Ані 28.08 про рівність карток.
+
+    Три окремі `gr.Row` вирівняти між собою неможливо: висоту ряду задає
+    найдовша кнопка в ньому, а ряди нічого одне про одного не знають. Тест
+    тримає саме конструкцію -- один контейнер плюс сітка в CSS."""
+    src = io.open(os.path.join(APP_DIR, "chat_gradio", "app.py"),
+                  encoding="utf-8").read()
+    block = src.split('elem_id="hero-cards"', 1)[1][:400]
+    assert "hero_btns = [gr.Button(q) for q in EXAMPLES]" in block, block[:200]
+    assert src.count('elem_id="hero-cards"') == 1, "рядів мусить бути один"
+
+    css = io.open(os.path.join(APP_DIR, "chat_gradio", "theme-v3.css"),
+                  encoding="utf-8").read()
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in css
+    assert "align-items: stretch" in css

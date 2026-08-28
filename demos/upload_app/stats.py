@@ -314,6 +314,10 @@ def collect(query=None, report_path=None):
         "chat_live": livemetrics.snapshot(),
         # Сталі числа внутрішнього заміру: маршрутизація і звірка каталогу.
         "chat_quality": chat_quality(),
+        # Замір Андрія (база й нормативний пошук) -- окремим розділом і з
+        # окремим підписом: знаменники в нас різні НАВМИСНО, і змішувати їх
+        # означало б зробити обидва числа непояснюваними.
+        "partner_metrics": partner_metrics(),
         "run_report": report,
         "run_report_error": report_error,
         "run_report_path": os.path.relpath(path, PROJECT_ROOT).replace("\\", "/"),
@@ -365,6 +369,21 @@ ROUTER_REPORT = os.path.join(PROJECT_ROOT, "data", "eval",
 CATALOG_REPORT = os.path.join(PROJECT_ROOT, "data", "eval",
                               "catalog-report.json")
 
+#: Пакет метрик Андрія (зона бази й нормативного пошуку). Формат домовлений:
+#: плоский масив із полями `name`, `value`, `of`, `unit`, `as_of`, `how`.
+PARTNER_METRICS = os.path.join(PROJECT_ROOT, "data", "eval",
+                               "andriy-metrics.json")
+
+#: Метрики, які ДУБЛЮЮТЬ живі числа розділу «База зараз». Показувати їх
+#: окремими плитками означало б покласти на один екран два числа про одне й
+#: те саме -- і одне з них застаріле. Приклад із пакета 28.08: «охоплення:
+#: нормативних актів у корпусі — 41», тоді як у базі вже 44.
+#:
+#: Тому вони не викидаються, а ЗГОРТАЮТЬСЯ: сторінка каже, скільком метрик
+#: пакета відповідають живі числа вище. Ховати замір партнера не можна, але й
+#: показувати застарілий знімок поруч із живим — теж.
+PARTNER_FOLDED_PREFIX = "охоплення:"
+
 #: Чому цитати нормативки поки не рахуються. Текст іде на екран як є.
 QUOTES_BLOCKED = ("ланцюг нормативки ще не підключений: потрібен доступ "
                   "milidoc_readonly до схеми andriy_test")
@@ -378,6 +397,47 @@ def _read_json(path):
         # Немає звіту -- це не помилка сторінки, а відсутність заміру.
         # Показуємо прочерк і кажемо, чим його заповнити.
         return None
+
+
+def partner_metrics(path=None):
+    """Пакет метрик Андрія для сторінки. Винятків не кидає НІКОЛИ.
+
+    Домовленість про формат була одна й головна: у кожної метрики мусить бути
+    **`how`** -- чим саме її зміряно. Без цього поля цифру не можна показати,
+    бо правило продукту -- «цифра без джерела не показується», і саме на цьому
+    нас уже ловив Денис. Тому метрика без `how` НЕ йде на сторінку, і про це
+    сказано числом: тихо викинути замір партнера гірше, ніж показати, що з ним
+    не так.
+
+    -> {"shown": [...], "folded": [...], "dropped": N, "error": текст|None}
+    """
+    raw = _read_json(path or PARTNER_METRICS)
+    out = {"shown": [], "folded": [], "dropped": 0, "error": None}
+    if raw is None:
+        out["error"] = ("пакета метрик немає: очікується "
+                        + os.path.relpath(path or PARTNER_METRICS,
+                                          PROJECT_ROOT).replace("\\", "/"))
+        return out
+    if not isinstance(raw, list):
+        out["error"] = "пакет метрик має бути плоским масивом"
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            out["dropped"] += 1
+            continue
+        name = (item.get("name") or "").strip()
+        how = (item.get("how") or "").strip()
+        if not name or item.get("value") is None or not how:
+            out["dropped"] += 1
+            continue
+        rec = {"name": name, "value": item.get("value"),
+               "of": item.get("of"), "unit": (item.get("unit") or "").strip(),
+               "as_of": (item.get("as_of") or "").strip(), "how": how}
+        if name.lower().startswith(PARTNER_FOLDED_PREFIX):
+            out["folded"].append(rec)
+        else:
+            out["shown"].append(rec)
+    return out
 
 
 def chat_quality():

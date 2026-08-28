@@ -2,12 +2,12 @@
   "encoder": "BAAI/bge-m3",
   "aggregation": "max",
   "threshold": 0.92,
-  "questions": 54,
-  "top1_ok": 37,
+  "questions": 53,
+  "top1_ok": 35,
   "routed": 6,
   "routed_ok": 6,
-  "fallback": 48,
+  "fallback": 47,
   "confidently_wrong": 0,
-  "measured_at": "2026-08-27T07:09:15",
+  "measured_at": "2026-08-28T14:55:58",
   "production_view": true
 }

@@ -74,6 +74,18 @@
     <p class="hint" id="quality-note"></p>
   </section>
 
+  <!-- Замір бази й нормативного пошуку. Окремий розділ, а не спільні плитки:
+       знаменники в двох замірах різні НАВМИСНО (у нас 179 із 204 -- усі
+       документи, у Андрія 134 із 153 -- лише ті, з яких узялися факти), і
+       поставити їх поруч без підпису означало б зробити обидва числа
+       непояснюваними. -->
+  <section id="partner-sec">
+    <h2>Замір бази й нормативного пошуку</h2>
+    <p class="hint" id="partner-lead"></p>
+    <div class="tiles" id="partner-tiles"></div>
+    <p class="hint" id="partner-note"></p>
+  </section>
+
   <p class="asof" id="asof"></p>
 </main>
 
@@ -518,6 +530,73 @@ function render(data) {
     $("quality-note").textContent =
       "Цифри, проти яких щодня йде перевірка «не ламає».";
   }
+
+  renderPartner(data.partner_metrics);
+}
+
+/* ── Замір бази й нормативного пошуку (пакет Андрія) ──────────────────────
+   Плитка тут МУСИТЬ нести «чим зміряно»: правило продукту -- цифра без
+   джерела не показується. Тому `how` не в підказці й не в атрибуті title
+   (його не видно ні на проєкторі, ні на телефоні), а в розкривному блоці
+   під числом. */
+function metricTile(m) {
+  const d = document.createElement("div");
+  d.className = "tile";
+  const n = document.createElement("div");
+  n.className = "tile-num";
+  n.textContent = (m.of === null || m.of === undefined || m.of === "")
+    ? String(m.value)
+    : String(m.value) + " / " + String(m.of);
+  const l = document.createElement("div");
+  l.className = "tile-label";
+  l.textContent = m.name + (m.unit ? " (" + m.unit + ")" : "");
+  d.append(n, l);
+  const det = document.createElement("details");
+  det.className = "how";
+  const sum = document.createElement("summary");
+  sum.textContent = "чим зміряно";
+  const p = document.createElement("div");
+  p.className = "tile-note";
+  p.textContent = m.how + (m.as_of ? " · замір " + m.as_of : "");
+  det.append(sum, p);
+  d.appendChild(det);
+  return d;
+}
+
+function renderPartner(pm) {
+  const host = $("partner-tiles");
+  if (!host) { return; }
+  host.textContent = "";
+  $("partner-lead").textContent = "";
+  $("partner-note").textContent = "";
+  if (!pm) { return; }
+  if (pm.error) {
+    $("partner-sec").appendChild(note("warn", pm.error));
+    return;
+  }
+  /* Хто міряв і на чому -- перед числами, не після. Знаменники в двох
+     замірах різні навмисно, і без цього рядка вони читаються як суперечність
+     нашим власним. */
+  $("partner-lead").textContent =
+    "Міряв Андрій, приладами зони бази й нормативного пошуку. Знаменники "
+    + "тут свої: наприклад «без питань до людини» рахується від документів, "
+    + "з яких справді взялися факти, а не від усіх у базі.";
+  for (const m of pm.shown || []) { host.appendChild(metricTile(m)); }
+  const parts = [];
+  if ((pm.folded || []).length) {
+    /* Згорнуте НАЗИВАЄТЬСЯ. Це метрики охоплення корпусу: вони є вище
+       живими, і показати поруч застарілий знімок означало б покласти на один
+       екран два числа про одне й те саме (у пакеті «41 нормативний акт», у
+       базі вже 44). */
+    parts.push(pm.folded.length + " метрик охоплення не показано окремо: "
+               + "ті самі величини є вище, у розділі «База зараз», і там "
+               + "вони живі");
+  }
+  if (pm.dropped) {
+    parts.push(pm.dropped + " метрик відкинуто: без поля «чим зміряно» "
+               + "цифра не показується");
+  }
+  $("partner-note").textContent = parts.join(". ");
 }
 
 load();

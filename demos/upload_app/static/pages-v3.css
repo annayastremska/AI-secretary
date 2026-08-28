@@ -1361,3 +1361,15 @@ thead th {
     .appbar { margin-bottom: 0 }
     main { padding-top: var(--s-4) !important }
 }
+
+/* Плитка метрики партнера: «чим зміряно» -- розкривним блоком під числом.
+ *
+ * Не в атрибуті `title` і не підказкою збоку: на проєкторі й на телефоні
+ * такого не видно, а правило продукту вимагає, щоб джерело цифри БУЛО ВИДНО,
+ * а не існувало формально. Згорнуте за замовчуванням -- інакше пояснення на
+ * два рядки перебиває саме число.
+ */
+#partner-tiles .tile { display: flex; flex-direction: column }
+#partner-tiles details.how { margin-top: auto; padding-top: var(--s-2) }
+#partner-tiles details.how > summary { font-size: 11px }
+#partner-tiles details.how .tile-note { white-space: normal; line-height: 1.45 }
