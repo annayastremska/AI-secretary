@@ -65,19 +65,51 @@ EVAL = os.path.join(ROOT, "eval", "retrieval")
 
 
 def m5_documents_without_human(cur):
-    cur.execute("SELECT count(*) FROM documents")
-    total = cur.fetchone()[0]
+    """Три групи, а НЕ одне число. Перша редакція цієї метрики була неправильна
+    двічі, і помилку знайшов Андрій питанням «а як ти це рахував».
+
+    Було: 204 мінус документи з відкритим завданням = 173. Дві діри:
+
+    1. **знаменник.** У 204 входять 44 нормативні документи, які фактів про
+       людей не дають і не мусять. Метрика має сенс лише там, де факти
+       ОЧІКУЮТЬСЯ: leave + deployment = 158;
+    2. **числитель.** Із 173 «чистих» 111 були чисті тільки тому, що завдання
+       закрив МІЙ СКРИПТ правилом зі штатки. Тобто число на 87% складалося з
+       моєї власної роботи над чергою, а подавалось як якість пайплайна.
+
+    Тому тут три групи, і кожна означає різне:
+
+      A -- нічого ніколи не позначалось: пайплайн не знайшов, до чого чіплятись;
+      B -- завдання було й закрите ПРАВИЛОМ (особа зійшлася зі штаткою). Це
+           справжня перевірка, але автоматична: людина не дивилась;
+      C -- відкрите завдання: чекає людини.
+
+    Плюс окремо -- документи без ЖОДНОГО факту. Такий документ у першій
+    редакції потрапляв у «чисті», хоч він найгірший випадок: пайплайн не витяг
+    нічого, і це виглядає точно як добре оброблений документ.
+    """
     cur.execute("""
-        SELECT count(DISTINCT d.id) FROM documents d
-          JOIN review_queue q ON q.document_id = d.id
-         WHERE q.resolved_at IS NULL
+        WITH факт_доки AS (
+            SELECT id FROM documents WHERE domain IN ('leave', 'deployment')),
+        відкриті AS (
+            SELECT DISTINCT document_id FROM review_queue WHERE resolved_at IS NULL),
+        за_правилом AS (
+            SELECT DISTINCT document_id FROM review_queue
+             WHERE resolved_at IS NOT NULL AND resolution = 'matched_by_roster')
+        SELECT
+         (SELECT count(*) FROM факт_доки),
+         (SELECT count(*) FROM факт_доки f
+           WHERE f.id NOT IN (SELECT document_id FROM відкриті)
+             AND f.id NOT IN (SELECT document_id FROM за_правилом)),
+         (SELECT count(*) FROM факт_доки f
+           WHERE f.id NOT IN (SELECT document_id FROM відкриті)
+             AND f.id IN (SELECT document_id FROM за_правилом)),
+         (SELECT count(*) FROM факт_доки f
+           WHERE f.id IN (SELECT document_id FROM відкриті)),
+         (SELECT count(*) FROM факт_доки f WHERE NOT EXISTS
+           (SELECT 1 FROM fact_sources fs WHERE fs.document_id = f.id))
     """)
-    pending = cur.fetchone()[0]
-    cur.execute("""
-        SELECT count(*) FROM review_queue
-         WHERE resolved_at IS NOT NULL AND resolution = 'matched_by_roster'
-    """)
-    closed_by_rule = cur.fetchone()[0]
+    total, a_clean, b_rule, c_pending, no_facts = cur.fetchone()
     cur.execute("""
         SELECT count(*) FROM review_log
          WHERE changed_by NOT IN ('ai_secretary_loader', 'dedupe_existing_facts',
@@ -85,17 +117,27 @@ def m5_documents_without_human(cur):
     """)
     human_edits = cur.fetchone()[0]
     return {
-        "value": total - pending,
+        "value": a_clean + b_rule,
         "of": total,
-        "means": f"{total - pending} із {total} документів внесено так, що "
-                 "черга не має до них жодного питання",
-        "does_not_prove": "НЕ означає «людина перевірила»: у журналі змін немає "
-                          f"жодного людського запису ({human_edits}). Означає "
-                          "лише, що наш пайплайн не позначив тут нічого "
-                          "підозрілого -- та сама межа, що в звірці каталогу.",
-        "detail": {"documents_with_open_task": pending,
-                   "queue_closed_by_rule_not_human": closed_by_rule,
-                   "human_edits_in_review_log": human_edits},
+        "means": f"{a_clean + b_rule} із {total} документів про відпустки й "
+                 f"відрядження внесено без питань до людини: {a_clean} не "
+                 f"викликали жодного зауваження, ще {b_rule} мали зауваження, "
+                 f"зняте автоматичною звіркою зі штаткою. {c_pending} чекають "
+                 "людини",
+        "does_not_prove": "НЕ означає «перевірено людиною»: у журналі змін "
+                          f"немає жодного людського запису ({human_edits}). "
+                          f"Більшість числа ({b_rule} з "
+                          f"{a_clean + b_rule}) -- це завдання, закриті "
+                          "правилом зі штатки, тобто автоматично. Нормативні "
+                          "документи в знаменник не входять: вони фактів про "
+                          f"людей не дають. Окремо: {no_facts} документів не "
+                          "мають жодного факту -- пайплайн не витяг нічого.",
+        "detail": {"A_never_flagged": a_clean,
+                   "B_closed_by_roster_rule": b_rule,
+                   "C_waiting_for_human": c_pending,
+                   "documents_with_no_facts_at_all": no_facts,
+                   "human_edits_in_review_log": human_edits,
+                   "denominator": "domain IN (leave, deployment)"},
     }
 
 
