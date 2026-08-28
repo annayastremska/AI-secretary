@@ -35,15 +35,30 @@
 відпечатком, згенерованим машиною з тексту бази. НЕ доводить, що цитата
 відповідає на питання по суті: це б вимагало людського судження.
 
-**5. Документів, яким не потрібна людина.** 204 мінус ті, що мають відкрите
-завдання в черзі. НЕ означає «перевірено»: у `review_log` немає ЖОДНОГО
-людського запису, тобто ніхто нічого не переглядав. Означає рівно «наш пайплайн
-не позначив тут нічого підозрілого» -- та сама межа, що в звірці каталогу
-(«база проти нашого ж витягу», не проти правди).
+**5. Документів, яким не потрібна людина.** Визначення «чистого» -- Ані (28.08):
+немає непідтверджених полів І немає відкритого завдання, крім вибіркової
+перевірки. Знаменник -- мій: лише документи, з яких факти справді взялись.
 
-Окремо: 130 завдань `new_person` закрито з резолюцією `matched_by_roster`. Їх
-закрив МІЙ СКРИПТ за правилом зі штатки, а не людина, -- у передачі Ані це
-названо «закриті людиною», і це варто поправити.
+Ця метрика вже двічі була неправильна, і обидва рази помилку знайшов не я:
+
+* перша редакція рахувала «204 мінус документи з відкритим завданням» = 173.
+  Андрій спитав «а як ти це рахував», і виявилось, що 111 із тих 173 чисті
+  ЛИШЕ тому, що завдання закрив мій власний скрипт правилом зі штатки. Тобто
+  число на 87% складалося з моєї роботи над чергою, а подавалось як якість
+  пайплайна. Плюс у знаменник входили 44 нормативні документи, у яких
+  підтверджувати нема чого;
+* друга редакція не дивилась на СТАТУС фактів, тому документ із чернетками
+  вважався чистим. Умову взято в Ані.
+
+НЕ означає «перевірено людиною»: у `review_log` немає ЖОДНОГО людського запису.
+Означає «наш пайплайн не позначив тут нічого підозрілого» -- та сама межа, що в
+звірці каталогу («база проти нашого ж витягу», не проти правди).
+
+Два числа, які треба тримати поруч: 130 завдань `new_person` закрив МІЙ СКРИПТ
+(резолюція `matched_by_roster`), а не людина. І документів із фактами 153 по
+`fact_sources` проти 147 по `facts.source_doc_id`: другий файл пари .docx/.pdf
+прикріплюється зведенням дублікатів як ДОДАТКОВЕ джерело -- він оброблений, але
+не первинний.
 
 **6. Прилади зелені.** Не цінність, а страховка: скільки моїх самотестів
 проходить. Кожен -- на точне значення, не на діапазон (мутаційний аудит Ані
@@ -88,56 +103,98 @@ def m5_documents_without_human(cur):
     редакції потрапляв у «чисті», хоч він найгірший випадок: пайплайн не витяг
     нічого, і це виглядає точно як добре оброблений документ.
     """
+    # Визначення «чистого» взяте в Ані (28.08) -- воно строгіше за моє першу
+    # редакцію: я не дивився на СТАТУС фактів узагалі, тому документ із
+    # чернетками вважався чистим. Її умова: немає непідтверджених полів І
+    # немає відкритого завдання, крім вибіркової перевірки (`qa_sample` --
+    # це завдання, яке ми створюємо самі, а не ознака проблеми документа).
+    #
+    # Знаменник -- мій: лише документи, з яких факти справді взялись. Її
+    # 179/204 відтворюється точно, але серед 204 є 51 документ, у якому нема
+    # чого підтверджувати (нормативка), і вони йдуть у числитель безкоштовно.
+    #
+    # «Документи з фактами» рахуються по fact_sources, а не по
+    # facts.source_doc_id. Різниця -- 6 документів: другий файл пари
+    # .docx/.pdf прикріплюється зведенням дублікатів як ДОДАТКОВЕ джерело
+    # того самого факту. Він оброблений успішно, просто не первинний. За
+    # source_doc_id виходить 147 (число Ані), по fact_sources -- 153.
     cur.execute("""
-        WITH факт_доки AS (
-            SELECT id FROM documents WHERE domain IN ('leave', 'deployment')),
-        відкриті AS (
-            SELECT DISTINCT document_id FROM review_queue WHERE resolved_at IS NULL),
+        WITH з_фактами AS (
+            SELECT DISTINCT document_id AS id FROM fact_sources),
+        блокує AS (
+            SELECT DISTINCT document_id FROM review_queue
+             WHERE resolved_at IS NULL AND queue_type <> 'qa_sample'),
+        має_чернетку AS (
+            SELECT DISTINCT fs.document_id FROM fact_sources fs
+              JOIN facts f ON f.id = fs.fact_id WHERE f.status = 'unconfirmed'),
         за_правилом AS (
             SELECT DISTINCT document_id FROM review_queue
              WHERE resolved_at IS NOT NULL AND resolution = 'matched_by_roster')
         SELECT
-         (SELECT count(*) FROM факт_доки),
-         (SELECT count(*) FROM факт_доки f
-           WHERE f.id NOT IN (SELECT document_id FROM відкриті)
-             AND f.id NOT IN (SELECT document_id FROM за_правилом)),
-         (SELECT count(*) FROM факт_доки f
-           WHERE f.id NOT IN (SELECT document_id FROM відкриті)
-             AND f.id IN (SELECT document_id FROM за_правилом)),
-         (SELECT count(*) FROM факт_доки f
-           WHERE f.id IN (SELECT document_id FROM відкриті)),
-         (SELECT count(*) FROM факт_доки f WHERE NOT EXISTS
-           (SELECT 1 FROM fact_sources fs WHERE fs.document_id = f.id))
+         (SELECT count(*) FROM з_фактами),
+         (SELECT count(*) FROM з_фактами z
+           WHERE z.id NOT IN (SELECT document_id FROM блокує)
+             AND z.id NOT IN (SELECT document_id FROM має_чернетку)
+             AND z.id NOT IN (SELECT document_id FROM за_правилом)),
+         (SELECT count(*) FROM з_фактами z
+           WHERE z.id NOT IN (SELECT document_id FROM блокує)
+             AND z.id NOT IN (SELECT document_id FROM має_чернетку)
+             AND z.id IN (SELECT document_id FROM за_правилом)),
+         (SELECT count(*) FROM з_фактами z
+           WHERE z.id IN (SELECT document_id FROM блокує)
+              OR z.id IN (SELECT document_id FROM має_чернетку)),
+         (SELECT count(*) FROM documents d WHERE NOT EXISTS
+           (SELECT 1 FROM fact_sources fs WHERE fs.document_id = d.id)),
+         (SELECT count(DISTINCT source_doc_id) FROM facts),
+         (SELECT count(*) FROM documents),
+         (SELECT count(*) FROM documents d
+           WHERE d.id NOT IN (SELECT document_id FROM блокує)
+             AND d.id NOT IN (SELECT document_id FROM має_чернетку))
     """)
-    total, a_clean, b_rule, c_pending, no_facts = cur.fetchone()
+    (total, a_clean, b_rule, c_pending, no_facts,
+     by_source_doc_id, all_docs, clean_over_all) = cur.fetchone()
     cur.execute("""
         SELECT count(*) FROM review_log
          WHERE changed_by NOT IN ('ai_secretary_loader', 'dedupe_existing_facts',
                                   'reconcile_roster_status')
     """)
     human_edits = cur.fetchone()[0]
+    clean = a_clean + b_rule
     return {
-        "value": a_clean + b_rule,
+        "value": clean,
         "of": total,
-        "means": f"{a_clean + b_rule} із {total} документів про відпустки й "
-                 f"відрядження внесено без питань до людини: {a_clean} не "
-                 f"викликали жодного зауваження, ще {b_rule} мали зауваження, "
-                 f"зняте автоматичною звіркою зі штаткою. {c_pending} чекають "
-                 "людини",
+        "means": f"{clean} із {total} документів, з яких ми взяли факти, "
+                 f"внесено без питань до людини: {a_clean} не викликали жодного "
+                 f"зауваження, ще {b_rule} мали зауваження, зняте автоматичною "
+                 f"звіркою зі штаткою. {c_pending} мають чернетку або відкрите "
+                 "завдання",
         "does_not_prove": "НЕ означає «перевірено людиною»: у журналі змін "
-                          f"немає жодного людського запису ({human_edits}). "
-                          f"Більшість числа ({b_rule} з "
-                          f"{a_clean + b_rule}) -- це завдання, закриті "
-                          "правилом зі штатки, тобто автоматично. Нормативні "
-                          "документи в знаменник не входять: вони фактів про "
-                          f"людей не дають. Окремо: {no_facts} документів не "
-                          "мають жодного факту -- пайплайн не витяг нічого.",
+                          f"немає жодного людського запису ({human_edits}), і "
+                          f"більшість числа ({b_rule} з {clean}) -- завдання, "
+                          "закриті правилом зі штатки, тобто автоматично. "
+                          f"Знаменник -- {total} документів із фактами, а не "
+                          f"всі {all_docs}: у решти ({no_facts}, з них "
+                          "нормативка) підтверджувати нема чого, і вони йшли б "
+                          "у числитель безкоштовно.",
         "detail": {"A_never_flagged": a_clean,
                    "B_closed_by_roster_rule": b_rule,
-                   "C_waiting_for_human": c_pending,
+                   "C_draft_or_open_task": c_pending,
                    "documents_with_no_facts_at_all": no_facts,
                    "human_edits_in_review_log": human_edits,
-                   "denominator": "domain IN (leave, deployment)"},
+                   "denominator": "документи з фактами (fact_sources), "
+                                  f"{total} із {all_docs}",
+                   "same_definition_over_all_documents":
+                       f"{clean_over_all} із {all_docs} -- те саме визначення по ВСІХ документах (число Ані). Відсоток майже той самий, але твердження інше: сюди входять документи, у яких нема чого підтверджувати",
+                   "documents_with_facts_by_source_doc_id": by_source_doc_id,
+                   "why_two_counts": (
+                       f"{by_source_doc_id} за facts.source_doc_id проти "
+                       f"{total} за fact_sources: другий файл пари .docx/.pdf "
+                       "прикріплюється зведенням дублікатів як ДОДАТКОВЕ "
+                       "джерело того самого факту -- він оброблений, але не "
+                       "первинний"),
+                   "definition": "немає непідтверджених полів І немає "
+                                 "відкритого завдання, крім qa_sample "
+                                 "(визначення Ані, 28.08)"},
     }
 
 
