@@ -50,6 +50,10 @@ import quote_with_llm_test as G  # noqa: E402
 import resolve_identifier as R  # noqa: E402
 import search_units_test as SU  # noqa: E402
 
+# Та сама таблиця, яку читає пошук: інакше зіставлення істини йде по
+# public, а видача -- по копії, і id не збігаються.
+UNITS = SU.UNITS
+
 FOLD = str.maketrans({"i": "і", "I": "І", "a": "а", "A": "А", "c": "с", "C": "С",
                       "e": "е", "E": "Е", "o": "о", "O": "О", "p": "р", "P": "Р",
                       "x": "х", "X": "Х", "y": "у", "T": "Т", "B": "В", "H": "Н",
@@ -91,14 +95,14 @@ def norm(s):
 def _match(cur, frag):
     """Одиниці, що містять фрагмент. Пробілонечутливо, із запасом на гомоглифи."""
     needle = "%" + " ".join(frag.split()) + "%"
-    cur.execute("""
-        SELECT u.id FROM document_units u
+    cur.execute(f"""
+        SELECT u.id FROM {UNITS} u
          WHERE regexp_replace(u.text, E'\\\\s+', ' ', 'g') ILIKE %s LIMIT 20
     """, (needle,))
     rows = cur.fetchall()
     if not rows:      # латинські гомоглифи в OCR -- на них я вже попадався
-        cur.execute("""
-            SELECT u.id FROM document_units u
+        cur.execute(f"""
+            SELECT u.id FROM {UNITS} u
              WHERE translate(regexp_replace(u.text, E'\\\\s+', ' ', 'g'),
                              'iIaAcCeEoOpPxXyTBHMK',
                              'іІаАсСеЕоОрРхХуТВНМК') ILIKE %s LIMIT 20
@@ -252,7 +256,7 @@ def chain(cur, encode, rescore, q, top=2, criterion=None, ctx=False,
         if truncated:
             continue
         quote = (data.get("quote") or "").strip()
-        cur.execute("SELECT id FROM document_units WHERE document_id=%s AND base_label=%s",
+        cur.execute(f"SELECT id FROM {UNITS} WHERE document_id=%s AND base_label=%s",
                     (doc_id, base))
         uids = {r[0] for r in cur.fetchall()}
         out.append({"doc": doc_id, "label": base, "ident": ident,
