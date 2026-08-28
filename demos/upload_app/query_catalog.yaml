@@ -732,20 +732,22 @@ templates:
   # в схемі немає); validity за замовчуванням 'unknown' -- система ніколи не
   # позначає документ чинним самостійно, і відповідь мусить це озвучити.
   - id: normative_list
-    title: Перелік нормативних актів у базі
+    title: Про що є нормативні документи (теми корпусу)
     examples:
       - Які нормативні документи є в базі?
       - Покажи перелік наказів та інструкцій
       - На які акти ти спираєшся?
     params: []
     answer_hint: >
-      Головне -- перелік: назва (title_line -- перший рядок тексту акта) і
-      стан чинності validity. Якщо validity не 'current' -- сказати «чинність
-      не підтверджено» (система сама чинність не встановлює). Джерело -- сама
-      назва акта і id запису.
+      Головне -- ТЕМИ корпусу з числами й приклади питань, а не перелік
+      документів: перелік не відповідає на «про що можна питати» (розбір --
+      chat_gradio/normative_topics.py). Теми беруться з normative_topics.yaml
+      і зіставляються автоматично, тому новий документ теми не потребує.
+      Якщо validity не 'current' -- сказати «чинність не підтверджено»
+      (система сама чинність не встановлює).
     sql: >
-      SELECT dc.id, dc.validity, dc.uploaded_at::date AS uploaded_on,
-             split_part(btrim(dc.text_content), E'\n', 1) AS title_line
+      SELECT dc.doc_identifier, dc.doc_title, dc.validity,
+             left(coalesce(dc.text_content, ''), 1200) AS head
       FROM documents dc
       WHERE dc.domain = 'normative'
       ORDER BY dc.id

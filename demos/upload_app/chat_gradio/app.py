@@ -1181,6 +1181,16 @@ def answer_reference(question):
         # Порядок саме такий: у корпусі є документ «Підключення до службової
         # мережі військової частини», тобто на це питання відповідь Є -- і дати
         # її мусить ланцюг, цитатою з адресою пункту.
+        # Питання про ТЕМИ -- своїм шаблоном, а не складом бази: сюда воно
+        # доходить від моделі, яка про правила маршрутизації не знає.
+        if tier_chat.is_topic_question(question):
+            try:
+                text, source = tier_chat.run_template("normative_list", {})
+            except Exception:
+                text = None
+            if text:
+                return text + _fmt_source_block(
+                    source, "теми корпусу (дорога «довідник»)")
         if not tier_chat.is_corpus_question(question):
             try:
                 text, source = tier_chat.run_template(

@@ -93,9 +93,15 @@ def stats():
     return 0
 
 
-def check():
-    """Судити, а не описувати. Код виходу 1, якщо правило зламане."""
-    data = trace.summary()
+def check(since=None):
+    """Судити, а не описувати. Код виходу 1, якщо правило зламане.
+
+    `since` звужує вибірку за часом. Потрібне після 28.08: до правки
+    conftest набір писав у бойовий слід, і шість тестових записів
+    («база недоступна», відповідь без джерела) лишились у файлі назавжди --
+    видаляти їх означало б переписати історію, у якій лежать номери звернень
+    для розбору скарг. Звужена вибірка ЗАВЖДИ називається вголос."""
+    data = trace.summary(since=since)
     if not data.get("turns"):
         print("НЕМА ЩО ПЕРЕВІРЯТИ: слідів нуль")
         return 0
@@ -118,6 +124,13 @@ def check():
         print(f"OK: технічних збоїв нема на {data['turns']} ходах")
     print(f"довідково: відмов {data.get('refusals')} (це НЕ збій), "
           f"медіана {data.get('median_seconds')} с")
+    skipped = data.get("skipped_before_since") or 0
+    if skipped:
+        # Відкинуте називається ВГОЛОС. Прилад, що тихо звужує власну
+        # перевірку, гірший за відсутній: йому перестають вірити рівно тоді,
+        # коли він скаже правду.
+        print(f"довідково: вікном --since {since} відкинуто {skipped} "
+              f"ранніших ходів")
     return 1 if bad else 0
 
 
@@ -130,13 +143,16 @@ def main():
     ap.add_argument("--check", action="store_true",
                     help="перевірити правила; код виходу 1, якщо зламано")
     ap.add_argument("--path", default=None, help="інший файл сліду")
+    ap.add_argument("--since", default=None,
+                    help="рахувати лише ходи від цього часу (ISO, напр. "
+                         "2026-08-28T12:00). Звужена вибірка друкується")
     args = ap.parse_args()
 
     if args.path:
         trace.TRACE_PATH = args.path
 
     if args.check:
-        return check()
+        return check(args.since)
     if args.stats:
         return stats()
     if not args.request_id:
