@@ -50,9 +50,12 @@
 import datetime
 import glob
 import importlib.util
+import io as _io
+import json
 import os
 import re
 import time
+import uuid
 
 try:
     from . import tiers as _t
@@ -77,6 +80,16 @@ KEEP_HOURS = 1
 
 #: Скільком невдалих спроб на одне поле, після чого пропонуємо вихід.
 MAX_TRIES = 3
+
+#: СЛІД РЕЖИМУ -- ОКРЕМИЙ ФАЙЛ, а не спільний із чатом.
+#:
+#: Аня спитала, чи не змішувати. Не змішувати, і причина не смакова:
+#: `trace_lookup --check` судить кожен запис правилом «у відповіді є джерело».
+#: У режимі створення «відповідь» -- це ПИТАННЯ до людини, джерела в неї немає
+#: за побудовою, тому в спільному файлі прилад почав би рахувати порушення
+#: там, де їх нема. Ми вже наступали на це рівно раз, коли тести писали в
+#: бойовий слід і прилад закричав «ЗЛАМАНО» про власний набір.
+TRACE_PATH = os.path.join(ROOT, "logs", "docgen-trace.jsonl")
 
 _CACHE = {}
 
@@ -132,18 +145,18 @@ _PLAN = {
         {"name": "person", "type": "person", "required": True,
          "ask": "Прізвище, ім'я, по батькові."},
         {"name": "leave_type", "type": "text", "required": True,
-         "ask": "Вид відпустки (наприклад: щорічна основна відпустка за "
-                "2026 рік)."},
+         "ask": "Вид відпустки так, як він названий у наказі — наприклад: "
+                "щорічна основна відпустка за 2026 рік."},
         {"name": "place", "type": "text", "required": True,
-         "ask": "Населений пункт, куди звільнено."},
+         "ask": "Населений пункт, куди звільнено. З типом населеного пункту, як у документі — наприклад: м. Кривоярськ."},
         {"name": "start", "type": "date", "required": True,
          "ask": "Дата початку відпустки."},
         {"name": "end", "type": "date", "required": True,
          "ask": "Дата завершення відпустки."},
         {"name": "vpd", "type": "text", "required": False,
-         "ask": "Номер військового перевізного документа, якщо видавався."},
+         "ask": "Номер військового перевізного документа, якщо видавався. Наприклад: 4480/26. Немає — скажіть «пропустити»."},
         {"name": "companions", "type": "text", "required": False,
-         "ask": "Хто прямує разом, якщо є такі."},
+         "ask": "Хто прямує разом, якщо є такі. Прізвище й ініціали — наприклад: Орлик Р.К. Немає — «пропустити»."},
         {"name": "number", "type": "number", "required": True,
          "ask": "Номер документа."},
         {"name": "issue", "type": "date", "required": True,
@@ -153,12 +166,12 @@ _PLAN = {
         {"name": "person", "type": "person", "required": True,
          "ask": "Прізвище, ім'я, по батькові."},
         {"name": "dest", "type": "text", "required": True,
-         "ask": "Населений пункт призначення."},
+         "ask": "Населений пункт призначення. З типом населеного пункту — наприклад: м. Рівне."},
         {"name": "dest_org", "type": "text", "required": True,
-         "ask": "Куди саме відряджається (найменування частини чи "
-                "організації)."},
+         "ask": "Найменування частини або організації — наприклад: "
+                "військова частина К2317."},
         {"name": "purpose", "type": "text", "required": True,
-         "ask": "Мета відрядження."},
+         "ask": "Мета відрядження. Одним рядком, як у наказі — наприклад: приймання матеріально-технічних засобів."},
         {"name": "start", "type": "date", "required": True,
          "ask": "Дата початку відрядження."},
         {"name": "end", "type": "date", "required": True,
@@ -541,8 +554,43 @@ def _clean_old(out):
 # помилка такого перемикача, і на демо вона виглядала б як зламаний чат.
 
 def start():
-    return {"kind": None, "idx": 0, "answers": {}, "tries": 0, "done": False,
+    """Новий сеанс збирання. Номер звернення -- одразу.
+
+    Один номер на ВЕСЬ документ, а не на кожне питання: людина показує на
+    подію («створювала документ, і ось що вийшло»), а подія тут одна. Десять
+    номерів під десятьма питаннями були б шумом, у якому неможливо вказати на
+    потрібний.
+    """
+    return {"id": uuid.uuid4().hex[:6],
+            "kind": None, "idx": 0, "answers": {}, "tries": 0, "done": False,
             "confirm": False, "conflict": None}
+
+
+def done_line(state):
+    """Рядок із номером звернення для кінця розмови."""
+    return f"звернення {(state or {}).get('id', '—')}"
+
+
+def _log(state, event, **fields):
+    """Слід режиму. ЖОДНОГО ЗНАЧЕННЯ полів -- лише що відбулось.
+
+    Тут це строгіше, ніж у чаті: у режимі людина ДИКТУЄ ПІБ, дати й місце
+    призначення. Правило проєкту -- у логи не їде персональна інформація, і
+    писати відповіді означало б зібрати картотеку в лог-файлі.
+    """
+    rec = {"id": (state or {}).get("id"),
+           "at": datetime.datetime.now().replace(microsecond=0).isoformat(),
+           "kind": (state or {}).get("kind"),
+           "event": event}
+    rec.update(fields)
+    try:
+        os.makedirs(os.path.dirname(TRACE_PATH), exist_ok=True)
+        with _io.open(TRACE_PATH, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        # Слід -- допоміжне знання. Не записався -- людина однаково отримує
+        # документ.
+        pass
 
 
 def is_done(state):
@@ -553,6 +601,16 @@ def is_done(state):
 #: переліку: воно перевіряється у двох місцях (у стані перетину й поза ним).
 _OVERRIDE = re.compile(r"^\s*формуй\s*(усе\s*одно|все\s*одно)?\s*$",
                        re.IGNORECASE)
+
+
+def _current_field_name(state):
+    """Назва поля, на якому стоїмо. Для сліду: назва -- не персональні дані."""
+    st = state or {}
+    if not st.get("kind"):
+        return "kind"
+    fields = plan(st["kind"])
+    idx = st.get("idx", 0)
+    return fields[idx]["name"] if idx < len(fields) else "summary"
 
 
 def _current_ask(state):
@@ -586,6 +644,7 @@ def step(state, text):
 
     if low in ("скасувати", "відміна", "стоп", "вихід"):
         st["done"] = True
+        _log(st, "cancelled", at_field=_current_field_name(st))
         return st, "Створення документа скасовано. Чат працює як звичайно.", None
 
     # КЕРІВНІ ФРАЗИ ПОЗА СВОЇМ МІСЦЕМ -- не дані.
@@ -602,10 +661,22 @@ def step(state, text):
     if st["kind"] is None:
         kind = _kind_of(raw)
         if not kind:
-            return st, ("Який документ створюємо? Скажіть «відпускний квиток» "
-                        "або «посвідчення про відрядження»."), None
+            ask = ("Який документ створюємо? Скажіть «відпускний квиток» "
+                   "або «посвідчення про відрядження».")
+            # НОМЕР ЗВЕРНЕННЯ -- у першому повідомленні й у останньому.
+            #
+            # Один на весь документ: людина показує на ПОДІЮ («створювала
+            # документ, і ось що вийшло»), а подія тут одна. Десять номерів під
+            # десятьма питаннями були б шумом, у якому неможливо вказати на
+            # потрібний -- рівно те, на що Аня скаржилась у чаті 27.08
+            # («код звернення дублюється»).
+            if not raw:
+                _log(st, "started")
+                return st, ask + "\n" + done_line(st), None
+            return st, ask, None
         st["kind"] = kind
         st["idx"] = 0
+        _log(st, "kind_chosen")
         return st, plan(kind)[0]["ask"], None
 
     fields = plan(st["kind"])
@@ -630,7 +701,10 @@ def step(state, text):
     if st.get("confirm"):
         if low in ("так", "формуй", "давай") or _OVERRIDE.match(low):
             st["done"] = True
-            return st, "", build(st["kind"], st["answers"])
+            path = build(st["kind"], st["answers"])
+            _log(st, "built", superseded=bool(st["answers"].get("supersedes")),
+                 override=bool(st["answers"].get("conflict_override")))
+            return st, "", path
         st["done"] = True
         return st, "Не формую. Створення скасовано.", None
 
@@ -654,6 +728,9 @@ def step(state, text):
 
     value, err, note = validate_answer(field, raw, st["answers"])
     if err:
+        # У слід -- ЛИШЕ назва поля й те, що не прийнялось. Ні тексту людини,
+        # ні тексту помилки: помилка може містити перелік знайдених ПІБ.
+        _log(st, "rejected", field=field["name"])
         st["tries"] = st.get("tries", 0) + 1
         if st["tries"] >= MAX_TRIES:
             st["tries"] = 0
@@ -665,6 +742,7 @@ def step(state, text):
 
     st["tries"] = 0
     st["answers"][field["name"]] = value
+    _log(st, "accepted", field=field["name"])
     return _advance(st, fields, note)
 
 
@@ -687,6 +765,7 @@ def _advance(st, fields, note):
         clash = _conflict_note(st)
         if clash:
             st["conflict"] = True
+            _log(st, "conflict_found")
             return st, head + clash, None
     nxt = fields[st["idx"]] if st["idx"] < len(fields) else None
 
@@ -729,7 +808,15 @@ def _summary(st):
     lines = ["Зібрано:"]
     for f in plan(st["kind"]):
         v = st["answers"].get(f["name"])
-        lines.append(f"- {f['ask'].rstrip('.')}: "
-                     + ("—" if v in (None, "") else str(v)))
+        if f["name"] == "person" and v:
+            # У зведенні стояло «Прізвище, ім'я, по батькові: UNIT-0026».
+            # Службовий код у полі, яке людина щойно назвала словами, -- це та
+            # сама внутрішня кухня на екрані, на яку скаржився Денис (п. 25).
+            rows = [r for r in _roster() if r["service_id"] == v]
+            if rows:
+                v = f"{rows[0]['rank']} {rows[0]['full_name']}"
+        # Питання скорочуємо до суті: у зведенні «(наприклад: …)» -- шум.
+        label = re.split(r"\s+[—(]|\.\s", f["ask"])[0].rstrip(".")
+        lines.append(f"- {label}: " + ("—" if v in (None, "") else str(v)))
     lines.append("Сформувати документ? так / скасувати")
     return "\n".join(lines)

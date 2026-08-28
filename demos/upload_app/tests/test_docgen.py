@@ -13,6 +13,7 @@
 виводиться з того, чого чекає ЗАПОВНЮВАЧ, а схема лишається джерелом перевірок.
 """
 import os
+import re
 import sys
 
 import pytest
@@ -435,3 +436,87 @@ def test_conflict_stops_the_document_and_offers_the_legal_route():
     st, reply, path = docgen.step(st, "замість №1077")
     assert not st.get("conflict")
     assert "1077" in reply
+
+
+# ── Номер звернення й слід режиму ────────────────────────────────────────────
+
+
+def test_session_gets_a_request_id():
+    st = docgen.start()
+    assert re.fullmatch(r"[0-9a-f]{6}", st["id"]), st.get("id")
+
+
+def test_id_is_shown_at_the_start_and_with_the_file(tmp_path):
+    st = docgen.start()
+    st, reply, _ = docgen.step(st, "")
+    assert st["id"] in reply, reply
+    # І в кінці, разом із файлом.
+    line = docgen.done_line(st)
+    assert st["id"] in line
+
+
+def test_trace_file_is_separate_from_the_chat_trace():
+    """Змішувати не можна, і це не смак.
+
+    `trace_lookup --check` судить кожен запис за правилом «у відповіді є
+    джерело». У режимі створення відповідь -- це ПИТАННЯ до людини, джерела в
+    неї немає за побудовою, тому в спільному файлі прилад почав би рахувати
+    порушення там, де їх нема. Ми вже наступали на це, коли тести писали в
+    бойовий слід.
+    """
+    from chat_gradio import trace as chat_trace
+    assert docgen.TRACE_PATH != chat_trace.TRACE_PATH
+    assert "docgen" in os.path.basename(docgen.TRACE_PATH)
+
+
+def test_trace_records_no_personal_data(tmp_path, monkeypatch):
+    """Правило проєкту: у логи не їде персональна інформація.
+
+    Тут це важливіше, ніж у чаті: у режимі людина ДИКТУЄ ПІБ, дати й місце.
+    Тому в слід ідуть лише назва поля, чи воно прийнялось, і чи був перетин --
+    без жодного значення.
+    """
+    path = tmp_path / "docgen-trace.jsonl"
+    monkeypatch.setattr(docgen, "TRACE_PATH", str(path))
+    st = docgen.start()
+    st, _, _ = docgen.step(st, "відпускний квиток")
+    st, _, _ = docgen.step(st, "Гавриш Адам Станіславович")
+    body = path.read_text(encoding="utf-8")
+    assert "Гавриш" not in body, body
+    assert "UNIT-" not in body, body
+    assert st["id"] in body
+    assert "person" in body
+
+
+# ── Формат відповіді: очікуваний вигляд і ОДИН приклад ──────────────────────
+
+
+@pytest.mark.parametrize("kind", ["leave", "deployment"])
+def test_text_fields_state_the_expected_format_with_one_example(kind):
+    """Рішення Ані: за людину не нормалізуємо, але мусимо сказати, ЯК саме
+    писати, і дати один приклад."""
+    for f in docgen.plan(kind):
+        if f["type"] != "text":
+            continue
+        ask = f["ask"]
+        assert "наприклад" in ask.lower(), (kind, f["name"], ask)
+        # Один приклад, не три: перелік прикладів читається як перелік
+        # варіантів на вибір.
+        assert ask.lower().count("наприклад") == 1, (kind, f["name"], ask)
+
+
+def test_summary_shows_the_person_by_name_not_by_code():
+    """У зведенні стояло «Прізвище, ім'я, по батькові: UNIT-0026».
+
+    Службовий код у полі, яке людина щойно назвала словами, -- це та сама
+    внутрішня кухня на екрані, на яку скаржився Денис (п. 25).
+    """
+    st = docgen.start()
+    st["kind"] = "leave"
+    st["answers"] = {"person": "UNIT-0001", "leave_type": "щорічна",
+                     "place": "м. Рівне", "start": "2026-11-03",
+                     "end": "2026-11-12", "number": "9001",
+                     "issue": "2026-11-01"}
+    text = docgen._summary(st)
+    assert "UNIT-0001" not in text, text
+    assert "Гавриш" in text, text
