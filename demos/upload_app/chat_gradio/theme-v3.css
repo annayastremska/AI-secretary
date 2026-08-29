@@ -2427,3 +2427,99 @@ details.src > *:not(summary) {
         line-height: 1.25 !important;
     }
 }
+
+/* 43. ТЕЛЕФОН: шапка чата -- СІТКА, а не вирівнювання «на око» (Аня 29.08:
+ *     «верхня панель все ще кривувата і не гарна»).
+ *
+ *     Чому правило 42 не допомогло. Воно зробило три однакові коробки, але
+ *     розкладка лишалась flex із проміжком: назва починалась одразу за
+ *     кнопкою меню, а праворуч лишався інший відступ -- тобто симетрії не було
+ *     ні по горизонталі, ні між краями смуги. Плюс висота лишалась
+ *     «мінімальною», тобто її задавав найвищий елемент, а не смуга.
+ *
+ *     Тут три колонки фіксованої ширини: 40 -- назва -- 40. Обидва краї
+ *     однакові, проміжки однакові, а назва більше не залежить від ширини
+ *     кнопок.
+ *
+ *     Висота 52px задана саме як висота, а не мінімум: смуга мусить бути
+ *     сталою, інакше вона стрибає, коли в кнопці міняється знак (сонце ->
+ *     місяць -> «як у системі»).
+ *
+ *     Безпечна зона зверху лишається окремим відступом: на iPhone смуга
+ *     статусу накриває перші пікселі, і зелень мусить іти під неї.
+ */
+@media (max-width: 860px) {
+    #topbar {
+        display: grid !important;
+        grid-template-columns: 40px minmax(0, 1fr) 40px !important;
+        grid-auto-rows: 52px !important;
+        align-items: center !important;
+        column-gap: var(--s-3) !important;
+        padding: env(safe-area-inset-top) var(--s-3) 0 !important;
+        min-height: 0 !important;
+    }
+    /* Кожен елемент -- у свою колонку явно. Без цього Gradio-обгортки
+       розкладаються в порядку появи, і поява четвертого елемента (колись)
+       зсунула б усе. */
+    #nav-toggle-block { grid-column: 1 !important; order: 0 !important }
+    #topbar-title     { grid-column: 2 !important }
+    #theme-switch     { grid-column: 3 !important; justify-self: end !important }
+
+    /* Назва: рівно по центру рядка. `line-height: 1` тут не косметика --
+       заголовок набраний ВЕЛИКИМИ літерами, у нього немає нижніх виносних,
+       і при звичайному міжрядковому текст оптично сидить вище центру. */
+    #topbar-title {
+        display: flex !important;
+        align-items: center !important;
+        min-height: 0 !important;
+        height: 100% !important;
+        overflow: hidden !important;
+    }
+    #topbar-title .prose,
+    #topbar-title h1, #topbar-title h2, #topbar-title h3, #topbar-title p {
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+
+    /* Однакова вага двох органів керування. Риски меню були тонші за обводку
+       кола, і на зеленому це читалось як два різні за важливістю елементи. */
+    #nav-toggle span {
+        width: 22px !important;
+        height: 2.5px !important;
+        border-radius: 2px !important;
+    }
+    #nav-toggle { gap: 5px !important }
+}
+
+/* 43-а. І ГОЛОВНЕ, чого не бачив жоден із попередніх заходів.
+ *
+ *     У ранній мобільній версії кнопка меню стояла АБСОЛЮТОМ, і щоб вміст
+ *     шапки під неї не заїжджав, кожному елементу дописали лівий відступ:
+ *
+ *         #topbar > * { padding: 0 var(--s-3) 0 52px !important }
+ *
+ *     Кнопка давно в потоці (правило A), потім у сітці (правило 43) -- а цей
+ *     відступ лишився. Тобто НАЗВА мала всередині своєї колонки 52 пікселі
+ *     порожнечі злива, а кнопка теми -- ті самі 52 пікселі в колонці шириною
+ *     40. Вона просто не вміщалась у свою клітинку, і саме це на екрані
+ *     виглядало як «кожен елемент сам собі».
+ *
+ *     Урок той самий, що з тінню й межами: відступ, доданий під АБСОЛЮТ,
+ *     мусить зникати разом з абсолютом. Тут він жив на три правила довше.
+ */
+@media (max-width: 860px) {
+    #topbar > * {
+        padding: 0 !important;
+        margin: 0 !important;
+        max-width: none !important;
+        min-width: 0 !important;
+    }
+    /* Клавіатура відкрита: смуга нижча, бо екрана лишається 40%. */
+    @media (max-height: 460px) {
+        #topbar { grid-auto-rows: 44px !important }
+    }
+}
