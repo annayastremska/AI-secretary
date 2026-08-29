@@ -3242,6 +3242,25 @@ FREE_SQL_ENABLED = os.environ.get("CHAT_FREE_SQL", "1").strip().lower() not in (
     "0", "false", "no", "off")
 
 
+def _free_sql_value(v):
+    """Значення з нешаблонного запиту -- у людський вигляд. -> рядок.
+
+    Дробові числа з Postgres приходять як Decimal повної точності:
+    `10.2000000000000000`. На екрані це читається як витік із бази. Округлюємо
+    до одного знака й ставимо кому -- як у решті наших чисел.
+
+    Екранування лишається обов'язковим: значення прийшли з документів, тобто це
+    недовірений вхід, і вони їдуть у Markdown-рендер чата.
+    """
+    import decimal
+    if isinstance(v, (float, decimal.Decimal)):
+        f = float(v)
+        if f == int(f):
+            return _esc(str(int(f)))
+        return _esc(("%.1f" % f).replace(".", ","))
+    return _esc(v)
+
+
 def tier2_answer(question):
     """-> (text, source_lines). Не склалось -> чесна відмова, без другої
     спроби моделі «аби щось віддати»."""
@@ -3283,15 +3302,27 @@ def tier2_answer(question):
     if not rows or all(v is None for r in rows for v in r.values()):
         return ("Не знайшла: запит виконано, але даних немає. "
                 "Спробуйте перефразувати питання."), src
-    lines = ["Відповідь на нешаблонний запит (перевірте джерело у згортці):"]
     cols = list(rows[0].keys())
-    # і назви колонок, і значення їдуть у Markdown-рендер чата -- екрануємо
-    # (значення в базі прийшли з документів, недовірений вхід)
-    lines.append(" | ".join(_esc(c) for c in cols))
-    for r in rows[:50]:
-        lines.append(" | ".join("" if r[c] is None else _esc(r[c]) for c in cols))
-    if len(rows) > 50:
-        lines.append(f"... і ще {len(rows) - 50} рядків (обрізано)")
+    lines = []
+    if len(rows) == 1 and len(cols) == 1:
+        # ОДНЕ ЧИСЛО -- найчастіший випадок цього яруса (середнє, максимум,
+        # сума). Назву колонки НЕ показуємо: `avg` і `max` -- це внутрішня
+        # кухня бази, а не відповідь. Питання людини стоїть на екрані вище,
+        # тому підпис їй не потрібен; вигадувати свій ми не будемо (див.
+        # шапку правки).
+        lines.append(_free_sql_value(rows[0][cols[0]]))
+    else:
+        # Кілька рядків або кілька колонок -- лишається таблиця, але числа в
+        # ній теж округлені.
+        lines.append(" | ".join(_esc(c) for c in cols))
+        for r in rows[:50]:
+            lines.append(" | ".join(
+                "" if r[c] is None else _free_sql_value(r[c]) for c in cols))
+        if len(rows) > 50:
+            lines.append(f"... і ще {len(rows) - 50} рядків (обрізано)")
+    # ЗРІЗ БАЗИ -- як у решти відповідей. Його тут не було, і саме через це
+    # відповідь виглядала чужою серед інших: у всіх є дата, у цієї не було.
+    lines.append(f"Зріз: стан бази на {datetime.date.today()}.")
     try:
         u = _run_template_sql(
             "SELECT COUNT(*) AS n FROM facts WHERE status = 'unconfirmed'", {})

@@ -81,13 +81,57 @@ def test_enabled_tier_is_called_and_its_answer_is_marked(monkeypatch):
     monkeypatch.setattr(tiers, "FREE_SQL_ENABLED", True)
     monkeypatch.setattr(chat_app, "model_available", lambda: True)
     monkeypatch.setattr(tiers, "_get_model", lambda: object())
+    #: Ознака нешаблонності живе в ДЖЕРЕЛІ, а не в тексті відповіді. Заглушка
+    #: мусить віддавати те саме, що віддає справжній `tier2_answer` -- інакше
+    #: тест перевіряє власну вигадку.
     monkeypatch.setattr(
         tiers, "tier2_answer",
-        lambda q: ("Відповідь на нешаблонний запит: 7", ["SQL:", "SELECT 1"]))
+        lambda q: ("7", ["НЕШАБЛОННИЙ ЗАПИТ: SQL склала модель",
+                         "SQL:", "SELECT 1"]))
     out = chat_app._tier2_tier("скільки в середньому днів відпустки?")
     assert out is not None
     assert "нешаблонний запит" in out
     assert "SELECT 1" in out, "SQL мусить бути видно у відповіді"
+
+
+def test_marker_lives_in_the_source_on_both_sides():
+    """КОНСТРУКЦІЙНИЙ тест, і він написаний після власного промаху.
+
+    29.08 я прибрала з подачі рядок «Відповідь на нешаблонний запит…», бо він
+    казав людині «перевірте джерело у згортці» замість самої відповіді. А
+    `_tier2_tier` розпізнавав ярус саме за цим рядком -- і перестав. МОВЧКИ:
+    ярус віддавав правильну відповідь, гілка її не впізнавала й повертала None,
+    питання падало у відмову. Тобто косметична правка подачі вимкнула цілий
+    ярус, і жоден тест цього не побачив, бо заглушка підсовувала потрібний
+    рядок сама.
+
+    Тому тут перевіряється ЗВ'ЯЗОК двох боків: те саме слово стоїть і в тому,
+    що складає джерело (`tier2_answer`), і в тому, що його читає
+    (`_tier2_tier`).
+    """
+    import io as _io
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tiers_src = _io.open(os.path.join(here, "chat_gradio", "tiers.py"),
+                         encoding="utf-8").read()
+    app_src = _io.open(os.path.join(here, "chat_gradio", "app.py"),
+                       encoding="utf-8").read()
+    marker = "НЕШАБЛОННИЙ ЗАПИТ"
+    def one_function(src, head):
+        """Тіло однієї функції. До НАСТУПНОГО `def` або до кінця файла.
+
+        «Або до кінця» тут обов'язкове: `tier2_answer` -- остання функція
+        `tiers.py`, і перша версія цього тесту падала на ValueError, шукаючи
+        неіснуючий наступний def. Тобто тест ламався не на предметі перевірки,
+        а на власній нарізці."""
+        body = src[src.index(head):]
+        nxt = body.find(chr(10) + "def ", 10)
+        return body if nxt < 0 else body[:nxt]
+
+    body = one_function(tiers_src, "def tier2_answer(")
+    assert marker in body, "джерело яруса більше не містить ознаки"
+    reader = one_function(app_src, "def _tier2_tier(")
+    assert marker in reader, "читач ознаки більше її не шукає"
 
 
 if __name__ == "__main__":
