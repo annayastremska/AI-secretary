@@ -224,6 +224,13 @@
     "ті самі величини є вище, у розділі «База зараз», і там":
       "the same quantities appear above, in «The database right now», and there",
     "вони живі": "they are live",
+    // Згорнутий дубль перетинів (29.08, пункт 13 переліку Ані). Рядки
+    // розбиті так само, як у рендері: ключем має бути рівно той шматок, що
+    // потрапляє на екран, інакше перемикач мови його не бачить.
+    "метрику про перетини не показано окремо:":
+      "one overlap metric is not shown separately:",
+    "те саме число є нижче, у розділі «Конфлікти», і воно живе":
+      "the same number appears below, in «Overlaps», and it is live",
     "метрик відкинуто: без поля «чим зміряно»":
       "metrics were dropped: without the «how it was measured» field",
     "цифра не показується": "a number is not shown",
