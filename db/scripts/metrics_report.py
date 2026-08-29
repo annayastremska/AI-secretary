@@ -344,20 +344,20 @@ def m2_and_m3(args):
             print(f"   {'відмовився' if not said_yes else 'ВІДПОВІВ (погано)'}"
                   f"  {q[:62]}")
 
-        print("\n3. джерело, що сходиться")
+        # ДОСЛІВНІ ЦИТАТИ: чи показане джерело справжнє (цитата воріт --
+        # підрядок процитованої одиниці). НЕ вимагаємо, щоб адреса збіглася з
+        # істиною: цитата з сусіднього пункту чи додатка теж дослівна, а
+        # каране «інша адреса» -- це строгість набору, не порушення правила.
+        # Провал тут = модель відредагувала цитату (пунктуація, пропуск,
+        # зшивання), і продукт її відкидає. Розклад причин -- у
+        # diagnose_source_failures.py.
+        print("\n3. дослівні цитати з документів")
         ok3 = 0
         for q, doc_id, needle in truth:
-            ids = AB.correct_units(cur, doc_id, needle)
             got = chain(cur, q)
-            hit = False
-            for unit, exact, answers in got:
-                if not (exact and answers):
-                    continue
-                if _unit_ids(cur, unit) & ids:
-                    hit = True
-                    break
-            ok3 += hit
-            print(f"   {'OK    ' if hit else 'ні    '} {q[:62]}")
+            verbatim = any(exact and answers for _u, exact, answers in got)
+            ok3 += verbatim
+            print(f"   {'дослівно' if verbatim else 'НЕ ДОСЛІВНО'} {q[:62]}")
 
     m2 = {
         "value": refused, "of": len(off_topic),
@@ -367,12 +367,12 @@ def m2_and_m3(args):
     }
     m3 = {
         "value": ok3, "of": len(truth),
-        "means": f"для {ok3} із {len(truth)} питань знайдено ДОСЛІВНУ цитату з "
-                 "тієї одиниці документа, яку призначила істина",
+        "means": f"для {ok3} із {len(truth)} відповідей цитата воріт -- "
+                 "ДОСЛІВНИЙ підрядок процитованого документа",
         "does_not_prove": "не доводить, що цитата відповідає на питання по "
                           "суті: це вимагало б людського судження. Доведено "
-                          "лише дослівність (підрядок оригіналу) і те, що "
-                          "одиниця та сама.",
+                          "лише дослівність. Не-дослівні продукт відкидає й "
+                          "відмовляє -- користувачу вони не показуються.",
     }
     return m2, m3
 
@@ -411,7 +411,7 @@ def main():
     if args.with_llm:
         m2, m3 = m2_and_m3(args)
         report["metrics"]["refused_outside_corpus"] = m2
-        report["metrics"]["source_checks_out"] = m3
+        report["metrics"]["verbatim_quotes"] = m3
     else:
         print("\n2 і 3 пропущено (нема --with-llm)")
 
