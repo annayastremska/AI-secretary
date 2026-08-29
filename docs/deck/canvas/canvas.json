@@ -1,0 +1,77 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "Limitations.dc.html",
+      "x": 2120,
+      "y": 0,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "NotYet.dc.html",
+      "x": 4240,
+      "y": 0,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "Promised.dc.html",
+      "x": 0,
+      "y": 1340,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "Architecture.dc.html",
+      "x": 2120,
+      "y": 1340,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "QA.dc.html",
+      "x": 4240,
+      "y": 1340,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "Harness.dc.html",
+      "x": 0,
+      "y": 2680,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "DataAccess.dc.html",
+      "x": 2120,
+      "y": 2680,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "Extending.dc.html",
+      "x": 4240,
+      "y": 2680,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "ModelSafety.dc.html",
+      "x": 0,
+      "y": 4020,
+      "w": 1920,
+      "h": 1080
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}
