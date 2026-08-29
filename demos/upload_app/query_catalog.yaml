@@ -1239,6 +1239,92 @@ templates:
   # Межі: причина інша, ніж «немає даних»: нуль тут читався б як «там нікого
   # немає», а насправді немає самого пункту серед місць у документах. Той самий
   # принцип, що `subdivision_unknown`.
+
+  - id: list_place_within_state
+    title: Хто з попереднього переліку в цьому пункті
+    route_hint: >
+      уточнення до попереднього переліку: «хтось із них у Житомирі?».
+      Ставиться лише кодом, коли в питанні є звуження «із них / із цих /
+      серед них» і в попередньому ході відомі стан і дата -- модель цей
+      шаблон не обирає
+    internal: true
+    examples:
+      - Хтось із них у Житомирі?
+      - Хто з цих людей у Сухоброді?
+      - Серед них є хтось у Кривоярську?
+    params: [place, dims, on_date]
+    answer_hint: >
+      Перелік осіб, які за документами перебувають у цьому пункті: ПІБ, вид
+      відсутності (відпустка чи відрядження), період, номер документа. Назву
+      пункту казати ТАК, ЯК ВОНА В БАЗІ. Якщо запис один -- так і сказати, без
+      слова «лише» як докору. Чернетки окремим числом.
+    sql: |
+      SELECT o.canonical_name AS name, d.code AS dim,
+             btrim(f.value) AS place,
+             a.valid_from, a.valid_to, a.source_doc_id,
+             dn.value AS doc_number
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN objects o ON o.id = f.object_id
+      -- Період лежить НЕ у факті місця, а у факті самої відсутності з того ж
+      -- документа: у `leave_place` дат немає. Без цього приєднання відповідь
+      -- назвала б людей без періоду, тобто без можливості перевірити.
+      JOIN facts a ON a.source_doc_id = f.source_doc_id
+                   AND a.object_id = f.object_id
+                   AND a.dimension_id IN (SELECT id FROM dimensions
+                                           WHERE code IN ('leave', 'deployment_location'))
+      LEFT JOIN LATERAL (
+        SELECT f2.value FROM facts f2
+        JOIN dimensions d2 ON d2.id = f2.dimension_id
+        WHERE f2.source_doc_id = f.source_doc_id
+          AND d2.code = 'document_number' LIMIT 1) dn ON true
+      WHERE d.code IN ('leave_place', 'deployment_location')
+        AND btrim(f.value) = %(place)s
+        AND f.status = 'confirmed'
+        AND a.dimension_id IN (SELECT id FROM dimensions
+                                WHERE code = ANY(%(dims)s))
+        AND a.valid_from <= %(on_date)s
+        AND (a.valid_to IS NULL OR a.valid_to >= %(on_date)s)
+        AND a.status = 'confirmed'
+      GROUP BY o.canonical_name, d.code, btrim(f.value),
+               a.valid_from, a.valid_to, a.source_doc_id, dn.value
+      ORDER BY a.valid_from, o.canonical_name
+    sql_unconfirmed: |
+      SELECT o.canonical_name AS name, d.code AS dim,
+             btrim(f.value) AS place,
+             a.valid_from, a.valid_to, a.source_doc_id,
+             dn.value AS doc_number
+      FROM facts f
+      JOIN dimensions d ON d.id = f.dimension_id
+      JOIN objects o ON o.id = f.object_id
+      -- Період лежить НЕ у факті місця, а у факті самої відсутності з того ж
+      -- документа: у `leave_place` дат немає. Без цього приєднання відповідь
+      -- назвала б людей без періоду, тобто без можливості перевірити.
+      JOIN facts a ON a.source_doc_id = f.source_doc_id
+                   AND a.object_id = f.object_id
+                   AND a.dimension_id IN (SELECT id FROM dimensions
+                                           WHERE code IN ('leave', 'deployment_location'))
+      LEFT JOIN LATERAL (
+        SELECT f2.value FROM facts f2
+        JOIN dimensions d2 ON d2.id = f2.dimension_id
+        WHERE f2.source_doc_id = f.source_doc_id
+          AND d2.code = 'document_number' LIMIT 1) dn ON true
+      WHERE d.code IN ('leave_place', 'deployment_location')
+        AND btrim(f.value) = %(place)s
+        AND f.status = 'unconfirmed'
+        AND a.dimension_id IN (SELECT id FROM dimensions
+                                WHERE code = ANY(%(dims)s))
+        AND a.valid_from <= %(on_date)s
+        AND (a.valid_to IS NULL OR a.valid_to >= %(on_date)s)
+        AND a.status = 'confirmed'
+      GROUP BY o.canonical_name, d.code, btrim(f.value),
+               a.valid_from, a.valid_to, a.source_doc_id, dn.value
+      ORDER BY a.valid_from, o.canonical_name
+
+  # Нащо: названий пункт, якого в даних немає.
+  # Межі: причина інша, ніж «немає даних»: нуль тут читався б як «там нікого
+  # немає», а насправді немає самого пункту серед місць у документах. Той самий
+  # принцип, що `subdivision_unknown`.
   - id: place_unknown
     title: Населений пункт, якого немає в даних
     blocked: true

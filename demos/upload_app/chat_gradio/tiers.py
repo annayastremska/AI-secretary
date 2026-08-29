@@ -1229,6 +1229,26 @@ def _place_lookup(stem):
     return None
 
 
+#: ЗВУЖЕННЯ ДО ПОПЕРЕДНЬОГО ПЕРЕЛІКУ: «хтось із них у Житомирі?».
+#:
+#: Знайдено Анею 29.08 живцем. Після переліку трьох у відрядженні питання
+#: «хтось із них у житомирі?» пішло звичайною дорогою місця -- тобто запитом
+#: по ВСІЙ базі -- і відповіло про Лемешко з травневою відпусткою. Питання про
+#: тих трьох лишилось без відповіді, а про підміну предмета не було сказано
+#: жодного слова. Це та сама «впевнена відповідь не про те», що й із набоями.
+#:
+#: Тому звуження -- окремий шаблон із перетином, а не той самий запит.
+_AMONG_PREVIOUS = re.compile(
+    r"\b(?:з|із|зі)\s+(?:них|цих|тих)\b"
+    r"|\bсеред\s+(?:них|цих|тих)\b"
+    r"|\b(?:з|із|зі)\s+(?:цих|тих)\s+\w+", re.I)
+
+
+def asks_within_previous(question):
+    """Чи звужує питання попередній перелік. -> True/False."""
+    return bool(_AMONG_PREVIOUS.search(question or ""))
+
+
 _ASKS_WHO_OR_WHERE = re.compile(
     r"\bхто\b|\bкого\b|\bхтось\b|\bперелік\b|\bсписок\b|\bпокажи\b"
     r"|\bскільк\w*\b|\bвони\b|\bїх\b|\bтам\b", re.I)
@@ -2879,7 +2899,7 @@ def run_template(template_id, params):
             lines.append("Непідтверджених записів на цю дату: 0.")
         lines += _zero_coverage_lines(len(rows), params.get("on_date"))
 
-    elif template_id == "list_by_place":
+    elif template_id in ("list_by_place", "list_place_within_state"):
         # ЛЮДСЬКИЙ рендер, а не таблиця. Без цієї гілки відповідь виїжджала
         # сирими колонками («name | dim | place | valid_from | ...») -- рівно
         # те, що Аня вже раз забракувала в нормативному переліку: колонки бази
@@ -2889,9 +2909,25 @@ def run_template(template_id, params):
         # вона у відмінку й із малої.
         place = params.get("place") or "цьому пункті"
         u_rows = unconfirmed or []
+        # ЗВУЖЕНИЙ ПЕРЕЛІК КАЖЕ ПРО ЦЕ ПРЯМО. «Нікого немає» на питання «хтось
+        # із них?» і «нікого з них немає» -- різні відповіді: перша заперечує
+        # наявність людей у пункті взагалі, друга -- лише серед тих трьох.
+        narrowed = template_id == "list_place_within_state"
         if not rows:
-            lines.append(f"У {_esc(place)} за підтвердженими документами "
-                         "нікого немає.")
+            if narrowed:
+                lines.append(f"Ні, нікого з них: серед цих осіб у "
+                             f"{_esc(place)} за підтвердженими документами "
+                             f"немає жодної.")
+            else:
+                lines.append(f"У {_esc(place)} за підтвердженими документами "
+                             "нікого немає.")
+        elif narrowed:
+            lines.append(f"{_people(len({r['name'] for r in rows}))} із цього "
+                         f"переліку у {_esc(place)}:")
+            for r in rows[:RAW_ROWS_SHOWN]:
+                kind = PLACE_DIM_LABEL.get(r.get("dim"), "відсутність")
+                lines.append(f"- {_esc(r['name'])} — {kind}, "
+                             f"{_fmt_period(r)} ({_doc_ref(r)})")
         else:
             # Одна людина може бути в переліку двічі (два документи), тому
             # рахуємо ОСІБ, а не рядків: «2 особи» на один і той самий Іванов

@@ -2301,6 +2301,41 @@ def _answer_inner(question, history=None):
         _state_route = tier_chat.rules_route(merged)
     except Exception:
         _state_route = None
+    # «ХТОСЬ ІЗ НИХ У ЖИТОМИРІ?» -- ЗВУЖЕННЯ ПОПЕРЕДНЬОГО ПЕРЕЛІКУ.
+    #
+    # Стоїть ВИЩЕ за дорогу каталогу навмисно: правила впізнають тут маршрут
+    # `list_by_place`, і без цієї гілки питання пішло б запитом по ВСІЙ базі.
+    # Саме так Аня й зловила 29.08: після переліку трьох у відрядженні
+    # відповідь була про Лемешко з травневою відпусткою.
+    #
+    # Умови жорсткі -- усі три разом: у питанні є звуження («із них»), у
+    # питанні або в пам'яті є пункт, а в пам'яті є стан. Немає стану -- звужувати
+    # нема до чого, і тоді краще звичайна дорога, ніж вигаданий перетин.
+    if tier_chat.asks_within_previous(merged):
+        _prev = _read_state(history) or {}
+        _st = (_prev.get("state") or "").strip()
+        _pl = tier_chat.extract_place(merged) or (_prev.get("place") or "").strip()
+        if _pl and _st in tier_chat.STATE_DIMS:
+            _on = (_prev.get("date") or "").strip() or str(datetime.date.today())
+            _params = {"place": _pl, "dims": tier_chat.STATE_DIMS[_st],
+                       "on_date": _on, "state": _st, "date": _on}
+            try:
+                text, source = tier_chat.run_template(
+                    "list_place_within_state", _params)
+            except Exception:
+                text = None
+            if text:
+                # Успадковане -- вголос. Інакше це відповідь на інше питання
+                # без жодного слова про підміну.
+                text = (f"Звужую до попереднього переліку: "
+                        f"{tier_chat.STATE_LABEL.get(_st, _st)}, {_on}.\n"
+                        + text)
+                return _done(
+                    text
+                    + _fmt_source_block(source, "каталог шаблонів "
+                                                "(list_place_within_state)")
+                    + _slots_of_catalog("list_place_within_state", _params))
+
     if _state_route and _state_route[0] in _STATE_TEMPLATES:
         out = _catalog_tier(merged)
         if out is not None:
