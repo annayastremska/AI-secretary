@@ -50,6 +50,12 @@ import measure_followup_route as M  # noqa: E402
 
 FELLTHROUGH = {"вільний_sql", "відмова"}
 SEEN_IN_PROMPT = "example"
+# У наборі Ані зʼявилась група `refusal`: питання, на які ПРАВИЛЬНА відповідь --
+# відмова (погода, курс долара, «скільки набоїв», «де підрозділ»). Істина
+# позначена сентинелом `__refusal__`, якого в каталозі немає за побудовою.
+# Тут він означає «модель мусить повернути відмову».
+REFUSAL_EXPECTED = "__refusal__"
+REFUSED = {"відмова"}
 
 
 def main():
@@ -66,7 +72,8 @@ def main():
     with open(args.testset, encoding="utf-8") as fh:
         rows = yaml.safe_load(fh)["questions"]
 
-    bad = [q["expected"] for q in rows if q["expected"] not in catalog]
+    bad = [q["expected"] for q in rows
+           if q["expected"] not in catalog and q["expected"] != REFUSAL_EXPECTED]
     if bad:
         sys.exit(f"expected поза каталогом: {sorted(set(bad))}")
 
@@ -77,7 +84,9 @@ def main():
         got = (data or {}).get("template") or "не розібрано"
         rec = per[grp]
         rec["n"] += 1
-        if got == q["expected"]:
+        want = q["expected"]
+        ok = got in REFUSED if want == REFUSAL_EXPECTED else got == want
+        if ok:
             rec["ok"] += 1
             mark = "OK  "
         elif got in FELLTHROUGH:
