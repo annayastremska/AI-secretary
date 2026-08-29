@@ -1,0 +1,386 @@
+--- a/airflow/plugins/ai_secretary_loader.py
++++ b/airflow/plugins/ai_secretary_loader.py
+@@ -433,6 +433,107 @@
+     return document_id, ("reprocessed" if existing is not None else "new")
+ 
+ 
++# ── Гейт перетину періодів відсутності (при ЗАВАНТАЖЕННІ) ────────────────────
++# Та сама особа не може бути у двох НАКЛАДЕНИХ періодах відпустки/відрядження.
++# Логіка дзеркалить demos/upload_app/chat_gradio/docgen.py:find_conflicts, але з
++# двома відмінностями (рішення 29.08): рахує й ЧЕРНЕТКИ (status <> 'rejected', не
++# лише confirmed) і ВИКЛЮЧАЄ ІДЕНТИЧНИЙ період -- це .docx/.pdf двійник тієї самої
++# відсутності, а не конфлікт. object_id беремо напряму (load() його вже має),
++# тому service_id не потрібен. docgen у завантажувач НЕ імпортуємо: він тягне
++# tiers -> модель, а завантажувач має лишатись легким.
++_ABSENCE_DIMS = ["leave", "deployment_location"]
++_DIM_LABEL = {"leave": "відпустка", "deployment_location": "відрядження"}
++
++
++class OverlapConflict(Exception):
++    """Новий документ накладається періодом на наявну відсутність тієї самої
++    особи. Несе перелік конфліктів для показу людині; транзакція load()
++    відкочується -- ні документа, ні фактів у базу не потрапляє."""
++
++    def __init__(self, conflicts):
++        self.conflicts = conflicts
++        super().__init__(f"{len(conflicts)} overlap conflict(s)")
++
++
++def overlap_conflicts(cur, object_id, start, end, exclude_doc_id):
++    """Наявні НЕ-відхилені absence-факти цієї особи, що перетинаються з
++    [start, end]; крім фактів того самого документа й крім ІДЕНТИЧНОГО періоду
++    (двійник тієї самої відсутності). -> перелік словників."""
++    end = end or start
++    cur.execute(
++        """
++        SELECT f.valid_from, f.valid_to, f.source_doc_id, d.code,
++               (SELECT btrim(n.value) FROM facts n
++                  JOIN dimensions nd ON nd.id = n.dimension_id
++                 WHERE n.source_doc_id = f.source_doc_id
++                   AND nd.code = 'document_number' LIMIT 1)
++          FROM facts f
++          JOIN dimensions d ON d.id = f.dimension_id
++         WHERE f.object_id = %s
++           AND d.code = ANY(%s)
++           AND f.status <> 'rejected'
++           AND f.valid_from IS NOT NULL
++           AND f.valid_from <= %s
++           AND COALESCE(f.valid_to, f.valid_from) >= %s
++           AND f.source_doc_id <> %s
++           AND NOT (f.valid_from = %s AND COALESCE(f.valid_to, f.valid_from) = %s)
++         ORDER BY f.valid_from
++        """,
++        (object_id, _ABSENCE_DIMS, end, start, exclude_doc_id, start, end),
++    )
++    out = []
++    for vf, vt, sd, dim, number in cur.fetchall():
++        out.append({"valid_from": str(vf),
++                    "valid_to": str(vt) if vt else None,
++                    "source_doc_id": sd, "dim": dim, "number": number,
++                    "kind_label": _DIM_LABEL.get(dim, "відсутність")})
++    return out
++
++
++def supersede_document(old_doc_id):
++    """Скасовує ВЕСЬ старий документ (рішення користувача, коли новий перетинний
++    документ визнано актуальнішим): усі його не-відхилені факти -> rejected, з
++    записом у review_log; відкриті review_queue закриває; документ ->
++    validity='superseded', validity_source='manual'. Дзеркалить handle_reprocess,
++    лише дія інша. Саме відхилення фактів прибирає перетин (overlap_conflicts
++    рахує status<>'rejected'), тому після цього повторний load() нового
++    документа проходить. -> скільки фактів скасовано.
++
++    Значення enum перевірені проти CHECK documents: validity ∈
++    {current,probably_superseded,superseded,cancelled,unknown}; validity_source ∈
++    {declared,inferred,manual}."""
++    with psycopg.connect(get_dsn()) as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                "SELECT id, value FROM facts WHERE source_doc_id = %s AND status <> 'rejected'",
++                (old_doc_id,),
++            )
++            rows = cur.fetchall()
++            for fact_id, old_value in rows:
++                cur.execute("UPDATE facts SET status = 'rejected' WHERE id = %s", (fact_id,))
++                cur.execute(
++                    """
++                    INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
++                    VALUES (%s, %s, %s, %s, %s)
++                    """,
++                    (fact_id, "ai_secretary_loader:supersede", old_value, None,
++                     "superseded_by_user_on_upload"),
++                )
++            cur.execute(
++                "UPDATE review_queue SET resolved_at = now(), "
++                "resolution = 'superseded_by_user_on_upload' "
++                "WHERE document_id = %s AND resolved_at IS NULL",
++                (old_doc_id,),
++            )
++            cur.execute(
++                "UPDATE documents SET validity = 'superseded', "
++                "validity_source = 'manual' WHERE id = %s",
++                (old_doc_id,),
++            )
++        conn.commit()
++    return len(rows)
++
++
+ def load(md_path: str, original_file_hint: str = None) -> dict:
+     """Повертає короткий звіт: {"document_id", "doc_state", "already_existed",
+     "facts_inserted"}. doc_state -- "new" / "unchanged" / "reprocessed"
+@@ -498,6 +599,25 @@
+                     (document_id,),
+                 )
+ 
++            # ── Гейт перетину: ДО вставки будь-яких фактів ─────────────────
++            # Якщо absence-період нового документа накладається на наявну
++            # відсутність тієї самої особи -- не вставляємо нічого, а кидаємо
++            # OverlapConflict. `with psycopg.connect` відкотить транзакцію
++            # (документ ще не закомічено -- коміт лише в кінці), тож у базі не
++            # лишиться ні документа, ні фактів. Людина далі або перегляне поля,
++            # або скасує старий документ (supersede_document) і повторить коміт.
++            _conflicts, _seen = [], set()
++            for _f in meta.get("facts") or []:
++                if _f.get("fact_type") in _ABSENCE_DIMS and _f.get("date_start"):
++                    for _c in overlap_conflicts(cur, person_object_id,
++                                                _f.get("date_start"),
++                                                _f.get("date_end"), document_id):
++                        if _c["source_doc_id"] not in _seen:
++                            _seen.add(_c["source_doc_id"])
++                            _conflicts.append(_c)
++            if _conflicts:
++                raise OverlapConflict(_conflicts)
++
+             field_provenance = meta.get("field_provenance") or {}
+ 
+             rank = subject.get("rank")
+--- a/demos/upload_app/app.py
++++ b/demos/upload_app/app.py
+@@ -423,6 +423,16 @@
+                         "DATABASE_URL=..., див. README апки)")
+         return
+     except Exception as exc:
++        # OverlapConflict із завантажувача: новий документ перетинається періодом
++        # з наявною відсутністю тієї самої особи. Це НЕ збій, а окремий стан для
++        # людини: переглянути поля або скасувати старий документ. Транзакція в
++        # load() уже відкотилась -- у базі нічого не зʼявилось. Ловимо за іменем
++        # класу, щоб не переносити ліниве `import ai_secretary_loader` вгору.
++        if type(exc).__name__ == "OverlapConflict":
++            _set_step(job, "db", "done", _now() - started)
++            job["state"] = "conflict"
++            job["conflicts"] = getattr(exc, "conflicts", [])
++            return
+         _set_step(job, "db", "failed", _now() - started)
+         job["state"] = "commit_failed"
+         # НЕ називаємо кожен збій «БД недоступна» (знайдено блоком 1 перевірки
+@@ -843,6 +853,44 @@
+     return {"ok": True}
+ 
+ 
++@app.post("/api/jobs/{job_id}/supersede")
++def supersede(job_id: str, request: Request):
++    """Людина в стані «конфлікт» вирішила, що СТАРИЙ документ втратив чинність.
++    Скасовуємо всі конфліктні старі документи (факти -> rejected, документ ->
++    validity=superseded), після чого перетину вже немає, і повторюємо коміт
++    нового документа. Ті самі гарди доступу, що й commit: пише лише оператор і
++    не в публічному режимі."""
++    if getattr(request.state, "access_level", LEVEL_OPERATOR) != LEVEL_OPERATOR:
++        return JSONResponse(status_code=403, content={
++            "error": "Гостьовий доступ: скасувати документ може лише оператор."})
++    if PUBLIC_MODE:
++        return JSONResponse(status_code=403, content={
++            "error": "Демонстраційний доступ: запис у базу заблокований."})
++    with JOBS_LOCK:
++        job = JOBS.get(job_id)
++    if job is None:
++        return JSONResponse(status_code=404, content={"error": "немає такої задачі"})
++    if job["state"] != "conflict":
++        return JSONResponse(status_code=409, content={
++            "error": f"скасування доступне лише зі стану перетину (стан: {job['state']})"})
++    old_ids = sorted({c["source_doc_id"] for c in (job.get("conflicts") or [])})
++    if not old_ids:
++        return JSONResponse(status_code=409, content={
++            "error": "у стані перетину не вказано конфліктного документа"})
++    import ai_secretary_loader
++    try:
++        for old in old_ids:
++            ai_secretary_loader.supersede_document(old)
++    except Exception as exc:  # noqa: BLE001
++        return JSONResponse(status_code=500, content={
++            "error": f"скасування не вдалось: {type(exc).__name__}: {exc}"})
++    job["conflicts"] = []
++    # Повторний коміт нового документа: старі факти вже rejected, перетину
++    # немає, load() пройде як звичайний коміт.
++    threading.Thread(target=_commit_job, args=(job_id,), daemon=True).start()
++    return {"ok": True, "superseded": old_ids}
++
++
+ # Монтування Gradio-чату останнім: він додає власні маршрути під /chat,
+ # API-маршрути апки вище лишаються як були.
+ import gradio as gr  # noqa: E402
+--- a/demos/upload_app/static/index.html
++++ b/demos/upload_app/static/index.html
+@@ -272,6 +272,10 @@
+     $("db-body").appendChild(note("err", job.error || "запис не вдався"));
+     $("commit-btn").disabled = false;  /* можна повторити після підняття бази */
+     stopPolling();
++  } else if (job.state === "conflict") {
++    renderReview(job);
++    renderConflict(job);
++    stopPolling();
+   }
+ }
+ 
+@@ -433,6 +437,54 @@
+   return src + (prov.resolved === false ? " · не зіставлено з довідником" : "");
+ }
+ 
++function renderConflict(job) {
++  /* Стан «перетин»: новий документ у базу НЕ додано (транзакція відкотилась).
++     Людина або переглядає поля вище, або каже, що старий документ втратив
++     чинність -- тоді сервер його скасовує й повторює коміт нового. */
++  $("db-sec").classList.remove("hidden");
++  atStep(3);
++  const body = $("db-body");
++  body.innerHTML = "";
++  const lines = (job.conflicts || []).map(function (c) {
++    var per = c.valid_from + (c.valid_to && c.valid_to !== c.valid_from
++      ? " – " + c.valid_to : "");
++    return "№" + (c.number || "?") + " — " + c.kind_label + ", " + per;
++  });
++  body.appendChild(note("err",
++    "Перетин періодів у тієї самої особи — новий документ у базу НЕ додано. "
++    + "Накладається на: " + lines.join("; ") + "."));
++  $("commit-btn").disabled = true;   /* повторний коміт дав би той самий перетин */
++  const p = document.createElement("p");
++  p.className = "actions";
++  const review = document.createElement("button");
++  review.textContent = "Переглянути поля";
++  review.addEventListener("click", function () {
++    $("review-sec").scrollIntoView({ behavior: "smooth" });
++  });
++  const sup = document.createElement("button");
++  sup.className = "primary";
++  sup.textContent = "Старий документ втратив чинність";
++  sup.addEventListener("click", async function () {
++    sup.disabled = true; review.disabled = true;
++    body.appendChild(note("info", "Скасовую старий документ і додаю новий…"));
++    let r;
++    try { r = await fetch("/api/jobs/" + currentJob + "/supersede", { method: "POST" }); }
++    catch (e) { r = null; }
++    if (!r || !r.ok) {
++      const e = r ? await r.json().catch(function () { return {}; }) : {};
++      body.appendChild(note("err", (e && e.error) || "скасування не вдалось"));
++      sup.disabled = false; review.disabled = false;
++      return;
++    }
++    if (!pollTimer) pollTimer = setInterval(poll, 1000);  /* догоне стан committed */
++  });
++  p.style.display = "flex";
++  p.style.gap = "1.5rem";
++  p.style.flexWrap = "wrap";
++  p.append(review, sup);
++  body.appendChild(p);
++}
++
+ function renderDbResult(job) {
+   $("db-sec").classList.remove("hidden");
+   atStep(3);
+--- a/demos/upload_app/static/stats.html
++++ b/demos/upload_app/static/stats.html
+@@ -467,22 +467,10 @@
+     const queueParts = Object.entries(byType)
+       .sort((a, b) => b[1] - a[1])
+       .map(([k, v]) => (qt[k] || k) + " " + v);
+-    /* `open_total` -- журнал завдань, і більшість його записів створена до
+-       появи штатки (система відмічала кожне нове прізвище). Тому першим стоїть
+-       «документів чекає людини» (скільком папок відкрити), а журнал -- за ним.
+-       Цей рядок і є тепер єдине місце, де сторінка каже про роботу для людини:
+-       плитка «осіб не зійшлися зі штаткою» прибрана 29.08. */
+-    $("queue-note").textContent = queueParts.length
+-      /* Коротко (зауваження Ані 27.08): на екрані -- два числа, які
+-         відповідають на питання «скільком роботи людині». Розбір, чому
+-         завдань більше за документи, -- у документації. */
+-      /* `documents_pending`, а НЕ `..._substantive`. Фільтр «крім нової
+-         особи» писався 26.08, коли таких завдань було 133 старих. Андрій їх
+-         закрив, лишилось чотири -- і фільтр перестав прибирати шум, а почав
+-         приховувати три живі документи. */
+-      ? (q.documents_pending ?? "—") + " документів чекає людини" +
+-        " · усього завдань у черзі " + q.open_total
+-      : "";
++    /* Рядок черги (скільки в роботі для людини + журнал завдань) прибрано на
++       прохання (29.08): перевантажував сторінку. queueParts і byType лишаються
++       обчисленими на випадок повернення. */
++    $("queue-note").textContent = "";
+   }
+ 
+   renderChatLive(data.chat_live);
+@@ -603,12 +591,9 @@
+   if (c.truncated) {
+     parts.push("пар без подробиць: " + c.truncated);
+   }
+-  /* Визначення перетину тут БІЛЬШЕ НЕ ПЕРЕКАЗУЄТЬСЯ: воно стоїть під числом,
+-     а тут стояло вдруге тими самими словами (Аня: «одне й те саме взагалі
+-     повторюється двічі»). Лишається рівно те, чого визначення не покриває --
+-     найчастіше хибне прочитання числа. */
+-  parts.push("різні люди, відсутні одночасно, перетином не є");
+-  $("conflict-note").textContent = parts.join(". ") + ".";
++  /* Уточнення про різних осіб прибрано на прохання (29.08). Join захищений від
++     порожнього масиву, щоб не лишилось самотньої крапки. */
++  $("conflict-note").textContent = parts.length ? parts.join(". ") + "." : "";
+ }
+ 
+ function renderPartner(pm) {
+@@ -628,24 +613,9 @@
+      усім розділом. */
+   for (const m of pm.shown || []) { host.appendChild(metricTile(m)); }
+   const parts = [];
+-  if ((pm.folded || []).length) {
+-    /* Згорнуте НАЗИВАЄТЬСЯ. Це метрики охоплення корпусу: вони є вище
+-       живими, і показати поруч застарілий знімок означало б покласти на один
+-       екран два числа про одне й те саме (у пакеті «41 нормативний акт», у
+-       базі вже 44). */
+-    parts.push(pm.folded.length + " метрик охоплення не показано окремо: "
+-               + "ті самі величини є вище, у розділі «База зараз», і там "
+-               + "вони живі");
+-  }
+-  if ((pm.same_as_live || []).length) {
+-    /* Так само називається, а не мовчки зникає: замір Андрія лишається в
+-       пакеті, просто те саме число видно нижче живим. */
+-    /* Рядок розбитий по МЕЖАХ ФРАЗ, а не де влізло: перемикач мови шукає
+-       кожен шматок у словнику як є, тому «…не показано» + «окремо: те саме»
+-       він не знайде ніколи. Тест `test_language_toggle` це й зловив. */
+-    parts.push(pm.same_as_live.length + " метрику про перетини не показано окремо: "
+-               + "те саме число є нижче, у розділі «Конфлікти», і воно живе");
+-  }
++  /* Рядки про згорнуті метрики (охоплення й перетинів) прибрано на прохання
++     (29.08): ті величини вже є вище живими («База зараз») і нижче
++     («Конфлікти»). */
+   if (pm.dropped) {
+     parts.push(pm.dropped + " метрик відкинуто: без поля «чим зміряно» "
+                + "цифра не показується");
+--- a/demos/upload_app/tests/test_partner_metrics.py
++++ b/demos/upload_app/tests/test_partner_metrics.py
+@@ -38,18 +38,18 @@
+ 
+ 
+ def test_package_is_present_and_flat():
+-    """Записів 10 -- пакет обрізаний Андрієм 28.08 «під вітрину».
++    """Записів 11 -- пакет обрізаний Андрієм 28.08 «під вітрину», потім +1.
+ 
+-    Було 30. Він сам прибрав діагностичні лінії («без історії»), тавтологічні
+-    (recall і precision 12/12 при 27/27 на бінарній задачі), нерепрезентативні
+-    (8 питань), секундні (їх покриває наш живий лічильник латентності) і той,
+-    що ми самі дискредитували у звіті (зазор реранкера 1.82). Розклад під
+-    «правильних шаблонів обрано» переїхав у поле `how`.
++    Було 30 -> обрізано до 10 (прибрані діагностичні «без історії»,
++    тавтологічні recall/precision при 27/27, нерепрезентативні 8 питань,
++    секундні -- їх покриває живий лічильник латентності, і зазор реранкера
++    1.82, який ми самі дискредитували; розклад під «правильних шаблонів»
++    переїхав у `how`). 29.08 додано метрику «конфлікти станів» -> 11.
+ 
+     Число тут жорстке навмисно: пакет -- вітрина, і поповзти вона може лише
+     свідомо."""
+     data = json.load(io.open(PACKAGE, encoding="utf-8"))
+-    assert isinstance(data, list) and len(data) == 10, len(data)
++    assert isinstance(data, list) and len(data) == 11, len(data)
+ 
+ 
+ def test_every_metric_in_the_package_says_how_it_was_measured():
+@@ -133,11 +133,14 @@
+     assert ".title =" not in block, "how у title -- його не видно"
+ 
+ 
+-def test_page_names_what_was_folded_and_dropped():
++def test_page_names_what_was_dropped():
++    # Рядки «…не показано окремо» (згорнуті метрики охоплення/перетинів) прибрано
++    # 29.08 на прохання: ті величини вже є вище/нижче живими. Лишилось називання
++    # ВІДКИНУТИХ метрик (без «чим зміряно»).
+     html = io.open(PAGE, encoding="utf-8").read()
+     block = html.split("function renderPartner", 1)[1]
+-    assert "не показано окремо" in block
+     assert "відкинуто" in block
++    assert "не показано окремо" not in block
+ 
+ 
+ def test_page_makes_no_external_requests():
