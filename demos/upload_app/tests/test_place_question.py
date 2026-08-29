@@ -231,3 +231,98 @@ def test_place_templates_are_reachable_from_the_early_road():
     from chat_gradio import app as chat_app
     for tid in ("list_by_place", "place_unknown"):
         assert tid in chat_app._STATE_TEMPLATES, tid
+
+
+# ── Короткі репліки-продовження (знахідка Ані 29.08 на живому діалозі) ───────
+
+
+BARE_FOLLOWUPS = ["а у житомирі", "а у житомирі?", "у Сухоброді?",
+                  "а в Кривоярську", "а Тихолісся?"]
+
+NOT_BARE_FOLLOWUPS = [
+    #: Довга фраза без питального слова: місто в ній обставина, а не предмет.
+    "у житомирі підписали наказ про відпустку минулого тижня",
+    #: Коротка, але питає про документ, а не про людей.
+    "документ у житомирі?",
+    "яка норма у житомирі",
+    "що в черзі у житомирі",
+]
+
+
+@pytest.mark.parametrize("q", BARE_FOLLOWUPS)
+def test_bare_place_followup_is_recognised(q):
+    """«а у житомирі» -- питання про людей, хоч слова «хто» в ньому немає.
+
+    Знайдено Анею на живому діалозі: перша репліка «хто зараз у рівному»
+    відповіла правильно (Рівного в даних немає), а «а у житомирі» впало у
+    відмову «питання не лягає на жодну дорогу» -- бо мій гейт вимагав
+    питального слова. Так люди й питають: попереднє питання лишається в силі,
+    міняється один параметр."""
+    assert tiers.is_bare_place_followup(q, lookup=_lookup), q
+
+
+@pytest.mark.parametrize("q", NOT_BARE_FOLLOWUPS)
+def test_a_long_or_off_topic_phrase_is_not_a_place_followup(q):
+    assert not tiers.is_bare_place_followup(q, lookup=_lookup), q
+
+
+def test_place_slot_is_written_by_the_catalog_road():
+    """Слот, який ніхто не пише, це не пам'ять, а видимість пам'яті.
+
+    `_slots_of_catalog` віддає порожній рядок для шаблонів без наміру, і
+    `list_by_place` наміру не має (свого значення в закритій схемі моделі йому
+    не заводимо перед демо). Тому пункт пишеться окремою гілкою -- і саме її
+    тримає цей тест."""
+    from chat_gradio import app as chat_app
+    marker = chat_app._slots_of_catalog("list_by_place",
+                                        {"place": "м. Житомир"})
+    assert "м. Житомир" in marker, marker
+    assert "slots:" in marker, marker
+
+
+def test_carried_place_is_said_out_loud():
+    """Успадкований пункт мусить бути НАЗВАНИЙ у відповіді.
+
+    Те саме правило, що для дати й виміру: тиха підстановка з попереднього
+    ходу -- це відповідь не на те питання без жодного слова."""
+    import io
+    src = io.open(os.path.join(APP_DIR, "chat_gradio", "app.py"),
+                  encoding="utf-8").read()
+    assert "Пункт узято з попереднього питання" in src
+
+
+# ── Невідомий пункт: чесна відмова замість загальної ─────────────────────────
+
+
+def test_unknown_place_is_recognised_as_a_place_question():
+    """«хто зараз у рівному» -> відмова ПРО ПУНКТ, не «не лягає на жодну дорогу».
+
+    У живому прогоні Ані правильну відмову обрав векторний ярус -- за схожістю
+    з прикладом «Хто у Жмеринці?». На «у рівному» схожості не вистачило, і
+    питання впало в загальну відмову. Правильність відповіді не мусить залежати
+    від того, наскільки формулювання нагадує приклад."""
+    assert tiers.unknown_place_candidate("хто зараз у рівному",
+                                         lookup=_lookup) == "рівному"
+    assert tiers.unknown_place_candidate("є хтось у Жмеринці?",
+                                         lookup=_lookup) == "Жмеринці"
+
+
+@pytest.mark.parametrize("q", [
+    #: Стан у питанні -> це підрахунок, а не пункт.
+    "хто у відпустці зараз",
+    "скільки людей у відрядженні",
+    #: Дата -> теж підрахунок.
+    "хто повертається у травні",
+    #: Підрозділ.
+    "хто у 2 роті",
+    #: Документ і норма.
+    "покажи документ №102",
+    "яка норма у Житомирі",
+    #: Відомий пункт -- це не «невідомий».
+    "хто ще в житомирі",
+    #: Немає питального слова -- нема чого забирати.
+    "у рівному підписали наказ",
+])
+def test_unknown_place_does_not_steal_other_questions(q):
+    """ЦЕНА ПОМИЛКИ ТУТ -- украдене питання, тому межі суворі."""
+    assert tiers.unknown_place_candidate(q, lookup=_lookup) is None, q

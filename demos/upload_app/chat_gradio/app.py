@@ -1827,10 +1827,22 @@ def _slots_of_catalog(tid, params):
     Порожній рядок для шаблонів, яких немає в `_CATALOG_INTENT`: намір
     вигадувати не будемо, а слот без наміру `_carry_over` однаково не візьме.
     """
+    p = params or {}
     intent = _CATALOG_INTENT.get(tid)
     if not intent:
+        # НАСЕЛЕНИЙ ПУНКТ зберігаємо навіть БЕЗ наміру.
+        #
+        # Свого наміру в `INTENTS` місце не має навмисно: цей перелік --
+        # закрита схема відповіді МОДЕЛІ, і додати туди значення означало б
+        # новий замір маршрутизації перед демо. А слот потрібен уже: без нього
+        # репліка «а хто ще там?» не має чого успадкувати.
+        #
+        # Намір лишається порожнім, і це чесно: перенесення слотів за наміром
+        # (`_carry_over`) місця не торкається, його читає окрема гілка в
+        # `answer()` -- рівно по слоту `place`.
+        if tid == "list_by_place" and p.get("place"):
+            return _state_marker({"place": p["place"]})
         return ""
-    p = params or {}
     date = p.get("on_date") or p.get("date_from")
     return _state_marker({
         "intent": intent,
@@ -1840,6 +1852,8 @@ def _slots_of_catalog(tid, params):
         "doc_number": p.get("doc_number"),
         # Вимір -- головне, чого тут бракувало.
         "state": p.get("state"),
+        # Пункт -- щоб «а хто ще там?» працювало й після відповіді про місце.
+        "place": p.get("place"),
     })
 
 
@@ -2279,6 +2293,37 @@ def _answer_inner(question, history=None):
         out = _catalog_tier(merged)
         if out is not None:
             return _done(out)
+
+    # «А ХТО ЩЕ ТАМ?» -- питальне слово є, назви пункту немає: беремо її з
+    # попереднього ходу. Друга половина того самого класу, що «а у житомирі»
+    # (там навпаки: пункт є, питального слова немає).
+    #
+    # Слот `place` заведений 29.08 саме для цього, і без цієї гілки він лежав
+    # би мертвим -- слот, який ніхто не читає, це не пам'ять, а видимість
+    # пам'яті.
+    #
+    # Успадковане СКАЗАНО вголос: тиха підстановка пункту з попереднього ходу
+    # -- це відповідь не на те питання без жодного слова.
+    if (_state_route is None
+            and tier_chat._ASKS_WHO_OR_WHERE.search(merged.lower())
+            and tier_chat.extract_place(merged) is None):
+        _prev = _read_state(history) or {}
+        _prev_place = (_prev.get("place") or "").strip()
+        if _prev_place and re.search(r"\bтам\b|\bще\b", merged, re.I):
+            try:
+                text, source = tier_chat.run_template(
+                    "list_by_place", {"place": _prev_place})
+            except Exception:
+                text = None
+            if text:
+                text = (f"Пункт узято з попереднього питання: {_prev_place}.\n"
+                        + text)
+                return _done(
+                    text
+                    + _fmt_source_block(source, "каталог шаблонів "
+                                                "(list_by_place)")
+                    + _slots_of_catalog("list_by_place",
+                                        {"place": _prev_place}))
 
     # Швидкий шлях ПЕРЕД моделлю (скарга замовниці на латентність): якщо
     # правила впевнено впізнали підрахунок із власним наміром -- модель не
