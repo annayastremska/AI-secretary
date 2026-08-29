@@ -2523,3 +2523,119 @@ details.src > *:not(summary) {
         #topbar { grid-auto-rows: 44px !important }
     }
 }
+
+/* 44. ШАПКА ЧАТА НА ТЕЛЕФОНІ -- остаточно, і сітку я звідси прибираю.
+ *
+ *     ДІАГНОЗ, якого не було в попередніх трьох заходах. Правило 43 зробило
+ *     шапку сіткою з `grid-auto-rows: 52px`. У сітці КОЖНА зайва дитина
+ *     створює НОВИЙ РЯДОК -- а Gradio додає в контейнер свої обгортки, яких у
+ *     коді не видно (розмітку будує JS, тому з відданого HTML її не прочитати).
+ *     Тобто перший рядок займала порожня обгортка, а кнопки й назва падали в
+ *     другий: звідси «усе надто низько» на екрані. Мої `grid-column` пінили
+ *     колонку, але не РЯДОК.
+ *
+ *     Тому тут flex, а не сітка: зайва порожня дитина у flex займає нуль
+ *     ширини й нічого не зсуває. Це той самий висновок, що з кнопкою
+ *     надсилання (правило 40): у цій шапці flex стійкіший до чужої розмітки.
+ *
+ *     Розміри однакові й задані трьома властивостями кожен -- бо загальне
+ *     правило Gradio на `button` ставить `min-height: 48px`, і `height` його
+ *     не перебиває: у CSS `min-height` сильніша за `height` незалежно від
+ *     специфічності. На цьому вже горіла кругла кнопка теми (стала овалом).
+ */
+@media (max-width: 860px) {
+    #topbar {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: var(--s-3) !important;
+        height: 56px !important;
+        min-height: 56px !important;
+        max-height: 56px !important;
+        padding: 0 var(--s-3) !important;
+        box-sizing: border-box !important;
+        /* Сітку з правила 43 знімаємо явно: у flex ці властивості мертві, але
+           лишати їх означало б тримати два різні описи однієї розкладки. */
+        grid-template-columns: none !important;
+        grid-auto-rows: auto !important;
+    }
+    /* Будь-яка дитина: нуль відступів, по центру, не тягнеться. */
+    #topbar > * {
+        flex: 0 0 auto !important;
+        align-self: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        height: auto !important;
+        border: 0 !important;
+    }
+    /* Назва -- єдине, що тягнеться, і вона ж утримує еліпсис. */
+    #topbar-title {
+        flex: 1 1 auto !important;
+        display: flex !important;
+        align-items: center !important;
+        height: 100% !important;
+        overflow: hidden !important;
+    }
+    #topbar-title .prose,
+    #topbar-title h1, #topbar-title h2, #topbar-title h3, #topbar-title p {
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    /* Два органи керування -- однакова коробка 36x36. */
+    #nav-toggle-block,
+    #theme-switch {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 36px !important;
+        min-width: 36px !important;
+        max-width: 36px !important;
+        height: 36px !important;
+    }
+    #nav-toggle,
+    #theme-switch .theme-toggle,
+    #theme-switch .lang-toggle {
+        width: 36px !important;
+        min-width: 36px !important;
+        max-width: 36px !important;
+        height: 36px !important;
+        min-height: 36px !important;
+        max-height: 36px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        display: grid !important;
+        place-items: center !important;
+        align-self: center !important;
+        position: static !important;
+        top: auto !important;
+        bottom: auto !important;
+        transform: none !important;
+    }
+    #nav-toggle span {
+        width: 20px !important;
+        height: 2px !important;
+        border-radius: 2px !important;
+    }
+    #nav-toggle { gap: 4px !important }
+    #theme-switch .theme-toggle svg,
+    #theme-switch .lang-toggle svg {
+        width: 16px !important;
+        height: 16px !important;
+    }
+    /* Клавіатура відкрита -- смуга нижча. */
+    @media (max-height: 460px) {
+        #topbar {
+            height: 46px !important;
+            min-height: 46px !important;
+            max-height: 46px !important;
+        }
+    }
+}
