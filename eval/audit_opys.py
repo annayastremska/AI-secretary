@@ -152,13 +152,49 @@ real_markers = re.findall(r"\b\d{10}\b|\bРНОКПП\s*\d|паспорт\s*[А-
 say("ПРОВАЛ" if real_markers else "ок", "Б5 без персональних даних",
     ", ".join(real_markers[:3]) if real_markers else "ідентифікаторів немає")
 
-# ── довжина речень: Б3 (проста мова) ────────────────────────────────────────
+# ── ГОЛОВНЕ ПРАВИЛО: речення ніби пункти, без води, без дрібниць ────────────
+#
+# Межа 25 слів -- це міра правила Ані, а не мій смак: «речення ніби пункти, без
+# води, так щоб було зрозуміло людині не в контексті». Раніше тут стояло 45, і
+# прилад зеленів на реченні в сорок слів -- тобто міряв не те правило.
+MAX_WORDS = 25
+
 sent = []
 for _, t in paras:
-    sent += re.split(r"(?<=[.!?])\s+", t)
-long_s = [x for x in sent if len(x.split()) > 45]
-say("увага" if long_s else "ок", "Б3 довгі речення (>45 слів)",
-    "%d штук" % len(long_s))
+    sent += [(s, "абзац") for s in re.split(r"(?<=[.!?;])\s+", t)]
+for i, rows in enumerate(tables):
+    for r in rows:
+        for c in r:
+            sent += [(s, "таблиця %d" % i)
+                     for s in re.split(r"(?<=[.!?;])\s+", c)]
+long_s = [(len(x.split()), x, w) for x, w in sent if len(x.split()) > MAX_WORDS]
+say("ПРОВАЛ" if long_s else "ок",
+    "ГОЛОВНЕ довжина речень (>%d слів)" % MAX_WORDS, "%d штук" % len(long_s))
+for n, x, w in sorted(long_s, reverse=True)[:8]:
+    out.append("           %d слів [%s] %s" % (n, w, x[:150]))
+
+#: ВОДА -- вставні звороти, які нічого не додають.
+WATER = ("варто зазначити", "слід зазначити", "слід підкреслити", "як відомо",
+         "у цілому", "в цілому", "фактично", "по суті", "як правило",
+         "у певному сенсі", "з одного боку", "тим не менш",
+         "необхідно відзначити")
+water = [w for w in WATER if w in text.lower()]
+say("ПРОВАЛ" if water else "ок", "ГОЛОВНЕ без води",
+    ", ".join(water) if water else "жодного звороту")
+
+#: ДРІБНИЦІ -- те, що в мапі зайве. Назви моделей і рейки з числами тут
+#: НАВМИСНО відсутні: це суть, а не нюанс (див. правила, «Головне правило»).
+MINUTIAE = re.compile(
+    r"(?:documents|objects|people|dimensions|facts|fact_sources|review_queue"
+    r"|review_log|document_chunks|document_types|dimension_values"
+    r"|object_aliases|leave_place|deployment_location|superseded_by_doc_id"
+    r"|valid_from|valid_to|source_doc_id|canonical_name"
+    r"|python-docx|pypdf|psycopg|llama\.cpp|pgvector|Hunspell|FastAPI|Gradio"
+    r"|systemd|uvicorn|GBNF|tsvector"
+    r"|4096 токенів)")
+mins = sorted(set(MINUTIAE.findall(text)))
+say("ПРОВАЛ" if mins else "ок", "ГОЛОВНЕ мапа, не інструкція",
+    ", ".join(mins) if mins else "технічних дрібниць немає")
 
 io.open(sys.argv[1], "w", encoding="utf-8").write(
     "\n".join(out) + "\n\n--- найдовші речення ---\n"
