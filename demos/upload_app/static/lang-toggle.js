@@ -246,8 +246,8 @@
     "підстава заміни записана": "a ground for replacement is recorded",
     "різні люди, відсутні одночасно, перетином не є":
       "different people absent at the same time are not an overlap",
-    "поле documents.superseded_by_doc_id; нуль означає, що законну заміну не відрізнити від суперечності":
-      "the documents.superseded_by_doc_id field; zero means a lawful replacement cannot be told from a contradiction",
+    "записано, що один документ виданий замість іншого (documents.superseded_by_doc_id). Решта перетинів — не підтверджена заміна":
+      "recorded that one document was issued to replace another (documents.superseded_by_doc_id). The remaining overlaps are not a confirmed replacement",
     "накладання періодів двох відсутностей однієї особи; запит по базі при відкритті сторінки":
       "overlapping periods of two absences of one person; queried from the database when the page opens",
     // Комбінації видів відсутності: їх рівно три, і вони приходять готовою
