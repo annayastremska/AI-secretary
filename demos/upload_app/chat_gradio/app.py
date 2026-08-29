@@ -2829,6 +2829,8 @@ LANG_JS = os.path.join(_STATIC, "lang-toggle.js")   # noqa: F401 -- див. ви
 ACCESS_JS = os.path.join(_STATIC, "access.js")
 #: Телефонна розкладка й вимірювання висот -- на них тримається розкладка чата.
 MOBILE_JS = os.path.join(_STATIC, "mobile.js")
+#: Перемикач двох QR (вхід у чат / пам'ятка журі).
+QR_SWAP_JS = os.path.join(_STATIC, "qr-swap.js")
 
 TYPING_HTML = '<div class="typing"><i></i><i></i><i></i></div>'
 
@@ -2992,6 +2994,8 @@ def make_head_css():
         access = fh.read()
     with open(MOBILE_JS, encoding="utf-8") as fh:
         mobile = fh.read()
+    with open(QR_SWAP_JS, encoding="utf-8") as fh:
+        qr_swap = fh.read()
     # Скрипт перемикача теми -- тим самим способом, що CSS: інлайном, а
     # не <script src>. Причина та сама, що в коментарі вище: head
     # віддається до монтування, і відносний шлях під root_path=/chat не
@@ -3025,7 +3029,8 @@ def make_head_css():
             + "<style>" + "\n".join(parts) + "</style>"
             + "<script>" + toggle + "</script>"
             + "<script>" + access + "</script>"
-            + "<script>" + mobile + "</script>")
+            + "<script>" + mobile + "</script>"
+            + "<script>" + qr_swap + "</script>")
 
 
 #: Запасні приклади -- без дат і номерів, бо саме вони й «псуються» при зміні
@@ -3111,6 +3116,21 @@ def guest_qr_available():
         return False
     root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
     return os.path.exists(os.path.join(root, "data", "qr-guest.png"))
+
+
+def jury_qr_available():
+    """Чи є ДРУГИЙ QR -- на пам'ятку журі. -> True/False.
+
+    Три умови, і всі три потрібні: ключ (пам'ятка відкривається тим самим
+    гостьовим ключем), картинка з кодом і сама пам'ятка. Немає будь-чого --
+    перемикача не показуємо: кнопка, що веде в порожню рамку або в 404,
+    гірша за відсутність кнопки.
+    """
+    if not os.environ.get("APP_GUEST_TOKEN"):
+        return False
+    root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    return all(os.path.exists(os.path.join(root, "data", name))
+               for name in ("qr-jury.png", "jury-guide.html"))
 
 
 def build_blocks():
@@ -3264,13 +3284,30 @@ def build_blocks():
                 # Картинка приходить маршрутом /static/qr-guest.png; сам ключ
                 # у розмітку не потрапляє.
                 if guest_qr_available():
+                    # ДВА QR З ПЕРЕМИКАЧЕМ (Аня 29.08): вхід у чат і пам'ятка
+                    # журі. Перемикання -- у самій сторінці, без ходу на
+                    # сервер: це показ картинки, а не робота з даними, і
+                    # затримка тут читалась би як «зависло».
+                    #
+                    # Друга картинка може бути НЕ ВИКЛАДЕНОЮ (файл складається
+                    # локально й копіюється окремо), тому кнопки немає, поки
+                    # немає файла: кнопка, яка веде в порожню рамку, гірша за
+                    # відсутність кнопки.
+                    both = jury_qr_available()
+                    swap = ('<button type="button" id="qr-swap" '
+                            'aria-controls="guest-qr">Показати пам\'ятку '
+                            'журі</button>') if both else ""
                     gr.HTML(
-                        '<div id="guest-qr">'
+                        '<div id="guest-qr" data-shown="guest">'
                         '<div class="qr-title">Гостьовий доступ</div>'
                         '<img src="/static/qr-guest.png" alt="QR гостьового '
-                        'входу" width="150" height="150">'
-                        '<div class="qr-note">Вхід без пароля. '
-                        'Без доступу до запису в базу.</div></div>',
+                        'входу" width="150" height="150" data-qr="guest">'
+                        + ('<img src="/static/qr-jury.png" alt="QR пам\'ятки '
+                           'для журі" width="150" height="150" '
+                           'data-qr="jury" hidden>' if both else "")
+                        + '<div class="qr-note">Вхід без пароля. '
+                        'Без доступу до запису в базу.</div>'
+                        + swap + '</div>',
                         elem_id="guest-qr-block")
                 # Переходи між сторінками апки -- ті самі три, що в шапці
                 # звичайних сторінок (/ і /stats): один продукт означає, що

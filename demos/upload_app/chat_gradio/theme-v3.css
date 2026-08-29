@@ -1174,6 +1174,32 @@ details.src > *:not(summary) {
     color: color-mix(in srgb, var(--c-on-accent) 88%, transparent);
 }
 
+/* Перемикач двох QR (Аня 29.08). Виглядає як підпис, а не як кнопка дії:
+   натискання лише міняє картинку, і кнопка з рамкою й тінню обіцяла б тут
+   більше, ніж робить. Але це справжня <button> -- отже клавіатура й
+   зчитувач екрана бачать її як кнопку, а не як текст. */
+#guest-qr #qr-swap {
+    display: block;
+    width: 100%;
+    margin-top: var(--s-2);
+    padding: 4px 0 0;
+    background: none;
+    border: 0;
+    border-top: 1px solid color-mix(in srgb, var(--c-on-accent) 28%, transparent);
+    border-radius: 0;
+    font-family: var(--font-data, var(--font-mono));
+    font-size: 10px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--c-on-accent);
+    cursor: pointer;
+}
+#guest-qr #qr-swap:hover { text-decoration: underline }
+#guest-qr #qr-swap:focus-visible {
+    outline: 2px solid var(--c-on-accent);
+    outline-offset: 2px;
+}
+
 /* 14. (прибрано) Позначка рівня доступу в бічній панелі чата.
  *
  *     Рішення Ані 27.08: у чаті її не показуємо. Вона ламала ритм тісної

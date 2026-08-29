@@ -152,3 +152,9 @@ logs/docgen-trace.jsonl
 
 # Зібрана канва: 2 МБ редактора в кожному файлі, у git їй місця немає.
 docs/deck/canvas/ai-secretary-demo-day.html
+
+# QR і пам'ятка журі: у кожному зашитий ключ гостьового доступу.
+# Складаються локально (docs/demo/make-jury-qr.py) і копіюються
+# на сервер -- як і data/qr-guest.png.
+data/qr-jury.png
+data/jury-guide.html

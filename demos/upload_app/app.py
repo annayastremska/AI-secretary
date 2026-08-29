@@ -547,6 +547,40 @@ def skin_css():
 #: llama-cpp тихо стала процесорною. Файл гітігнорений: у ньому ключ.
 QR_PATH = os.path.join(PROJECT_ROOT, "data", "qr-guest.png")
 
+#: ДРУГИЙ QR -- на пам'ятку для журі («що спитати й на що дивитись», Андрій).
+#: Той самий спосіб: картинка складається локально (`docs/demo/make-jury-qr.py`)
+#: і копіюється на сервер. Обидва файли гітігнорені: у них ключ доступу.
+QR_JURY_PATH = os.path.join(PROJECT_ROOT, "data", "qr-jury.png")
+
+#: Сама пам'ятка. Лежить у `data/`, а не в `static/`, і в git не їде: у ній
+#: усередині посилання на чат ІЗ КЛЮЧЕМ.
+JURY_GUIDE_PATH = os.path.join(PROJECT_ROOT, "data", "jury-guide.html")
+
+
+@app.get("/jury")
+def jury_guide():
+    """Пам'ятка журі. Доступ -- ТОЙ САМИЙ гостьовий ключ, що й у чат.
+
+    Окремого відкритого маршруту тут немає навмисно: пам'ятка веде в чат, і
+    якби вона відкривалась без ключа, то вела б у вікно з паролем. Тому QR
+    кодує `/jury?k=...` -- гейт пускає, кладе cookie, і посилання «Open the
+    chat» усередині працює вже без ключа в адресі.
+    """
+    if not os.path.exists(JURY_GUIDE_PATH):
+        return JSONResponse(status_code=404,
+                            content={"error": "пам'ятки журі немає на сервері"})
+    return FileResponse(JURY_GUIDE_PATH, media_type="text/html; charset=utf-8",
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/static/qr-jury.png")
+def qr_jury():
+    if not (GUEST_TOKEN and os.path.exists(QR_JURY_PATH)):
+        return JSONResponse(status_code=404,
+                            content={"error": "QR пам'ятки не налаштований"})
+    return FileResponse(QR_JURY_PATH, media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+
 
 @app.get("/api/trace/{request_id}")
 def trace_one(request_id: str, request: Request):
