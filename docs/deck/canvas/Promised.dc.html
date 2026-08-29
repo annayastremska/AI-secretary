@@ -11,17 +11,36 @@
   <style>
     body{margin:0}
     a{color:#46682f}a:hover{color:#2e461f}
-    .kick{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:22px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;margin:0 0 56px}
-    .lab{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:21px;letter-spacing:.08em;text-transform:uppercase}
-    .rule{height:1px;border:0;margin:0}
+    .row{display:flex;gap:40px;align-items:baseline;padding:24px 0;border-top:1px solid #e2e4e0}
+    .p{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:21px;letter-spacing:.05em;text-transform:uppercase;color:#61645f;width:400px;flex:none}
+    .m{font-size:29px;font-weight:600;color:#46682f;line-height:1.3}
+    .m.warn{color:#b45309}
   </style>
 </helmet>
 
-<div style="width:1920px;height:1080px;background:#fbfbfa;color:#111312;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:104px 120px;display:flex;flex-direction:column;justify-content:center;box-sizing:border-box">
-<p class="kick" style="color:#61645f">03 &middot; Promised, and measured</p>
-<h1 style="font-size:52px;font-weight:700;letter-spacing:-.02em;margin:0 0 64px;line-height:1.08;max-width:1560px;text-wrap:balance">&#8220;Success is not model accuracy. It is what the answer is made of.&#8221;</h1>
-<div style="display:flex;flex-direction:column;gap:0"><div style="display:flex;gap:56px;align-items:baseline;padding:22px 0"><span class="lab" style="color:#61645f;min-width:560px;flex:none">every answer has four parts</span><span style="font-size:31px;font-weight:600;color:#46682f">date &middot; denominator &middot; drafts &middot; source document</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:22px 0"><span class="lab" style="color:#61645f;min-width:560px;flex:none">a draft is not a fact</span><span style="font-size:31px;font-weight:600;color:#46682f">132 of 2011 facts stay out of every count</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:22px 0"><span class="lab" style="color:#61645f;min-width:560px;flex:none">refusal beats invention</span><span style="font-size:31px;font-weight:600;color:#46682f">measured &#8212; the test set marks questions whose right answer is &#8220;no&#8221;</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:22px 0"><span class="lab" style="color:#61645f;min-width:560px;flex:none">a corpus, not a sample</span><span style="font-size:31px;font-weight:600;color:#46682f">204 documents &middot; 303 people &middot; 44 acts</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:22px 0"><span class="lab" style="color:#61645f;min-width:560px;flex:none">field extraction, against known answers</span><span style="font-size:31px;font-weight:600;color:#46682f">953 of 953 on 82 documents</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:22px 0"><span class="lab" style="color:#61645f;min-width:560px;flex:none">three to five document types</span><span style="font-size:31px;font-weight:600;color:#b45309">two &#8212; narrowed out loud, not quietly</span></div></div>
-<div style="margin-top:auto;padding-top:36px;border-top:1px solid #e2e4e0"><span class="lab" style="color:#61645f">Live numbers: the system&#39;s own statistics page.</span></div>
+<div style="width:1920px;height:1080px;background:#fbfbfa;color:#111312;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;display:flex">
+
+  <div style="width:660px;flex:none;background:#141a10;color:#e8ebe4;padding:96px 72px;display:flex;flex-direction:column;justify-content:space-between">
+    <div>
+      <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:21px;letter-spacing:.1em;color:#9fc47a;margin-bottom:44px">SPRINT 1 &middot; 1 AUGUST</div>
+      <div style="font-size:52px;font-weight:700;line-height:1.15;letter-spacing:-.02em">&#8220;Success is not model accuracy. It is what the answer is made of.&#8221;</div>
+    </div>
+    <div style="font-size:26px;line-height:1.45;color:#c9cec3">Remove any one of the four parts and the commander stops trusting the number &#8212; and goes back to the phone.</div>
+  </div>
+
+  <div style="flex:1;padding:96px 90px;display:flex;flex-direction:column;justify-content:center">
+    <div style="font-size:66px;font-weight:700;letter-spacing:-.03em;margin-bottom:44px">Promised, measured</div>
+
+    <div class="row"><div class="p">four parts in every answer</div><div class="m">date &middot; denominator &middot; drafts &middot; source</div></div>
+    <div class="row"><div class="p">refuse when it does not know</div><div class="m">measured, not claimed</div></div>
+    <div class="row"><div class="p">end to end, no manual steps</div><div class="m">shown live, minutes ago</div></div>
+    <div class="row"><div class="p">corpus of 3 units &times; 7 days</div><div class="m">205 documents &middot; 303 people</div></div>
+    <div class="row"><div class="p">no AI judging our own work</div><div class="m">answers known in advance, compared field by field</div></div>
+    <div class="row" style="border-bottom:1px solid #e2e4e0"><div class="p">3&#8211;5 document types</div><div class="m warn">2 &#8212; narrowed at the last show, out loud</div></div>
+
+    <div style="margin-top:40px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:21px;color:#61645f">Live numbers are on the system&#39;s own statistics page.</div>
+  </div>
+
 </div>
 </x-dc>
 </body>

@@ -11,17 +11,47 @@
   <style>
     body{margin:0}
     a{color:#46682f}a:hover{color:#2e461f}
-    .kick{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:22px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;margin:0 0 56px}
-    .lab{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:21px;letter-spacing:.08em;text-transform:uppercase}
-    .rule{height:1px;border:0;margin:0}
+    .card{border:1px solid #d8dbd6;background:#fff;padding:48px 52px;display:flex;flex-direction:column;gap:20px}
+    .tag{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:20px;letter-spacing:.1em;text-transform:uppercase;color:#b45309}
+    .big{font-size:38px;font-weight:700;line-height:1.15;letter-spacing:-.01em}
+    .sub{font-size:26px;line-height:1.4;color:#3a3d38}
   </style>
 </helmet>
 
-<div style="width:1920px;height:1080px;background:#fbfbfa;color:#111312;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:104px 120px;display:flex;flex-direction:column;justify-content:center;box-sizing:border-box">
-<p class="kick" style="color:#61645f">01 &middot; Limitations</p>
-<h1 style="font-size:64px;font-weight:700;letter-spacing:-.02em;margin:0 0 64px;line-height:1.08;max-width:1560px;text-wrap:balance">What the unit should know first.</h1>
-<div style="display:flex;flex-direction:column;gap:0"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#b45309;min-width:330px;flex:none">documents, not people</span><span style="font-size:31px;line-height:1.35;color:#3a3d38;max-width:1080px">The system knows what is written down. If someone came back early and no one wrote it, it does not know.</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#b45309;min-width:330px;flex:none">one person, two places</span><span style="font-size:31px;line-height:1.35;color:#3a3d38;max-width:1080px">Refused when the system <b>creates</b> a document. Accepted when it <b>receives</b> one &#8212; two such pairs sit in the database now.</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#b45309;min-width:330px;flex:none">lawful or not, same look</span><span style="font-size:31px;line-height:1.35;color:#3a3d38;max-width:1080px">A replacement slip says &#8220;instead of &#8470;118&#8221;. We read that line and do not store it, so we cannot tell a replacement from a contradiction.</span></div><hr class="rule" style="background:#e2e4e0"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#b45309;min-width:330px;flex:none">nothing closes the queue</span><span style="font-size:31px;line-height:1.35;color:#3a3d38;max-width:1080px">31 documents wait for a person. There is no screen to confirm them, and no way to close a remark.</span></div></div>
-<div style="margin-top:auto;padding-top:36px;border-top:1px solid #e2e4e0"><span class="lab" style="color:#61645f">All four are visible on the live system right now.</span></div>
+<div style="width:1920px;height:1080px;background:#fbfbfa;color:#111312;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:90px 110px;display:flex;flex-direction:column">
+
+  <div style="display:flex;align-items:baseline;gap:36px;margin-bottom:54px">
+    <div style="font-size:76px;font-weight:700;letter-spacing:-.03em">Not finished</div>
+    <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:22px;color:#61645f;letter-spacing:.08em">FOUR OF EIGHT</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:34px;flex:1">
+
+    <div class="card">
+      <div class="tag">access</div>
+      <div class="big">Two roles, and the only difference is writing.</div>
+      <div class="sub">A guest with the QR code can read everything an operator can &#8212; including passport data. They just cannot upload.</div>
+    </div>
+
+    <div class="card">
+      <div class="tag">contradictions</div>
+      <div class="big">Overlaps are not checked on upload.</div>
+      <div class="sub">One person can end up on leave and away on duty at the same time. We refuse that when creating a document &#8212; not when receiving one.</div>
+    </div>
+
+    <div class="card">
+      <div class="tag">the corpus</div>
+      <div class="big">We have no real documents.</div>
+      <div class="sub">Every document in the demo is synthetic. Nothing has been tested against a real unit&#39;s paperwork.</div>
+    </div>
+
+    <div class="card">
+      <div class="tag">review</div>
+      <div class="big">No queue screen.</div>
+      <div class="sub">You confirm a document while uploading it, or never. 31 documents are waiting with no way to open them.</div>
+    </div>
+
+  </div>
 </div>
 </x-dc>
 </body>

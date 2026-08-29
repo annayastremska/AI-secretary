@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+  <style>
+    body{margin:0}
+    a{color:#46682f}a:hover{color:#2e461f}
+    .k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:21px;letter-spacing:.1em;text-transform:uppercase}
+    .li{font-size:27px;line-height:1.4;padding:20px 0}
+  </style>
+</helmet>
+
+<div style="width:1920px;height:1080px;background:#fbfbfa;color:#111312;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;display:flex;flex-direction:column">
+
+  <div style="padding:78px 110px 40px">
+    <div style="font-size:74px;font-weight:700;letter-spacing:-.03em">Where the risk is</div>
+  </div>
+
+  <div style="display:flex;flex:1;border-top:1px solid #d8dbd6">
+
+    <div style="flex:1;padding:64px 70px;display:flex;flex-direction:column">
+      <div class="k" style="color:#61645f;margin-bottom:30px">Not here</div>
+      <div style="font-size:46px;font-weight:700;line-height:1.15;letter-spacing:-.02em;margin-bottom:34px">The model cannot reach the data.</div>
+      <div style="display:flex;align-items:center;gap:26px;margin-bottom:36px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:23px;color:#61645f">
+        <span>model</span>
+        <svg viewBox="0 0 60 24" width="90" height="34" fill="none" stroke="#b45309" stroke-width="2"><path d="M2 12h56"/><path d="M22 4l16 16M38 4L22 20"/></svg>
+        <span>database</span>
+      </div>
+      <div class="li" style="border-top:1px solid #e2e4e0;color:#3a3d38">It never sees a table, a row, or the result of a query.</div>
+      <div class="li" style="border-top:1px solid #e2e4e0;color:#3a3d38">Its every reply must fit a fixed shape &#8212; there is no room for a free sentence to slip through.</div>
+      <div class="li" style="border-top:1px solid #e2e4e0;color:#3a3d38">A quote must appear word for word in the document, or it is not shown.</div>
+      <div class="li" style="border-top:1px solid #e2e4e0;color:#3a3d38">48 attacks were tried on it. The two places that matter held all of them.</div>
+    </div>
+
+    <div style="flex:1;padding:64px 70px;background:#141a10;color:#e8ebe4;display:flex;flex-direction:column">
+      <div class="k" style="color:#9fc47a;margin-bottom:30px">Here</div>
+      <div style="font-size:46px;font-weight:700;line-height:1.15;letter-spacing:-.02em;margin-bottom:34px">Whoever logs in sees everything.</div>
+      <div class="li" style="border-top:1px solid rgba(255,255,255,.16);color:#c9cec3">Two roles only: one can upload, the other cannot. That is the whole difference.</div>
+      <div class="li" style="border-top:1px solid rgba(255,255,255,.16);color:#c9cec3">A guest with the QR code can read passport data. On the stand it is synthetic &#8212; in a unit it would not be.</div>
+      <div class="li" style="border-top:1px solid rgba(255,255,255,.16);color:#c9cec3">That access is deliberate: the people this is built for work with these documents every day.</div>
+      <div class="li" style="border-top:1px solid rgba(255,255,255,.16);color:#c9cec3">So the boundary belongs on the door, not on the model. That door is the next thing to build.</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

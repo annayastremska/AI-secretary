@@ -10,18 +10,45 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
   <style>
     body{margin:0}
-    a{color:#46682f}a:hover{color:#2e461f}
-    .kick{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:22px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;margin:0 0 56px}
-    .lab{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:21px;letter-spacing:.08em;text-transform:uppercase}
-    .rule{height:1px;border:0;margin:0}
+    a{color:#9fc47a}a:hover{color:#c2dda3}
+    .n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:34px;font-weight:600;color:#9fc47a;width:78px;flex:none}
+    .head{font-size:40px;font-weight:700;letter-spacing:-.015em;margin-bottom:12px}
+    .body{font-size:27px;line-height:1.4;color:#c9cec3;max-width:1180px}
   </style>
 </helmet>
 
-<div style="width:1920px;height:1080px;background:#141a10;color:#e8ebe4;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:104px 120px;display:flex;flex-direction:column;justify-content:center;box-sizing:border-box">
-<p class="kick" style="color:#9fc47a">02 &middot; Not built yet</p>
-<h1 style="font-size:64px;font-weight:700;letter-spacing:-.02em;margin:0 0 64px;line-height:1.08;max-width:1560px;text-wrap:balance">Named, with what each one needs.</h1>
-<div style="display:flex;flex-direction:column;gap:0"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">a queue screen</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">So a draft can be confirmed later, not only at upload.</span></div><hr class="rule" style="background:rgba(255,255,255,.13)"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">the overlap check on upload</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">Write it as a draft, put a remark in the queue, and store the &#8220;instead of &#8470;&#8230;&#8221; link.</span></div><hr class="rule" style="background:rgba(255,255,255,.13)"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">roles, not table lists</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">A guest with the QR code currently sees what an operator sees.</span></div><hr class="rule" style="background:rgba(255,255,255,.13)"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">containers</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">Everything runs as one service on the host today.</span></div></div>
-<div style="margin-top:auto;padding-top:36px;border-top:1px solid rgba(255,255,255,.13)"><span class="lab" style="color:#9aa094">From the project description &#8212; the same list we work from.</span></div>
+<div style="width:1920px;height:1080px;background:#141a10;color:#e8ebe4;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:96px 120px;display:flex;flex-direction:column">
+
+  <div style="font-size:76px;font-weight:700;letter-spacing:-.03em;margin-bottom:16px">The other four</div>
+  <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:22px;color:#9aa094;letter-spacing:.08em;margin-bottom:56px">WHAT WE KNOW WE HAVE NOT SOLVED</div>
+
+  <div style="display:flex;flex-direction:column;gap:0;flex:1">
+
+    <div style="display:flex;gap:44px;align-items:flex-start;padding:30px 0;border-top:1px solid rgba(255,255,255,.14)">
+      <div class="n">05</div>
+      <div><div class="head">Three kinds of document, no more.</div>
+      <div class="body">Leave slips, deployment certificates, regulations. A form we have never seen is unknown territory &#8212; we do not know what the reader will make of it.</div></div>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;padding:30px 0;border-top:1px solid rgba(255,255,255,.14)">
+      <div class="n">06</div>
+      <div><div class="head">A new question needs a developer.</div>
+      <div class="body">The document-creation feature fills forms. It cannot add a new kind of query &#8212; that is still a file we edit by hand.</div></div>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;padding:30px 0;border-top:1px solid rgba(255,255,255,.14)">
+      <div class="n">07</div>
+      <div><div class="head">Our own numbers say the chat can do better.</div>
+      <div class="body">Across 127 test questions the rules take 82 and get 61 right. The rest go to the model. We measure this on purpose &#8212; it is where the next work is.</div></div>
+    </div>
+
+    <div style="display:flex;gap:44px;align-items:flex-start;padding:30px 0;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+      <div class="n">08</div>
+      <div><div class="head">The model is local, so it needs the hardware.</div>
+      <div class="body">27 billion parameters on our own GPU. Nothing leaves the network &#8212; and nothing works quickly without that card.</div></div>
+    </div>
+
+  </div>
 </div>
 </x-dc>
 </body>

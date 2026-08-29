@@ -10,18 +10,55 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
   <style>
     body{margin:0}
-    a{color:#46682f}a:hover{color:#2e461f}
-    .kick{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:22px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;margin:0 0 56px}
-    .lab{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:21px;letter-spacing:.08em;text-transform:uppercase}
-    .rule{height:1px;border:0;margin:0}
+    a{color:#9fc47a}a:hover{color:#c2dda3}
+    .block{border:1px solid rgba(255,255,255,.22);padding:40px 40px 36px;display:flex;flex-direction:column;gap:22px;flex:1;background:rgba(255,255,255,.03)}
+    .btitle{font-size:38px;font-weight:700;letter-spacing:-.01em}
+    .bnum{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:20px;letter-spacing:.12em;color:#9fc47a}
+    .item{font-size:24px;line-height:1.35;color:#c9cec3;display:flex;gap:14px}
+    .dot{color:#9fc47a;flex:none}
+    .arrow{align-self:center;color:#9fc47a;opacity:.6;flex:none}
   </style>
 </helmet>
 
-<div style="width:1920px;height:1080px;background:#141a10;color:#e8ebe4;font-family:'IBM Plex Sans',system-ui,sans-serif;padding:104px 120px;display:flex;flex-direction:column;justify-content:center;box-sizing:border-box">
-<p class="kick" style="color:#9fc47a">04 &middot; How an answer is made</p>
-<h1 style="font-size:56px;font-weight:700;letter-spacing:-.02em;margin:0 0 64px;line-height:1.08;max-width:1560px;text-wrap:balance">31 verified queries. The model never touches the database.</h1>
-<div style="display:flex;flex-direction:column;gap:0"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">1 &middot; rules</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">wording recognised by pattern &#8212; <b>0.03&#8211;0.8 s</b>, the model is not called</span></div><hr class="rule" style="background:rgba(255,255,255,.13)"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">2 &middot; similarity</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">the question matches a known example closely enough</span></div><hr class="rule" style="background:rgba(255,255,255,.13)"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">3 &middot; the model picks</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">it names one query from the list and fills in the parameters</span></div><hr class="rule" style="background:rgba(255,255,255,.13)"><div style="display:flex;gap:56px;align-items:baseline;padding:26px 0"><span class="lab" style="color:#9fc47a;min-width:330px;flex:none">4 &middot; the model writes</span><span style="font-size:31px;line-height:1.35;color:#c9cec3;max-width:1080px">a single read, checked before it runs &#8212; when no query fits</span></div></div>
-<div style="margin-top:auto;padding-top:36px;border-top:1px solid rgba(255,255,255,.13)"><span class="lab" style="color:#9aa094">0.07 s for a count &middot; 29 s for a question about a regulation</span></div>
+<div style="width:1920px;height:1080px;background:#141a10;color:#e8ebe4;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:88px 100px;display:flex;flex-direction:column">
+
+  <div style="font-size:74px;font-weight:700;letter-spacing:-.03em;margin-bottom:12px">Three blocks</div>
+  <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:22px;color:#9aa094;letter-spacing:.08em;margin-bottom:60px">READ IT &middot; STORE IT &middot; ANSWER FROM IT</div>
+
+  <div style="display:flex;gap:34px;align-items:stretch;flex:1">
+
+    <div class="block">
+      <div class="bnum">01 &middot; READING</div>
+      <div class="btitle">Three ways in</div>
+      <div class="item"><span class="dot">&#9679;</span><span>a Word file &#8212; text taken straight from it</span></div>
+      <div class="item"><span class="dot">&#9679;</span><span>a PDF &#8212; its text layer first, pixels only if there is none</span></div>
+      <div class="item"><span class="dot">&#9679;</span><span>a photo &#8212; recognised on our own GPU</span></div>
+      <div style="margin-top:auto;font-size:23px;color:#9aa094;line-height:1.35">Then the same path for all three: recognise the form, pull the fields, hand it to a person.</div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M14 6l6 6-6 6"/></svg></div>
+
+    <div class="block">
+      <div class="bnum">02 &middot; THE DATABASE</div>
+      <div class="btitle">Two kinds of content</div>
+      <div class="item"><span class="dot">&#9679;</span><span><b style="color:#e8ebe4">Facts</b> &#8212; who, what, from when to when, and which document says so</span></div>
+      <div class="item"><span class="dot">&#9679;</span><span><b style="color:#e8ebe4">Regulations</b> &#8212; the full text, cut into clauses, each with its own address</span></div>
+      <div class="item"><span class="dot">&#9679;</span><span>plus the register of people, and a queue of what a person still has to check</span></div>
+      <div style="margin-top:auto;font-size:23px;color:#9aa094;line-height:1.35">Every fact keeps its source and its state: counted, or waiting for a person.</div>
+    </div>
+
+    <div class="arrow"><svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12h16M14 6l6 6-6 6"/></svg></div>
+
+    <div class="block">
+      <div class="bnum">03 &middot; THE CHAT</div>
+      <div class="btitle">Two roads out</div>
+      <div class="item"><span class="dot">&#9679;</span><span><b style="color:#e8ebe4">A number</b> &#8212; one of 31 ready-made queries runs against the facts</span></div>
+      <div class="item"><span class="dot">&#9679;</span><span><b style="color:#e8ebe4">A quote</b> &#8212; the regulation text is searched, then checked word for word</span></div>
+      <div class="item"><span class="dot">&#9679;</span><span>and a third answer that is not an answer: &#8220;no data&#8221;, with the reason</span></div>
+      <div style="margin-top:auto;font-size:23px;color:#9aa094;line-height:1.35">The queries are written and checked by us. The model picks one; it never writes the answer.</div>
+    </div>
+
+  </div>
 </div>
 </x-dc>
 </body>
