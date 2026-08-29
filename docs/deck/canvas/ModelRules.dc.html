@@ -7,7 +7,7 @@
 <body>
 <x-dc>
 <helmet>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap">
   <style>
     body{margin:0}
     a{color:#46682f}a:hover{color:#2e461f}
@@ -21,8 +21,8 @@
 <div style="width:1920px;height:1080px;background:#fbfbfa;color:#111312;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;display:flex;flex-direction:column">
 
   <div style="padding:80px 110px 44px">
-    <div style="font-size:74px;font-weight:700;letter-spacing:-.03em">What the model may do</div>
-    <div style="font-size:30px;color:#3a3d38;margin-top:16px;max-width:1300px">It is a translator between a question and a list of ready queries. Nothing more was allowed.</div>
+    <div style="font-size:74px;font-weight:700;letter-spacing:-.03em">The model's job</div>
+    <div style="font-size:30px;color:#3a3d38;margin-top:16px;max-width:1300px">It turns a question into one of our 31 queries.</div>
   </div>
 
   <div style="display:flex;flex:1;border-top:1px solid #d8dbd6">
@@ -30,35 +30,33 @@
     <div class="col" style="background:#eef3e8">
       <div class="k" style="color:#46682f">Allowed</div>
       <div class="h">Choose and extract</div>
-      <div class="li"><span style="color:#46682f">&#10003;</span><span>pick <b>one query</b> from a written list of 31</span></div>
-      <div class="li"><span style="color:#46682f">&#10003;</span><span>pull the date, the surname, the unit, the document number out of the question</span></div>
-      <div class="li"><span style="color:#46682f">&#10003;</span><span>say whether a found clause actually answers the question</span></div>
-      <div class="li"><span style="color:#46682f">&#10003;</span><span>write a query itself &#8212; only when no ready one fits, and only a single read</span></div>
+      <div class="li"><span style="color:#46682f">✓</span><span>pick <b>one query</b> from a list of 31</span></div>
+      <div class="li"><span style="color:#46682f">✓</span><span>pull the date, name, unit or document number from the question</span></div>
+      <div class="li"><span style="color:#46682f">✓</span><span>judge whether a clause answers the question</span></div>
+      <div class="li"><span style="color:#46682f">✓</span><span>write its own query when none fits — a single read</span></div>
     </div>
 
     <div class="col" style="background:#fbf3ea;border-left:1px solid #d8dbd6">
       <div class="k" style="color:#b45309">Never</div>
       <div class="h">Speak for the system</div>
-      <div class="li"><span style="color:#b45309">&#10007;</span><span>write the sentence you read &#8212; that is assembled by code from database rows</span></div>
-      <div class="li"><span style="color:#b45309">&#10007;</span><span>see the database, or the results of any query</span></div>
-      <div class="li"><span style="color:#b45309">&#10007;</span><span>invent a missing parameter &#8212; an empty field stays empty</span></div>
-      <div class="li"><span style="color:#b45309">&#10007;</span><span>change, delete or add anything: its access is read-only three times over</span></div>
+      <div class="li"><span style="color:#b45309">✗</span><span>write the sentence you read — code does that</span></div>
+      <div class="li"><span style="color:#b45309">✗</span><span>see the database, or any result</span></div>
+      <div class="li"><span style="color:#b45309">✗</span><span>invent a missing value — empty stays empty</span></div>
+      <div class="li"><span style="color:#b45309">✗</span><span>change anything — its access is read-only</span></div>
     </div>
 
     <div class="col" style="background:#f4f4f2;border-left:1px solid #d8dbd6">
       <div class="k" style="color:#61645f">What it is given</div>
       <div class="h">A short memory</div>
-      <div class="li"><span style="color:#61645f">&#8250;</span><span>the question, and the <b>one</b> turn before it</span></div>
-      <div class="li"><span style="color:#61645f">&#8250;</span><span>six things carried over: what was asked about, the date, the unit, the person, the document, the place</span></div>
-      <div class="li"><span style="color:#61645f">&#8250;</span><span>the list of queries &#8212; read from the same file that runs them</span></div>
-      <div class="li"><span style="color:#61645f">&#8250;</span><span>today&#39;s date, from the code. It is never asked to know what day it is</span></div>
+      <div class="li"><span style="color:#61645f">›</span><span>the question and <b>one</b> turn before it</span></div>
+      <div class="li"><span style="color:#61645f">›</span><span>six carried values: subject, date, unit, person, document, place</span></div>
+      <div class="li"><span style="color:#61645f">›</span><span>the query list, always the one actually in use</span></div>
+      <div class="li"><span style="color:#61645f">›</span><span>today's date, from the code</span></div>
     </div>
 
   </div>
 
-  <div style="padding:34px 110px;border-top:1px solid #d8dbd6;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:22px;color:#61645f">
-    Anything carried over from the previous turn is said out loud in the answer &#8212; a silent guess is an answer to a different question.
-  </div>
+  <div style="padding:34px 110px;border-top:1px solid #d8dbd6;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:22px;color:#61645f">+ documents GENERATION</div>
 </div>
 </x-dc>
 </body>

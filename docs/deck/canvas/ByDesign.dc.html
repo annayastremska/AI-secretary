@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap">
+  <style>
+    body{margin:0}
+    a{color:#46682f}a:hover{color:#2e461f}
+    .r{display:grid;grid-template-columns:1fr 760px;gap:60px;align-items:baseline;
+       padding:30px 0;border-top:1px solid #d8dbd6}
+    .w{font-size:42px;font-weight:700;letter-spacing:-.018em;line-height:1.1}
+    .h{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:23px;
+       line-height:1.4;color:#61645f;text-align:right}
+  </style>
+</helmet>
+
+<div style="width:1920px;height:1080px;background:#fbfbfa;color:#111312;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:82px 110px 70px;display:flex;flex-direction:column">
+
+  <div style="display:flex;align-items:baseline;gap:36px;margin-bottom:44px">
+    <div style="font-size:76px;font-weight:700;letter-spacing:-.03em">On the bright side</div>
+    
+  </div>
+
+  
+
+  <div style="flex:1;display:flex;flex-direction:column;justify-content:center">
+    <div class="r"><div class="w">The model never sees the database.</div><div class="h">picks a query from the list and inserts prompt data</div></div>
+    <div class="r"><div class="w">The model writes the quote. Code checks it.</div><div class="h">a quote that does not match is dropped</div></div>
+    <div class="r"><div class="w">A draft is not a fact.</div><div class="h">one unreliable field holds the whole document</div></div>
+    <div class="r"><div class="w">No data means no answer.</div><div class="h">it says so, and says why</div></div>
+    <div class="r"><div class="w">The same file counts once.</div><div class="h">matched by content, not by name</div></div>
+    <div class="r" style="border-bottom:1px solid #d8dbd6"><div class="w">No conflicts between files.</div><div class="h">a person cannot be deployed and on vacation simultaneously.</div></div>
+    
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -22,6 +22,13 @@
       "h": 1080
     },
     {
+      "file": "ByDesign.dc.html",
+      "x": 6360,
+      "y": 0,
+      "w": 1920,
+      "h": 1080
+    },
+    {
       "file": "Promised.dc.html",
       "x": 0,
       "y": 1340,
@@ -29,35 +36,42 @@
       "h": 1080
     },
     {
-      "file": "Architecture.dc.html",
+      "file": "Feedback.dc.html",
       "x": 2120,
       "y": 1340,
       "w": 1920,
       "h": 1080
     },
     {
-      "file": "ModelRules.dc.html",
+      "file": "TechArchitecture.dc.html",
       "x": 4240,
       "y": 1340,
       "w": 1920,
       "h": 1080
     },
     {
-      "file": "Local.dc.html",
+      "file": "ModelRules.dc.html",
+      "x": 6360,
+      "y": 1340,
+      "w": 1920,
+      "h": 1080
+    },
+    {
+      "file": "QA.dc.html",
       "x": 0,
       "y": 2680,
       "w": 1920,
       "h": 1080
     },
     {
-      "file": "Risk.dc.html",
+      "file": "Local.dc.html",
       "x": 2120,
       "y": 2680,
       "w": 1920,
       "h": 1080
     },
     {
-      "file": "QA.dc.html",
+      "file": "Risk.dc.html",
       "x": 4240,
       "y": 2680,
       "w": 1920,

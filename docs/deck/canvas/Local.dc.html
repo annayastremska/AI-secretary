@@ -7,7 +7,7 @@
 <body>
 <x-dc>
 <helmet>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap">
   <style>
     body{margin:0}
     a{color:#9fc47a}a:hover{color:#c2dda3}
@@ -18,27 +18,26 @@
 
 <div style="width:1920px;height:1080px;background:#141a10;color:#e8ebe4;font-family:'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:96px 120px;display:flex;flex-direction:column;justify-content:center">
 
-  <div style="font-size:96px;font-weight:700;letter-spacing:-.035em;line-height:1.02;max-width:1500px">Everything on one server</div>
+  <div style="font-size:96px;font-weight:700;letter-spacing:-.035em;line-height:1.02;max-width:1500px">One server, requirements to the unit</div>
   <div style="width:180px;height:6px;background:#9fc47a;margin:40px 0 52px"></div>
 
   <div style="display:flex;gap:90px;align-items:flex-start">
 
     <div style="flex:1">
-      <div class="fact" style="border-top:0"><b>The model runs here.</b> 27 billion parameters, on our own graphics card. No API, no external service, nothing to pay per question.</div>
-      <div class="fact"><b>The database is here.</b> Documents, facts, regulations &#8212; all on the same machine.</div>
-      <div class="fact"><b>The pages call nobody.</b> Even the fonts are local, so no outside service learns that someone opened the chat.</div>
-      <div class="fact"><b>The price is the hardware.</b> Without a real GPU the same work takes tens of seconds instead of tenths.</div>
+      <div class="fact" style="border-top:0"><b>The model runs here.</b> 27 billion parameters on GPU.</div>
+      <div class="fact"><b>The database is here.</b> Documents, facts and regulations, one machine.</div>
+      <div class="fact"><b>No external requests.</b> Nobody outside learns the chat was opened.</div>
+      
     </div>
 
     <div style="width:520px;flex:none;border:1px solid rgba(255,255,255,.22);padding:44px 44px 40px;background:rgba(255,255,255,.03)">
-      <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:20px;letter-spacing:.12em;color:#9fc47a;margin-bottom:28px">WHAT A UNIT WOULD NEED</div>
+      <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:20px;letter-spacing:.12em;color:#9fc47a;margin-bottom:28px">A UNIT NEEDS</div>
       <div style="display:flex;flex-direction:column;gap:22px;font-size:26px;line-height:1.35;color:#c9cec3">
-        <div>one machine with a GPU</div>
-        <div>no internet connection</div>
+        <div>server</div>
+        <div>no internet</div>
         <div>no cloud account</div>
-        <div>no per-question cost</div>
+        <div>no cost per question</div>
       </div>
-      <div style="margin-top:34px;padding-top:26px;border-top:1px solid rgba(255,255,255,.14);font-size:23px;color:#9aa094;line-height:1.35">This was a requirement from the start, not a feature we added later.</div>
     </div>
 
   </div>
