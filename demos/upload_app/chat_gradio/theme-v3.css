@@ -2639,3 +2639,75 @@ details.src > *:not(summary) {
         }
     }
 }
+
+/* 45. ОБГОРТКИ GRADIO ВИКИДАЮТЬСЯ З РОЗКЛАДКИ ШАПКИ (телефон).
+ *
+ *     Чому чотири попередні заходи не влучили. Я щоразу центрувала те, що
+ *     бачу в нашому коді -- кнопку меню й кнопку теми. Але між шапкою й
+ *     кнопкою стоять ДВА чужі вузли, яких у нашій розмітці немає:
+ *
+ *         #topbar  ->  .html-container (обгортка gr.HTML)  ->  .prose  ->  button
+ *
+ *     `align-items: center` центрує ПРЯМИХ дітей, тобто обгортку. А кнопка
+ *     всередині обгортки лягає за її власними правилами -- і в `.prose` вони
+ *     свої (`margin-bottom` у абзаців, свій `line-height`). Через це кнопка
+ *     сиділа нижче центру, а назва -- вище: три елементи, три різні коробки.
+ *
+ *     Рішення -- не ще один `align-items`, а `display: contents`: обгортка
+ *     зникає з розкладки, і кнопка стає ПРЯМОЮ дитиною шапки. Тоді її
+ *     центрує той самий `align-items: center`, який уже стоїть, і жодне чуже
+ *     правило між ними не втручається.
+ *
+ *     Лише на телефоні: на широкому екрані та сама шапка влаштована інакше
+ *     (кнопка теми абсолютом, межа під назвою), і чіпати те, що працює, перед
+ *     демо не будемо.
+ */
+@media (max-width: 860px) {
+    /* Обгортки -- геть із розкладки. */
+    #nav-toggle-block,
+    #theme-switch,
+    #topbar-title,
+    #topbar .html-container,
+    #topbar .prose {
+        display: contents !important;
+    }
+    /* Тепер прямі діти шапки -- самі кнопки й абзац назви. */
+    #topbar > *,
+    #topbar #nav-toggle,
+    #topbar .theme-toggle,
+    #topbar-title p,
+    #topbar .prose > p {
+        align-self: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+    }
+    /* Назва: тягнеться й обрізається еліпсисом. Це вже АБЗАЦ, а не обгортка. */
+    #topbar-title p,
+    #topbar .prose > p {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        line-height: 1 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        align-self: center !important;
+    }
+    /* Кнопки: однакові квадрати, центровані самою шапкою. */
+    #topbar #nav-toggle,
+    #topbar .theme-toggle {
+        flex: 0 0 36px !important;
+        width: 36px !important;
+        min-width: 36px !important;
+        height: 36px !important;
+        min-height: 36px !important;
+        max-height: 36px !important;
+        display: grid !important;
+        place-items: center !important;
+        position: static !important;
+        transform: none !important;
+    }
+    /* Тло під шухляду лишається поза розкладкою: воно fixed і показується
+       лише при відкритому меню. */
+    #nav-backdrop { position: fixed !important }
+}
