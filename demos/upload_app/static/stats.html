@@ -597,7 +597,7 @@ function renderConflicts(c) {
   $("conflict-note").textContent = "";
   if (!c) { return; }
 
-  const HOW_SUPERSESSION = "поле documents.superseded_by_doc_id: нуль означає, що законна заміна документа й справжня суперечність зовні виглядають однаково";
+  const HOW_SUPERSESSION = "поле documents.superseded_by_doc_id; нуль означає, що законну заміну не відрізнити від суперечності";
 
   if (c.pairs === null || c.pairs === undefined) {
     host.appendChild(tile("—", "пар, що перетинаються", c.how,
@@ -650,7 +650,10 @@ function renderConflicts(c) {
   if (c.truncated) {
     parts.push("пар без подробиць: " + c.truncated);
   }
-  parts.push("перетином вважається накладання періодів двох фактів відсутності однієї особи, що входять у підрахунки");
+  /* Визначення перетину тут БІЛЬШЕ НЕ ПЕРЕКАЗУЄТЬСЯ: воно стоїть під числом,
+     а тут стояло вдруге тими самими словами (Аня: «одне й те саме взагалі
+     повторюється двічі»). Лишається рівно те, чого визначення не покриває --
+     найчастіше хибне прочитання числа. */
   parts.push("різні люди, відсутні одночасно, перетином не є");
   $("conflict-note").textContent = parts.join(". ") + ".";
 }

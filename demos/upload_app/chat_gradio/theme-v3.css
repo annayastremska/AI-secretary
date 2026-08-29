@@ -2220,3 +2220,82 @@ details.src > *:not(summary) {
 #guest-qr {
     border-radius: var(--r-card) !important;
 }
+
+/* 40. Кнопка надсилання: висотою в поле, впритул у правий кут (Аня 28.08).
+ *
+ *     ЦЕ ПОВЕРНЕННЯ ДО ПОТОКУ, і повертатись тут страшно не просто так:
+ *     правило 3 робило саме це, а потім його перебило правило з абсолютом --
+ *     після двох поломок, описаних вище. Тому спершу чому зараз безпечно.
+ *
+ *     Ламалось так: обгортка поля в Gradio -- елемент flex зі стандартною
+ *     шириною 100%, тому рядок переносився і кнопка з'їжджала ПІД поле.
+ *     Тепер від цього стоять ДВА запобіжники, яких у правилі 3 не було
+ *     одночасно: `flex-wrap: nowrap` на самій стрічці і `min-width: 0` з
+ *     `flex: 1 1 auto` на обгортці поля. Перше не дає рядку переноситись
+ *     узагалі, друге дозволяє обгортці стискатись -- без нього вона тримає
+ *     свої 100% і виштовхує кнопку навіть без переносу.
+ *
+ *     Друга поломка була в тому, що правило влучило в САМУ кнопку замість
+ *     обгортки (elem_id Gradio сидить на <button>). Тут це вже не пастка, а
+ *     умова: кнопка Є прямим елементом стрічки, і саме тому потік працює.
+ *
+ *     «Тієї ж висоти» зроблено через `align-self: stretch`, а не числом:
+ *     поле росте разом із текстом, і зашита висота розійшлася б із ним на
+ *     довгому питанні.
+ *
+ *     «Рівно у правому кутку» -- це `gap: 0`: кнопка стоїть упритул до поля,
+ *     і разом вони читаються як один орган керування. Радіус лишається
+ *     квадратним: за правилом 39 скруглені картки й рамки медіа, а поле й
+ *     кнопка поля -- прямі.
+ */
+#composer {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: stretch !important;
+    gap: 0 !important;
+}
+#composer > *:first-child {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+}
+/* Правий відступ під кнопку більше не потрібен: кнопка вийшла з поля. Без
+   цього рядка в полі лишилась би 60px порожнеча праворуч. */
+#composer textarea {
+    padding: 13px var(--s-4) !important;
+    min-height: 50px !important;
+}
+#send-btn {
+    position: static !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    align-self: stretch !important;
+    flex: none !important;
+    width: 50px !important;
+    min-width: 50px !important;
+    height: auto !important;
+    min-height: 50px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    place-items: center !important;
+    border: 0 !important;
+    border-radius: var(--r-md) !important;
+    font-size: 17px !important;
+}
+/* Наведення й натиск -- ЛИШЕ кольором і тінню. Зсув по вертикалі тут
+   заборонений: кнопка тепер тягнеться на висоту поля, і піднімати її на
+   пiксель означало б рвати спільний край із полем -- те саме, що ми
+   щойно вирівнювали. */
+#send-btn:hover {
+    background: var(--c-accent-600) !important;
+    box-shadow: var(--shadow-md) !important;
+    transform: none !important;
+    filter: none !important;
+}
+#send-btn:active {
+    background: var(--c-accent-700) !important;
+    box-shadow: none !important;
+    transform: none !important;
+}

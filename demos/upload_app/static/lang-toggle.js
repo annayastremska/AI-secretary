@@ -244,12 +244,12 @@
       "Overlaps not measured: the database is unavailable.",
     "пар без подробиць:": "pairs shown without details:",
     "підстава заміни записана": "a ground for replacement is recorded",
-    "перетином вважається накладання періодів двох фактів відсутності однієї особи, що входять у підрахунки":
-      "an overlap means two absence facts of ONE person, both counted in the totals, whose periods overlap",
     "різні люди, відсутні одночасно, перетином не є":
       "different people absent at the same time are not an overlap",
-    "поле documents.superseded_by_doc_id: нуль означає, що законна заміна документа й справжня суперечність зовні виглядають однаково":
-      "the documents.superseded_by_doc_id field: zero means a lawful replacement of a document and a genuine contradiction look identical from outside",
+    "поле documents.superseded_by_doc_id; нуль означає, що законну заміну не відрізнити від суперечності":
+      "the documents.superseded_by_doc_id field; zero means a lawful replacement cannot be told from a contradiction",
+    "накладання періодів двох відсутностей однієї особи; запит по базі при відкритті сторінки":
+      "overlapping periods of two absences of one person; queried from the database when the page opens",
     // Комбінації видів відсутності: їх рівно три, і вони приходять готовою
     // фразою з Python (`stats._kinds_phrase`) саме для того, щоб перекладались
     // цілком, а не через ключ «і».

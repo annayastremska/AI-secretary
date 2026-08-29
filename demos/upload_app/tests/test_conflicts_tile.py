@@ -118,8 +118,12 @@ def test_every_number_has_how():
     ловив Денис."""
     c = stats.conflicts(dsn="postgresql://nobody@127.0.0.1:1/none")
     assert c["how"] and len(c["how"]) > 20, c["how"]
-    #: «Чим зміряно» мусить називати сам замір, а не бути гаслом.
-    assert "перетин" in c["how"].lower(), c["how"]
+    #: «Чим зміряно» мусить називати сам замір, а не бути гаслом: що саме
+    #: рахується (накладання періодів) і звідки взялось (запит по базі).
+    #: Слово «перетин» тут більше не шукається -- підпис скорочений на прохання
+    #: Ані, і тест мусить тримати ЗМІСТ, а не ту редакцію, під яку його писали.
+    low = c["how"].lower()
+    assert "накладання" in low and "запит по базі" in low, c["how"]
 
 
 def test_wording_does_not_call_a_lawful_replacement_a_conflict():
