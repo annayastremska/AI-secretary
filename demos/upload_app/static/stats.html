@@ -597,7 +597,7 @@ function renderConflicts(c) {
   $("conflict-note").textContent = "";
   if (!c) { return; }
 
-  const HOW_SUPERSESSION = "записано, що один документ виданий замість іншого (documents.superseded_by_doc_id). Решта перетинів — не підтверджена заміна";
+  const HOW_SUPERSESSION = "це перетини, для яких у базі записано, що один документ виданий замість іншого; решта — не підтверджена заміна";
 
   if (c.pairs === null || c.pairs === undefined) {
     host.appendChild(tile("—", "пар, що перетинаються", c.how,
