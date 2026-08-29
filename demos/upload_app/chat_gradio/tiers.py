@@ -1378,6 +1378,40 @@ def unknown_place_candidate(question, lookup=None):
     return None
 
 
+#: Дні тижня -- НЕ місця. Стоять окремо від _NOT_A_PLACE, бо там слова, які
+#: трапляються після «у» в наших же питаннях («у відпустці»), а тут -- слова, на
+#: яких коротка форма про пункт найлегше промахнеться («а у понеділок?»).
+_WEEKDAYS = re.compile(
+    r"понеділ|вівтор|серед|четвер|п.ятниц|субот|недíл|неділ|вихідн|будн", re.I)
+
+
+def is_place_followup_shape(question):
+    """-> True, якщо репліка має ФОРМУ короткого «а у <щось>».
+
+    Саме форму, без звірки з базою: цією функцією користується гілка, яка
+    відповідає на питання про пункт, ЯКОГО В ДАНИХ НЕМАЄ -- там звіряти нічого.
+    Через це умови тут суворіші, ніж деінде: коротко, з прийменником, і без
+    жодної іншої сутності.
+    """
+    text = (question or "").strip()
+    words = [w for w in re.split(r"\s+", text) if w]
+    if not words or len(words) > 4:
+        return False
+    if _SHORT_NOT_ABOUT_PEOPLE.search(text) or _WEEKDAYS.search(text):
+        return False
+    if _SUBDIVISION.search(text.lower()):
+        return False
+    if extract_state(text) or extract_doc_number(text):
+        return False
+    if re.search(r"\d", text) or _MONTH_WORD.search(text):
+        return False
+    m = _PLACE_AFTER.search(text)
+    if not m:
+        return False
+    word = re.sub(r"^(?:м\.|с\.|смт)\s*", "", m.group(1)).strip()
+    return len(word) >= PLACE_MIN_ROOT and word.lower() not in _NOT_A_PLACE
+
+
 def rules_route(question):
     """-> (template_id, params) або None, якщо правила не впізнали питання."""
     low = question.lower()

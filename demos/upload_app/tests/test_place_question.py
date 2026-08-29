@@ -326,3 +326,50 @@ def test_unknown_place_is_recognised_as_a_place_question():
 def test_unknown_place_does_not_steal_other_questions(q):
     """ЦЕНА ПОМИЛКИ ТУТ -- украдене питання, тому межі суворі."""
     assert tiers.unknown_place_candidate(q, lookup=_lookup) is None, q
+
+
+# ── «а у рівному»: коротка форма про НЕВІДОМИЙ пункт (Аня 29.08) ─────────────
+
+
+def test_short_followup_shape_is_recognised():
+    """Одне питання двома формами мусить давати ОДНАКОВУ відповідь.
+
+    На живому діалозі було так: «хто у рівному» -> правильна відмова про пункт,
+    «а у рівному» -> загальна відмова «не лягає на жодну дорогу». Коротша форма
+    давала гіршу відповідь на те саме питання."""
+    for q in ("а у рівному", "а у Жмеринці?", "а в Києві"):
+        assert tiers.is_place_followup_shape(q), q
+
+
+@pytest.mark.parametrize("q", [
+    #: День тижня -- не пункт. Найлегший промах короткої форми.
+    "а у понеділок?",
+    #: Занадто коротке слово.
+    "а у нас?",
+    #: Стан, підрозділ, документ -- усе це інші питання.
+    "а у відпустці?",
+    "а у 2 роті?",
+    "а документ №5?",
+    #: Довга фраза: там місто майже завжди обставина.
+    "а у рівному скільки людей у відпустці зараз загалом",
+])
+def test_short_followup_shape_does_not_steal(q):
+    """Ціна помилки тут вища за звичайну: гілка відповідає ВІДМОВОЮ про пункт,
+    тобто вкрадене питання отримає відмову, а не просто іншу відповідь."""
+    assert not tiers.is_place_followup_shape(q), q
+
+
+def test_unknown_place_followup_needs_the_previous_turn():
+    """Гілка спирається на КОНТЕКСТ, а не на саме слово.
+
+    Для невідомого пункту звірити слово з базою неможливо за визначенням, тому
+    без попереднього ходу про пункт коротка форма нічого не забирає. Тест
+    тримає саму умову в коді."""
+    import io
+    src = io.open(os.path.join(APP_DIR, "chat_gradio", "app.py"),
+                  encoding="utf-8").read()
+    block = src[src.index("«А У РІВНОМУ»"):]
+    block = block[:block.index("Швидкий шлях ПЕРЕД моделлю")]
+    assert '_prev.get("place")' in block, block[:400]
+    assert "is_place_followup_shape" in block
+    assert "place_unknown" in block
