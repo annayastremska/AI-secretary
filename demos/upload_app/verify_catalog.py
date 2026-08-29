@@ -272,6 +272,21 @@ def pick_person_surname(records):
     return aliases[0].split()[0] if aliases else None
 
 
+def pick_place(records):
+    """Найчастіший населений пункт у файлах пайплайна. -> назва або "".
+
+    Не зашитий рядок навмисно: зашита назва зістарілася б із корпусом, і
+    перевірка почала б мовчки звірятись із нулем -- тобто зеленіти ні на чому.
+    """
+    from collections import Counter
+    c = Counter()
+    for _, f in iter_facts(records, PLACE_DIMS, "confirmed"):
+        v = norm_apos(str(f["value"] or "")).strip()
+        if v:
+            c[v] += 1
+    return c.most_common(1)[0][0] if c else ""
+
+
 def pick_doc_number(records):
     nums = sorted({str(f["value"]).strip()
                    for _, f in iter_facts(records, dims=["document_number"])
@@ -650,6 +665,11 @@ def exp_co_travelers(records, ctx):
     return len(keys)
 
 
+#: Виміри, у яких лежить НАЗВА МІСЦЯ (не період). Окремо від ABSENCE_DIMS:
+#: там виміри самої відсутності, тут -- її місця.
+PLACE_DIMS = ["leave_place", "deployment_location"]
+
+
 def exp_travel_document(records, ctx):
     keys = set()
     for r, f in iter_facts(records, ["travel_document"], "confirmed"):
@@ -660,6 +680,32 @@ def exp_travel_document(records, ctx):
                 or overlaps(primary, ctx["date_from"], ctx["date_to"])):
             keys.add((r.person, f["value"]))
     return len(keys)
+
+
+def exp_by_place(records, ctx):
+    """Скільком РЯДКІВ мусить віддати `list_by_place` для ctx["place"].
+
+    Рахується по файлах пайплайна, не по базі -- у цьому й сенс звірки: цифра
+    з чата зіставляється з ІНШИМ джерелом, а не сама з собою.
+
+    Рядок = (особа, вид відсутності, період): саме так їх складає шаблон, і
+    одна людина може дати два рядки, якщо на неї два документи в тому самому
+    пункті. Тому рахуємо кортежі, а не осіб.
+    """
+    place = norm_apos(ctx["place"]).strip().lower()
+    rows = set()
+    for r, f in iter_facts(records, PLACE_DIMS, "confirmed"):
+        if norm_apos(str(f["value"])).strip().lower() != place:
+            continue
+        # Період лежить у факті самої відсутності з того ж документа -- так
+        # само, як у SQL шаблону.
+        primary = next((f2 for f2 in r.facts
+                        if f2["dim"] in ("leave", "deployment_location")),
+                       None)
+        if primary is None:
+            continue
+        rows.add((r.person, f["dim"], primary["vf"], primary["vt"]))
+    return len(rows)
 
 
 def exp_drafts(records, ctx):
@@ -955,6 +1001,20 @@ def build_checks(ctx):
             expected=lambda rs: exp_failed(rs, ctx),
             got=got_first_row),
         "subdivision_unknown": dict(kind="blocked", params={}),
+        # Зріз по населеному пункту (доданий 29.08 після розбору звернення
+        # 05259c). Звіряється ЧИСЛОМ РЯДКІВ проти файлів пайплайна: місце й
+        # період у них є, тому це справжня звірка, а не «виконалось».
+        #
+        # Пункт беремо не зашитий, а найчастіший у самих файлах (ctx["place"]):
+        # зашита назва зістарілась би з корпусом, і перевірка почала б мовчки
+        # звірятись із нулем.
+        "list_by_place": dict(
+            kind="compare", params={"place": ctx["place"]},
+            expected=lambda rs: exp_by_place(rs, ctx),
+            got=got_rowcount),
+        # Пункт, якого немає: SQL немає за задумом -- та сама природа, що
+        # subdivision_unknown.
+        "place_unknown": dict(kind="blocked", params={}),
         # Недійсна дата -- та сама природа, що підрозділ, якого немає: SQL
         # немає за задумом, перевіряється blocked + текст refusal. Доданий
         # 27.08 разом із правкою «дві дати = період»: та правка прибрала
@@ -1051,6 +1111,7 @@ def main():
         "surname": pick_person_surname(records) or "",
         "doc_number": pick_doc_number(records) or "",
         "query": args.query,
+        "place": pick_place(records),
     }
     # Дані поза пайплайном (штатка Андрія) -- читаємо з бази ДО побудови
     # перевірок: без цієї корекції прилад показував 5 «розбіжностей», яких

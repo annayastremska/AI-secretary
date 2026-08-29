@@ -1,0 +1,233 @@
+# -*- coding: utf-8 -*-
+"""Питання «хто ще в цьому місті». Розбір звернення 05259c (Аня, 29.08).
+
+ЩО БУЛО. Дві репліки поспіль: «Покажи документ №102», далі «але вони саме в
+житомирі?». Друга отримала відповідь на 468 символів, ІЗ ДЖЕРЕЛОМ і БЕЗ
+відмови -- тобто система впевнено відповіла про інше. Причина не в моделі: у
+каталозі не було жодного параметра «місце», тобто такого зрізу система не
+вміла за побудовою, а замість відмови впала в найближчий підрахунок.
+
+ЩО ТУТ ТРИМАЄТЬСЯ. Не сам новий шаблон -- його зламати важко. Тримаються дві
+межі, зламати які легко й тихо:
+
+  1. місце розпізнається ЛИШЕ якщо воно справді є в даних. Правило, що хапає
+     будь-яке слово після «у/в», почне бачити місто у «у відпустці» й «у
+     черзі»;
+  2. схожа, але не наявна назва -- це ВІДМОВА, а не найближчий збіг. Те саме
+     правило, що для номерів документів: не виправляємо і схожих не
+     підставляємо.
+
+Критерії -- `docs/tasks/2026-08-27_acceptance-criteria.md`, розділ 14.
+"""
+import os
+import sys
+
+import pytest
+
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, APP_DIR)
+sys.path.insert(0, os.path.join(APP_DIR, "chat_gradio"))
+
+import tiers  # noqa: E402
+
+
+#: Значення, які СПРАВДІ є в базі стенду (перевірено запитом 29.08).
+KNOWN = ["м. Житомир", "м. Сухобрід", "м. Кривоярськ", "м. Тихолісся",
+         "м. Малий Ясенець", "с. Соснова Гряда", "с. Верхня Тернівка"]
+
+
+def _lookup(stem):
+    """Заглушка звернення в базу: замість запиту -- список KNOWN.
+
+    Так тест не залежить від бази, але перевіряє САМЕ ту логіку, що в проді:
+    кандидат зіставляється зі значеннями, а не приймається на віру.
+    """
+    stem = stem.lower()
+    for v in KNOWN:
+        if v.lower().replace("м. ", "").replace("с. ", "").startswith(stem):
+            return v
+    return None
+
+
+# ── К3: розпізнавання у відмінку ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("question,expected", [
+    ("хто ще в житомирі", "м. Житомир"),
+    ("але вони саме в житомирі?", "м. Житомир"),
+    ("хто у Сухоброді?", "м. Сухобрід"),
+    ("є ще хтось у Кривоярську?", "м. Кривоярськ"),
+    ("хто в Тихолісся", "м. Тихолісся"),
+])
+def test_place_is_recognised_in_any_case(question, expected):
+    assert tiers.extract_place(question, lookup=_lookup) == expected
+
+
+def test_the_name_comes_from_the_database_not_from_the_question():
+    """К3: у відповіді назва мусить бути такою, як у базі.
+
+    «житомирі» з малої й у місцевому відмінку не має протікати у відповідь:
+    людина мусить бачити те, що записано в документі."""
+    got = tiers.extract_place("хто ще в житомирі", lookup=_lookup)
+    assert got == "м. Житомир", got
+    assert "житомирі" not in got
+
+
+# ── Ш1: не бачити місто там, де його немає ───────────────────────────────────
+
+
+@pytest.mark.parametrize("question", [
+    "хто у відпустці?",
+    "що в черзі перевірки?",
+    "хто у відрядженні зараз",
+    "скільки людей у частині",
+    "хто у 2 роті у відпустці?",
+    "покажи документ №102",
+    "яка тривалість щорічної основної відпустки?",
+])
+def test_no_place_where_there_is_none(question):
+    assert tiers.extract_place(question, lookup=_lookup) is None, question
+
+
+# ── К7 і Ш3: схоже -- не підставляємо ────────────────────────────────────────
+
+
+def test_a_similar_but_absent_place_is_not_substituted():
+    """К7: «Житомирська» -> не «м. Житомир».
+
+    Тут легко зробити «зручно»: обрізати до кореня й узяти найближче. Але
+    зручність тут означає відповідь про інший населений пункт, і людина цього
+    не побачить."""
+    assert tiers.extract_place("хто у Жмеринці?", lookup=_lookup) is None
+    assert tiers.extract_place("хто у Києві?", lookup=_lookup) is None
+
+
+def test_a_root_shorter_than_four_characters_is_not_matched():
+    """Ш3: три літери кореня дають хибні збіги на довгих назвах."""
+    assert tiers.extract_place("хто у Мал?", lookup=_lookup) is None
+
+
+# ── Ш2: підрозділ важливіший за місце ────────────────────────────────────────
+
+
+def test_subdivision_wins_over_place():
+    """Ш2: «у 2 роті» -- це підрозділ, а не населений пункт.
+
+    Перевіряється двома способами, і перший не потребує бази: `extract_place`
+    мусить віддати None ще до будь-якого запиту -- гейт підрозділу стоїть у
+    ньому першим рядком. Другий спосіб (повна дорога) вимагає бази, тому без
+    неї не провалює тест, а пропускається з поясненням: те саме твердження вже
+    доведено вище.
+    """
+    assert tiers.extract_place("Хто у 2 роті у відпустці?",
+                               lookup=_lookup) is None
+    try:
+        route = tiers.rules_route("Хто у 2 роті у відпустці?")
+    except Exception:                               # noqa: BLE001
+        pytest.skip("без бази повна дорога не міряється; гейт перевірений вище")
+    assert route, "правила мусять упізнати підрозділ"
+    assert route[0] != "list_by_place", route
+
+
+def test_the_place_rule_stands_before_the_counting_ones():
+    """Порядок правил: місце -- ПЕРЕД підрахунками стану.
+
+    Саме через цей порядок «хто ще в Житомирі» перестає падати в підрахунок по
+    всій частині. Якщо правило опустити нижче, дефект 05259c повернеться, і
+    повернеться тихо -- відповідь буде виглядати правильною."""
+    import io
+    src = io.open(os.path.join(APP_DIR, "chat_gradio", "tiers.py"),
+                  encoding="utf-8").read()
+    body = src[src.index("def rules_route("):]
+    i_place = body.index('return "list_by_place"')
+    for later in ("count_by_state_on_date", "list_by_state"):
+        assert i_place < body.index(later), later
+
+
+# ── К1, К2, К4: шаблони в каталозі ───────────────────────────────────────────
+
+
+def test_catalog_has_a_place_template_with_a_place_param():
+    import io
+
+    import yaml
+    d = yaml.safe_load(io.open(os.path.join(APP_DIR, "query_catalog.yaml"),
+                               encoding="utf-8"))
+    ids = {t["id"]: t for t in d["templates"]}
+    assert "list_by_place" in ids, sorted(ids)
+    t = ids["list_by_place"]
+    assert "place" in (t.get("params") or []), t.get("params")
+    #: К2: обидва види відсутності в одному зрізі.
+    sql = t.get("sql") or ""
+    assert "leave_place" in sql and "deployment_location" in sql, sql
+    #: Чернетки окремим запитом -- як у решти підрахункових шаблонів.
+    assert t.get("sql_unconfirmed"), "чернетки мусять рахуватись окремо"
+
+
+def test_catalog_has_a_refusal_for_an_unknown_place():
+    import io
+
+    import yaml
+    d = yaml.safe_load(io.open(os.path.join(APP_DIR, "query_catalog.yaml"),
+                               encoding="utf-8"))
+    ids = {t["id"]: t for t in d["templates"]}
+    assert "place_unknown" in ids, sorted(ids)
+    t = ids["place_unknown"]
+    assert t.get("blocked") is True
+    r = t.get("refusal") or ""
+    #: К4: причина мусить бути названа саме та -- не «немає даних», а «немає
+    #: самого пункту». Нуль тут читався б як «там нікого немає».
+    assert "нуль" in r.lower(), r
+
+
+# ── К5: питання-продовження ──────────────────────────────────────────────────
+
+
+def test_place_is_a_carried_slot():
+    """К5 і продовження розмови: «а хто ще там?» після питання про Житомир.
+
+    Перевіряється не діалог (це живий прогін), а те, що місце внесене в
+    перелік слотів. Без цього продовження не працює за побудовою."""
+    from chat_gradio import app as chat_app
+    assert "place" in chat_app.SLOT_KEYS, chat_app.SLOT_KEYS
+
+
+# ── Ш4: перелік дозволених параметрів не розходиться з каталогом ─────────────
+
+
+def test_every_catalog_param_is_allowed_in_sql():
+    """КОНСТРУКЦІЙНИЙ тест, а не про місце.
+
+    Двічі поспіль один і той самий провал: параметр оголошений у шаблоні
+    (`subdivision` 25.08, `place` 29.08), але не дописаний у
+    `_SQL_PARAM_NAMES`. Запит падає з «query parameter missing», виняток
+    глушиться дорогою каталогу, і питання тихо їде у відмову -- тобто на екрані
+    це виглядає як «чат не розуміє питання», а не як помилка коду.
+
+    Цей тест ловить весь клас: будь-який майбутній параметр, оголошений у
+    каталозі й забутий у переліку.
+    """
+    import io
+
+    import yaml
+    d = yaml.safe_load(io.open(os.path.join(APP_DIR, "query_catalog.yaml"),
+                               encoding="utf-8"))
+    declared = {p for t in d["templates"] for p in (t.get("params") or [])}
+    #: `state` -- службове значення дороги, у SQL його немає ніде.
+    declared.discard("state")
+    missing = sorted(declared - set(tiers._SQL_PARAM_NAMES))
+    assert not missing, (
+        "оголошені в каталозі, але не дозволені в SQL: " + str(missing)
+        + ". Саме через це «хто ще в житомирі» їхало у відмову 29.08.")
+
+
+def test_place_templates_are_reachable_from_the_early_road():
+    """Правило без дороги -- це правило, якого немає.
+
+    Друга половина того самого дефекту: правила впізнавали `list_by_place`, але
+    рання дорога каталогу відкрита лише для перелічених шаблонів, а нижче
+    маршрут уже поставлений моделлю. Тобто шаблон був, правило було, а дійти до
+    людини воно не могло."""
+    from chat_gradio import app as chat_app
+    for tid in ("list_by_place", "place_unknown"):
+        assert tid in chat_app._STATE_TEMPLATES, tid

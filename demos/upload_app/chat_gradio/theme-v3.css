@@ -2299,3 +2299,131 @@ details.src > *:not(summary) {
     box-shadow: none !important;
     transform: none !important;
 }
+
+/* 41. Телефон: підказка в полі вводу стоїть РІВНО по центру рядка (Аня 29.08).
+ *
+ *     Було: текст сидів трохи нижче середини. Причина не в одному правилі, а
+ *     в тому, що висота поля складалась із ТРЬОХ різних місць -- шрифт 16px
+ *     ставить мобільний блок (щоб iOS не зумив сторінку), мінімальну висоту --
+ *     загальне правило `.gradio-container textarea` (52px, розраховане під
+ *     15px), а відступи -- правило 40 (13px, теж під 15px). У сумі коробка
+ *     переставала бути симетричною, і єдиний рядок з'їжджав.
+ *
+ *     Тому тут задані всі три числа РАЗОМ і так, щоб вони сходились точно:
+ *
+ *         12 (верх) + 24 (рядок) + 12 (низ) = 48 = min-height
+ *
+ *     Один рядок за такої арифметики центрований за побудовою, а не на око.
+ *     `line-height` задається пікселями навмисно: множник 1.5 від 16px дає
+ *     24px тільки поки шрифт саме 16px, а він тут задається окремим правилом
+ *     -- тобто множник зробив би висоту залежною від чужого рядка.
+ *
+ *     Фіксованої `height` немає свідомо: поле мусить рости під довге питання.
+ *     Росте воно кроком у рядок (24px), тобто симетрія зберігається і на
+ *     двох рядках.
+ */
+@media (max-width: 860px) {
+    #composer textarea {
+        font-size: 16px !important;     /* iOS не зумить сторінку */
+        line-height: 24px !important;
+        min-height: 48px !important;
+        padding-top: 12px !important;
+        padding-bottom: 12px !important;
+        padding-left: var(--s-3) !important;
+        padding-right: var(--s-3) !important;
+    }
+    /* Кнопка: ширина під палець, висота -- за полем. Числа `right`/`height`
+       зі старого мобільного блоку тут не потрібні: кнопка вже не абсолют
+       (правило 40), і лишати їх означало б тримати мертві значення, які
+       наступний читач сприйме за діючі. */
+    #send-btn {
+        width: 46px !important;
+        min-width: 46px !important;
+        height: auto !important;
+        min-height: 48px !important;
+        right: auto !important;
+    }
+}
+
+/* 42. ТЕЛЕФОН: шапка чата -- три елементи в один рядок і по одній висоті
+ *     (Аня 29.08: «таке відчуття, що кожен елемент на своїй висоті»).
+ *
+ *     ЧОМУ ВОНО РОЗ'ЇХАЛОСЬ. Не через відсутність вирівнювання -- воно було
+ *     (`align-items: center` у правилі A). Через РІЗНІ КОРОБКИ: кнопка меню
+ *     44×44 без обводки, а перемикачі теми й мови -- кола 34×34 з обводкою.
+ *     Три різні розміри в рядку читаються як три різні висоти, навіть коли
+ *     центри збігаються.
+ *
+ *     Тому тут задана ОДНА коробка 40×40 на всі три, і риски кнопки меню
+ *     підросли до 20px -- інакше в однаковій коробці вона виглядала б
+ *     дрібнішою за сусідів.
+ *
+ *     Назва екрана: обнуляю відступи в самому заголовку. Це і є причина, чому
+ *     текст сидів «десь нижче»: центрувався БЛОК назви, а всередині нього h3
+ *     ніс власний верхній відступ від Gradio -- тобто вирівняли коробку, а не
+ *     те, що людина бачить.
+ *
+ *     Висота шапки 52px і задана явно: доти вона складалась із найвищої
+ *     кнопки, тобто мінялась від того, який елемент випадково більший.
+ */
+@media (max-width: 860px) {
+    #topbar {
+        align-items: center !important;
+        min-height: 52px !important;
+        gap: var(--s-2) !important;
+    }
+
+    /* Одна коробка на всі три органи керування. */
+    #nav-toggle,
+    #theme-switch .theme-toggle,
+    #theme-switch .lang-toggle {
+        width: 40px !important;
+        min-width: 40px !important;
+        max-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        max-height: 40px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        flex: none !important;
+        align-self: center !important;
+        display: grid !important;
+        place-items: center !important;
+    }
+    #nav-toggle-block {
+        width: 40px !important;
+        min-width: 40px !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    /* Риски кнопки меню -- під нову коробку. */
+    #nav-toggle span { width: 20px !important }
+    /* Знак теми/мови всередині кола: 17px читається на 40px коробці й не
+       торкається обводки. */
+    #theme-switch .theme-toggle svg,
+    #theme-switch .lang-toggle svg {
+        width: 17px !important;
+        height: 17px !important;
+    }
+    #theme-switch {
+        display: flex !important;
+        align-items: center !important;
+        gap: var(--s-2) !important;
+        flex: none !important;
+    }
+
+    /* Назва екрана: центрується САМ ТЕКСТ, не лише його блок. */
+    #topbar-title {
+        display: flex !important;
+        align-items: center !important;
+        min-height: 40px !important;
+    }
+    #topbar-title h1,
+    #topbar-title h2,
+    #topbar-title h3,
+    #topbar-title p {
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1.25 !important;
+    }
+}
