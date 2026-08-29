@@ -73,11 +73,18 @@ def test_shown_and_folded_split():
     got = stats_mod.partner_metrics(PACKAGE)
     assert got["error"] is None
     assert got["dropped"] == 0
-    assert len(got["shown"]) + len(got["folded"]) == 11
+    # Жодна метрика пакета не зникає: кожна або на екрані, або названа в
+    # підписі як згорнута. Саме це й перевіряє сума.
+    assert (len(got["shown"]) + len(got["folded"])
+            + len(got["same_as_live"])) == 11
     # Чотири метрики охоплення дублюють живий розділ.
     assert len(got["folded"]) == 4, [m["name"] for m in got["folded"]]
     for m in got["folded"]:
         assert m["name"].lower().startswith("охоплення:")
+    # Перетини (пункт 13 переліку Ані 29.08): те саме число живе нижче.
+    assert [m["name"] for m in got["same_as_live"]] == [
+        "конфлікти станів, що чекають ока людини"]
+    assert len(got["shown"]) == 6, [m["name"] for m in got["shown"]]
 
 
 def test_every_shown_metric_carries_how():

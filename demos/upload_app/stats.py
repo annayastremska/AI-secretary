@@ -388,6 +388,15 @@ PARTNER_METRICS = os.path.join(PROJECT_ROOT, "data", "eval",
 #: показувати застарілий знімок поруч із живим — теж.
 PARTNER_FOLDED_PREFIX = "охоплення:"
 
+#: Метрики пакета, які показує ЖИВОЮ вже сам розділ «Конфлікти» нижче. Причина
+#: та сама, що вище, але видима гостю з першого погляду: два однакові числа на
+#: одному екрані з різних джерел -- це рівно той дефект, який ми ловили весь
+#: тиждень. Прибрано 29.08 за рішенням Ані (пункт 13 переліку пріоритетів).
+#:
+#: Порівняння за повною назвою, а не за префіксом: назви метрик пише Андрій, і
+#: збіг за початком рядка колись згорне не те, що я мала на думці.
+PARTNER_SAME_AS_LIVE = ("конфлікти станів, що чекають ока людини",)
+
 #: Чому цитати нормативки поки не рахуються. Текст іде на екран як є.
 QUOTES_BLOCKED = ("ланцюг нормативки ще не підключений: потрібен доступ "
                   "milidoc_readonly до схеми andriy_test")
@@ -596,10 +605,12 @@ def partner_metrics(path=None):
     сказано числом: тихо викинути замір партнера гірше, ніж показати, що з ним
     не так.
 
-    -> {"shown": [...], "folded": [...], "dropped": N, "error": текст|None}
+    -> {"shown": [...], "folded": [...], "same_as_live": [...],
+        "dropped": N, "error": текст|None}
     """
     raw = _read_json(path or PARTNER_METRICS)
-    out = {"shown": [], "folded": [], "dropped": 0, "error": None}
+    out = {"shown": [], "folded": [], "same_as_live": [],
+           "dropped": 0, "error": None}
     if raw is None:
         out["error"] = ("пакета метрик немає: очікується "
                         + os.path.relpath(path or PARTNER_METRICS,
@@ -622,6 +633,8 @@ def partner_metrics(path=None):
                "as_of": (item.get("as_of") or "").strip(), "how": how}
         if name.lower().startswith(PARTNER_FOLDED_PREFIX):
             out["folded"].append(rec)
+        elif name.lower() in PARTNER_SAME_AS_LIVE:
+            out["same_as_live"].append(rec)
         else:
             out["shown"].append(rec)
     return out
