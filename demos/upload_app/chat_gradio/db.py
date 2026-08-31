@@ -485,6 +485,27 @@ def document_by_number(doc_number):
     return [_absence_row(r) for r in rows]
 
 
+def document_by_record_id(record_id):
+    """Картка документа за НОМЕРОМ ЗАПИСУ В БАЗІ (`documents.id`).
+
+    Нащо. Під кожною відповіддю ми самі показуємо «документ №207 (запис №33 у
+    базі)», а спитати про запис було НЕМОЖЛИВО -- система показувала
+    ідентифікатор, яким не можна скористатись. Найгірше це там, де номера на
+    папері немає взагалі (58 документів із 205): запис -- єдиний спосіб на
+    такий документ послатись.
+
+    Та сама вибірка, що й за номером, тому картка виходить однакова.
+    """
+    try:
+        rid = int(str(record_id).lstrip("№").strip())
+    except (TypeError, ValueError):
+        return []
+    sql = _ABSENCE_SELECT + "  AND f.source_doc_id = %(rid)s "
+    rows = _query(sql + " ORDER BY dat.value NULLS LAST",
+                  {"dims": ABSENCE_DIMS, "rid": rid})
+    return [_absence_row(r) for r in rows]
+
+
 def count_absent_by_subdivision(date):
     """Зведення по підрозділах -> [{subdivision, total, absent}, ...].
 

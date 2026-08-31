@@ -510,6 +510,21 @@ def rules_params(question):
         # рівно один хід і в наступний не потрапляв (див. INTENT_SLOTS).
         "state": tier_chat.extract_state(question),
     }
+    # ЗАПИС У БАЗІ -- ПЕРЕД номером на папері.
+    #
+    # Ми самі показуємо під відповіддю «документ №207 (запис №33 у базі)», а
+    # питання про запис ішло в дорогу «номер документа»: `extract_doc_number`
+    # хапав 33 як номер на папері, і відповідь була «документа №33 немає» --
+    # тобто впевнена відповідь про інший документ. Знайдено живим прогоном.
+    #
+    # Порядок тут несе всю вагу: обидві дороги живуть на числі в питанні, і
+    # виграє та, що стоїть вище.
+    m_rec = re.search(r"запис\w*\s*№?\s*(\d{1,6})", low)
+    if m_rec:
+        params["record_id"] = m_rec.group(1)
+        params["doc_number"] = None       # інакше картка піде за номером
+        params["intent"] = "документ_за_записом"
+        return params
     if params["doc_number"]:
         params["intent"] = "документ_за_номером"
         return params
@@ -1180,6 +1195,38 @@ def doc_number_warning(doc_number):
     return None
 
 
+def answer_doc_by_record(record_id):
+    """Картка документа за номером ЗАПИСУ («запис №33 у базі»).
+
+    Той самий рендер, що для номера на папері: людині байдуже, чим ми знайшли
+    документ, -- їй потрібна картка. Різниця лише в тому, що номер запису
+    завжди існує, а номер на папері -- ні.
+    """
+    rec = str(record_id).lstrip("№").strip()
+    rows = db.document_by_record_id(rec)
+    if not rows:
+        return (f"Запису №{_esc(rec)} у базі стенду немає. Номер не "
+                f"виправляємо і схожих не підставляємо."
+                + footer("картка документа", "—"))
+    # Є номер на папері -> віддаємо дорозі за номером: рендер лишається ОДИН.
+    # Інакше той самий документ виглядав би двома різними картками залежно від
+    # того, чим його спитали.
+    num = (rows[0].get("doc_number") or "").strip()
+    if num:
+        return answer_doc(num)
+    # Номера немає -- саме через такі документи ця дорога й потрібна. Початок
+    # той самий (`doc_lead`), щоб картка не відрізнялась виглядом.
+    parts = [doc_lead(rows[0])]
+    detail = " · ".join(_esc(x) for x in (rows[0].get("doc_type"),
+                                         rows[0].get("reason"),
+                                         rows[0].get("place"),
+                                         rows[0].get("status")) if x)
+    if detail:
+        parts.append(detail)
+    return "\n\n".join(parts) + footer("картка документа",
+                                        f"запис №{_esc(rec)}")
+
+
 def answer_doc(doc_number):
     rows = db.document_by_number(doc_number)
     warn = doc_number_warning(doc_number)
@@ -1252,6 +1299,8 @@ def dispatch_count(params, clarified, clarify_hint, question=""):
 
     if intent == "документ_за_номером" and doc_number:
         return answer_doc(doc_number)
+    if intent == "документ_за_записом" and params.get("record_id"):
+        return answer_doc_by_record(params["record_id"])
     if intent == "документи_людини" and name:
         return answer_person(name)
     if intent in ("хто_відсутній", "хто_повертається", "зведення_по_підрозділах"):
@@ -1805,6 +1854,7 @@ _CATALOG_INTENT = {
     "returning_on_date": "хто_повертається",
     "person_status": "документи_людини",
     "doc_by_number": "документ_за_номером",
+    "doc_by_record": "документ_за_записом",
 }
 
 
