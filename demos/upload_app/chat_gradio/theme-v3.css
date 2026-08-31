@@ -1167,6 +1167,12 @@ details.src > *:not(summary) {
     padding: 7px;
     image-rendering: pixelated;   /* QR мусить бути різким, не згладженим */
 }
+/* СХОВАНИЙ КОД МУСИТЬ БУТИ СХОВАНИЙ.
+   Атрибут `hidden` браузер реалізує як `display: none` у СВОЇХ стилях, а
+   правило вище (`display: block`) його перебиває -- специфічність однакова,
+   але авторський стиль сильніший за стиль браузера. Через це обидва коди
+   малювались один під одним, хоч атрибут стояв. Тому явно. */
+#guest-qr img[hidden] { display: none }
 #guest-qr .qr-note {
     margin-top: var(--s-2);
     font-size: 10.5px;

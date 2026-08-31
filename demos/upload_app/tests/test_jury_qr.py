@@ -118,3 +118,32 @@ def test_missing_files_answer_404_not_500():
     jury = jury[:jury.index("@app.get", 10)]
     assert "os.path.exists(JURY_GUIDE_PATH)" in jury
     assert "status_code=404" in jury
+
+
+# ── Мова ─────────────────────────────────────────────────────────────────────
+
+
+def test_jury_strings_are_english():
+    """Рішення Ані 30.08: усе про пам'ятку -- англійською. Сама пам'ятка
+    англійська, і підпис українською обіцяв би не те, що людина побачить
+    після сканування."""
+    with io.open(os.path.join(APP_DIR, "static", "qr-swap.js"),
+                 encoding="utf-8") as fh:
+        js = fh.read()
+    assert 'title: "Jury guide"' in js
+    assert 'note: "What to ask, and what to look for."' in js
+    assert 'button: "Switch to English guide"' in js
+    src = _chat_source()
+    assert "Switch to English " in src               # підпис кнопки в розмітці
+    assert 'alt="QR code of the jury guide"' in src  # і опис картинки
+
+
+def test_guest_strings_stay_ukrainian():
+    """Заголовок і підпис гостьового входу лишаються українськими -- він веде
+    в УКРАЇНСЬКИЙ чат. Англійський тут лише сам перемикач: це одна кнопка, і
+    двомовна кнопка виглядала б як недороблена."""
+    with io.open(os.path.join(APP_DIR, "static", "qr-swap.js"),
+                 encoding="utf-8") as fh:
+        js = fh.read()
+    assert "Гостьовий доступ" in js
+    assert "Вхід без пароля" in js
