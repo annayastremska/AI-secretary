@@ -140,133 +140,47 @@ def parse_frontmatter(md_path: str) -> dict:
         content = f.read()
     _, fm, body = content.split("---", 2)
     meta = yaml.safe_load(fm)
-    meta["_recognized_text"] = body.split("## Розпізнаний текст", 1)[-1].strip()
+    # .replace("\x00"): Postgres text-поля не приймають NUL, а старі .md
+    # (до правки пайплайна 24.08) могли принести його з pypdf. Захисний шар:
+    # джерело вже чистить, але записи, згенеровані до правки, лишаються.
+    meta["_recognized_text"] = (body.split("## Розпізнаний текст", 1)[-1]
+                                .strip().replace("\x00", ""))
     return meta
 
 
 def get_or_create_dimension(cur, code: str, validity_model: str = None) -> int:
-    """validity_model приходить із САМОГО ФАКТУ (`facts[*].validity_model`), а не
-    з нашої копії реєстру.
+    """validity_model -- ПЕРЕДАНЕ значення переважає локальну копію реєстру.
 
-    Було навпаки, і це вже розійшлося: у FACT_TYPE_VALIDITY немає п'яти кодів
-    із fact_type_registry.yaml, а дефолт `ranged` підставлявся мовчки. Три з
-    них реально їхали з неправильною моделлю чинності -- `travel_document`,
-    `unrecognized` і новий `deployment_actual_return` (`permanent_event` у
-    реєстрі, `ranged` у нас). `rank` і `position` врятували міграції, які
-    створюють ці виміри заздалегідь.
-
-    Помилки при цьому не було й у логах було чисто -- саме тому копія реєстру
-    в другому місці небезпечніша за її відсутність. FACT_TYPE_VALIDITY лишений
-    нижче ЛИШЕ як запобіжник на факт без поля, і на нього не варто спиратись.
-    """
+    Правка Ані 24.08.2026 (зона db/ -- Андрію на рев'ю): AI-secretary тепер
+    віддає validity_model У КОЖНОМУ факті (facts[*].validity_model), тому
+    локальний словник FACT_TYPE_VALIDITY більше не мусить встигати за її
+    реєстром. Він лишається лише запобіжником на факт без поля (старі .md).
+    Причина правки заміряна: у копії немає трьох нових типів
+    (travel_document, unrecognized, deployment_actual_return), і без цього
+    вони заводили вимір як 'ranged' замість 'permanent_event' -- мовчки."""
     cur.execute("SELECT id FROM dimensions WHERE code = %s", (code,))
     row = cur.fetchone()
     if row:
         return row[0]
     name = FACT_TYPE_LABELS.get(code, code)
-    model = validity_model or FACT_TYPE_VALIDITY.get(code, "ranged")
     if not validity_model:
-        # Видно в логах: далі так бути не мусить, вихід пайплайна віддає це
-        # поле в кожному факті.
-        print(f"[увага] вимір {code!r} створюється без validity_model із факту "
-              f"-- узято {model!r} з локальної копії реєстру")
+        validity_model = FACT_TYPE_VALIDITY.get(code, "ranged")
     cur.execute(
         "INSERT INTO dimensions (code, name, value_type, validity_model) VALUES (%s, %s, 'text', %s) RETURNING id",
-        (code, name, model),
+        (code, name, validity_model),
     )
     return cur.fetchone()[0]
 
 
-def document_requisites(meta: dict):
-    """(номер, дата) документа з його ж фактів.
-
-    Реквізити приходять фактами (`document_number`/`document_date`) -- так
-    навмисно, демо-запит `doc_by_number` шукає саме рядок факту. Для
-    дедуплікації вони потрібні як ПАРА: саме вона відрізняє «той самий
-    документ у docx і pdf» від «два різні документи про те саме».
-    """
-    number = date = None
-    for fact in meta.get("facts") or []:
-        if fact.get("fact_type") == "document_number":
-            number = (fact.get("value_code") or "").strip() or None
-        elif fact.get("fact_type") == "document_date":
-            date = (fact.get("value_code") or "").strip() or None
-    return number, date
-
-
-def find_equivalent_fact(cur, object_id, dimension_id, value, valid_from, valid_to,
-                          doc_number, doc_date):
-    """Чи є вже такий самий факт із документа з ТИМ САМИМ номером і датою.
-
-    Навіщо номер+дата, а не лише збіг значень: два РІЗНІ документи можуть
-    легально описувати той самий факт (наказ і виписка з нього), і зливати їх
-    не можна -- це різні підстави. Однаковий номер І дата означають, що це
-    фізично один документ, поданий двома файлами.
-
-    Обидва реквізити мусять бути НЕПОРОЖНІ. Інакше дефектні документи, у яких
-    номер і дата не розпізнались, зливалися б між собою -- а це вже втрата
-    даних, а не дедуплікація.
-    """
-    if not doc_number or not doc_date:
-        return None
-    cur.execute(
-        """
-        SELECT f.id
-          FROM facts f
-          JOIN facts fn ON fn.source_doc_id = f.source_doc_id
-          JOIN dimensions dn ON dn.id = fn.dimension_id AND dn.code = 'document_number'
-          JOIN facts fd ON fd.source_doc_id = f.source_doc_id
-          JOIN dimensions dd ON dd.id = fd.dimension_id AND dd.code = 'document_date'
-         WHERE f.object_id = %s
-           AND f.dimension_id = %s
-           AND f.value IS NOT DISTINCT FROM %s
-           AND f.valid_from IS NOT DISTINCT FROM %s
-           AND f.valid_to IS NOT DISTINCT FROM %s
-           AND f.status <> 'rejected'
-           AND fn.value = %s
-           AND fd.value = %s
-         LIMIT 1
-        """,
-        (object_id, dimension_id, value, valid_from, valid_to, doc_number, doc_date),
-    )
-    row = cur.fetchone()
-    return row[0] if row else None
-
-
-def add_fact_source(cur, fact_id, document_id, is_primary=False):
-    cur.execute(
-        """
-        INSERT INTO fact_sources (fact_id, document_id, is_primary)
-        VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
-        """,
-        (fact_id, document_id, is_primary),
-    )
-
-
 def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, source_doc_id, confirmed,
-                 additional_info=None, confidence=None, source_field=None,
-                 doc_number=None, doc_date=None) -> int:
+                 additional_info=None, confidence=None, source_field=None) -> int:
     """Вставляє факт. Для вимірів з validity_model='current_state' (rank,
     position -- "чинно, доки не з'явиться новіший факт того самого виміру
     для того самого об'єкта", dictionaries/fact_type_registry.yaml на боці
     AI-secretary) спершу закриває попередній відкритий факт (valid_to IS
     NULL) з ІНШИМ значенням -- інакше на одного об'єкта накопичувались би
     кілька "чинних" фактів того самого виміру одночасно, і жодного способу
-    визначити, який саме зараз дійсний.
-
-    Витіснення НЕ припускає, що новий факт хронологічно новіший: дати двох
-    фактів порівнюються, і випадків три.
-
-    1. новий пізніший  -> закривається наявний, його датою (звичайний хід);
-    2. новий РАНІШИЙ   -> це історія, не заміна: закривається НОВИЙ на даті
-                          початку наявного, наявний лишається чинним;
-    3. дати рівні або хоч одна відсутня -> впорядкувати неможливо, тому не
-                          витісняємо нічого, а новий факт лишається
-                          чернеткою (unconfirmed) -- у підрахунки не входить,
-                          але видний людині.
-
-    Кожен із випадків 2 і 3 пише рядок у review_log, бо це рішення системи
-    про хронологію, а не переказ документа."""
+    визначити, який саме зараз дійсний."""
     # Захист від CHECK-краху (facts_check: valid_to >= valid_from). AI-secretary
     # СВІДОМО лишає суперечливі дати у виході (date_range_error непорожній),
     # щоб людина це побачила -- завантажувач не має валитись через це: не
@@ -276,74 +190,28 @@ def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, sourc
         valid_to = None
         confirmed = False
 
-    # Той самий документ, поданий двома файлами (.docx і .pdf) -- не другий
-    # факт, а друге джерело того самого. Інакше список показує одне прізвище
-    # двічі, тоді як підрахунок (COUNT DISTINCT) дає правильне число, і
-    # комісія бачить дві різні відповіді на те саме питання.
-    existing = find_equivalent_fact(cur, object_id, dimension_id, value,
-                                    valid_from, valid_to, doc_number, doc_date)
-    if existing is not None:
-        add_fact_source(cur, existing, source_doc_id)
-        print(f"[дедуплікація] факт {existing}: документ {source_doc_id} "
-              f"долучено як ще одне джерело (№{doc_number} від {doc_date})")
-        return existing
-
     cur.execute("SELECT validity_model FROM dimensions WHERE id = %s", (dimension_id,))
     validity_model = cur.fetchone()[0]
 
-    # Рішення про витіснення ухвалюється ДО вставки, а в журнал пишеться після:
-    # у двох випадках із трьох журнальний рядок стосується НОВОГО факту, id
-    # якого на момент рішення ще не існує.
-    post_log = None
     if validity_model == "current_state":
-        # ORDER BY ... LIMIT 1 -- не косметика. Умова добирає й unconfirmed
-        # факти, тому відкритих може бути кілька (див. випадок 3 нижче), і
-        # без упорядкування fetchone() брав би довільний: той самий документ
-        # давав би різний результат при повторному завантаженні.
         cur.execute(
             """
-            SELECT id, value, valid_from FROM facts
+            SELECT id, value FROM facts
             WHERE object_id = %s AND dimension_id = %s AND valid_to IS NULL AND status != 'rejected'
-            ORDER BY valid_from DESC NULLS LAST, id DESC
-            LIMIT 1
             """,
             (object_id, dimension_id),
         )
         open_fact = cur.fetchone()
         if open_fact and open_fact[1] != value:
-            old_fact_id, old_value, old_from = open_fact
-            # Порівнюємо через str() тим самим способом, що й захист від
-            # facts_check вище: ISO-дата як рядок упорядковується правильно, і
-            # це не падає, коли одна дата прийшла об'єктом, а друга рядком.
-            if valid_from is None or old_from is None or str(valid_from) == str(old_from):
-                # 3. ВПОРЯДКУВАТИ НЕМОЖЛИВО: або дата відсутня, або вони рівні.
-                # Не витісняємо (витіснення за невідомим порядком -- це
-                # вигадування хронології) і не приховуємо значення. Натомість
-                # факт лишається чернеткою: у підрахунки він не входить, зате
-                # видний людині в unconfirmed_count і drafts_list.
-                # Саме тут був тихий дефект: при valid_from = NULL старий код
-                # виконував UPDATE ... SET valid_to = NULL, тобто НЕ закривав
-                # нічого, і в об'єкта ставало два чинних факти одного виміру.
-                confirmed = False
-                post_log = (old_value, value, "ambiguous_order_left_unconfirmed")
-            elif str(valid_from) > str(old_from):
-                # 1. Новий факт справді новіший -- закриваємо старий його датою.
-                cur.execute("UPDATE facts SET valid_to = %s WHERE id = %s", (valid_from, old_fact_id))
-                cur.execute(
-                    """
-                    INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
-                    VALUES (%s, %s, %s, %s, %s)
-                    """,
-                    (old_fact_id, "ai_secretary_loader", old_value, value, "superseded_by_newer_fact"),
-                )
-            else:
-                # 2. Новий факт СТАРІШИЙ за відкритий, тобто це історія, а не
-                # заміна. Закривається НОВИЙ (він скінчився там, де почався
-                # наявний), а відкритий лишається чинним. Старий код закривав
-                # тут наявний факт датою з минулого й падав на facts_check
-                # (valid_to >= valid_from) -- саме це ловила заливка штатки.
-                valid_to = old_from
-                post_log = (old_value, value, "inserted_as_historical")
+            old_fact_id, old_value = open_fact
+            cur.execute("UPDATE facts SET valid_to = %s WHERE id = %s", (valid_from, old_fact_id))
+            cur.execute(
+                """
+                INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (old_fact_id, "ai_secretary_loader", old_value, value, "superseded_by_newer_fact"),
+            )
 
     cur.execute(
         """
@@ -357,20 +225,7 @@ def insert_fact(cur, object_id, dimension_id, value, valid_from, valid_to, sourc
          Jsonb(additional_info) if additional_info else None,
          confidence, source_field),
     )
-    fact_id = cur.fetchone()[0]
-    add_fact_source(cur, fact_id, source_doc_id, is_primary=True)
-    if post_log is not None:
-        old_value, new_value, action = post_log
-        cur.execute(
-            """
-            INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (fact_id, "ai_secretary_loader", old_value, new_value, action),
-        )
-        print(f"[хронологія] факт {fact_id}: {action} "
-              f"(відкритий факт мав '{old_value}', новий '{new_value}')")
-    return fact_id
+    return cur.fetchone()[0]
 
 
 def handle_reprocess(cur, document_id: int) -> None:
@@ -578,6 +433,107 @@ def get_or_create_document(cur, meta: dict, md_path: str, original_file_hint: st
     return document_id, ("reprocessed" if existing is not None else "new")
 
 
+# ── Гейт перетину періодів відсутності (при ЗАВАНТАЖЕННІ) ────────────────────
+# Та сама особа не може бути у двох НАКЛАДЕНИХ періодах відпустки/відрядження.
+# Логіка дзеркалить demos/upload_app/chat_gradio/docgen.py:find_conflicts, але з
+# двома відмінностями (рішення 29.08): рахує й ЧЕРНЕТКИ (status <> 'rejected', не
+# лише confirmed) і ВИКЛЮЧАЄ ІДЕНТИЧНИЙ період -- це .docx/.pdf двійник тієї самої
+# відсутності, а не конфлікт. object_id беремо напряму (load() його вже має),
+# тому service_id не потрібен. docgen у завантажувач НЕ імпортуємо: він тягне
+# tiers -> модель, а завантажувач має лишатись легким.
+_ABSENCE_DIMS = ["leave", "deployment_location"]
+_DIM_LABEL = {"leave": "відпустка", "deployment_location": "відрядження"}
+
+
+class OverlapConflict(Exception):
+    """Новий документ накладається періодом на наявну відсутність тієї самої
+    особи. Несе перелік конфліктів для показу людині; транзакція load()
+    відкочується -- ні документа, ні фактів у базу не потрапляє."""
+
+    def __init__(self, conflicts):
+        self.conflicts = conflicts
+        super().__init__(f"{len(conflicts)} overlap conflict(s)")
+
+
+def overlap_conflicts(cur, object_id, start, end, exclude_doc_id):
+    """Наявні НЕ-відхилені absence-факти цієї особи, що перетинаються з
+    [start, end]; крім фактів того самого документа й крім ІДЕНТИЧНОГО періоду
+    (двійник тієї самої відсутності). -> перелік словників."""
+    end = end or start
+    cur.execute(
+        """
+        SELECT f.valid_from, f.valid_to, f.source_doc_id, d.code,
+               (SELECT btrim(n.value) FROM facts n
+                  JOIN dimensions nd ON nd.id = n.dimension_id
+                 WHERE n.source_doc_id = f.source_doc_id
+                   AND nd.code = 'document_number' LIMIT 1)
+          FROM facts f
+          JOIN dimensions d ON d.id = f.dimension_id
+         WHERE f.object_id = %s
+           AND d.code = ANY(%s)
+           AND f.status <> 'rejected'
+           AND f.valid_from IS NOT NULL
+           AND f.valid_from <= %s
+           AND COALESCE(f.valid_to, f.valid_from) >= %s
+           AND f.source_doc_id <> %s
+           AND NOT (f.valid_from = %s AND COALESCE(f.valid_to, f.valid_from) = %s)
+         ORDER BY f.valid_from
+        """,
+        (object_id, _ABSENCE_DIMS, end, start, exclude_doc_id, start, end),
+    )
+    out = []
+    for vf, vt, sd, dim, number in cur.fetchall():
+        out.append({"valid_from": str(vf),
+                    "valid_to": str(vt) if vt else None,
+                    "source_doc_id": sd, "dim": dim, "number": number,
+                    "kind_label": _DIM_LABEL.get(dim, "відсутність")})
+    return out
+
+
+def supersede_document(old_doc_id):
+    """Скасовує ВЕСЬ старий документ (рішення користувача, коли новий перетинний
+    документ визнано актуальнішим): усі його не-відхилені факти -> rejected, з
+    записом у review_log; відкриті review_queue закриває; документ ->
+    validity='superseded', validity_source='manual'. Дзеркалить handle_reprocess,
+    лише дія інша. Саме відхилення фактів прибирає перетин (overlap_conflicts
+    рахує status<>'rejected'), тому після цього повторний load() нового
+    документа проходить. -> скільки фактів скасовано.
+
+    Значення enum перевірені проти CHECK documents: validity ∈
+    {current,probably_superseded,superseded,cancelled,unknown}; validity_source ∈
+    {declared,inferred,manual}."""
+    with psycopg.connect(get_dsn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, value FROM facts WHERE source_doc_id = %s AND status <> 'rejected'",
+                (old_doc_id,),
+            )
+            rows = cur.fetchall()
+            for fact_id, old_value in rows:
+                cur.execute("UPDATE facts SET status = 'rejected' WHERE id = %s", (fact_id,))
+                cur.execute(
+                    """
+                    INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (fact_id, "ai_secretary_loader:supersede", old_value, None,
+                     "superseded_by_user_on_upload"),
+                )
+            cur.execute(
+                "UPDATE review_queue SET resolved_at = now(), "
+                "resolution = 'superseded_by_user_on_upload' "
+                "WHERE document_id = %s AND resolved_at IS NULL",
+                (old_doc_id,),
+            )
+            cur.execute(
+                "UPDATE documents SET validity = 'superseded', "
+                "validity_source = 'manual' WHERE id = %s",
+                (old_doc_id,),
+            )
+        conn.commit()
+    return len(rows)
+
+
 def load(md_path: str, original_file_hint: str = None) -> dict:
     """Повертає короткий звіт: {"document_id", "doc_state", "already_existed",
     "facts_inserted"}. doc_state -- "new" / "unchanged" / "reprocessed"
@@ -609,7 +565,17 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
             # фантомний objects-рядок з canonical_name=''. Тепер документ
             # лишається без жодної особи/факту -- лише документ + review_queue.
             person_incomplete = subject.get("person_complete") is False
-            if meta.get("status") == "unresolved" or person_incomplete:
+            # Документ БЕЗ особи взагалі (правка Ані 24.08, зона db/ -- Андрію
+            # на рев'ю). Нормативний акт: status=confirmed, facts=[],
+            # create_subject_object=false, суб'єкта немає. Попередній гард
+            # ловив лише unresolved/person_incomplete, тому на нормативних
+            # get_or_create_person отримувала три None і падала на
+            # NOT NULL людей (last_name) -- усі 41 акт не завантажились.
+            # Такий документ -- законний запис лише в documents (текст для
+            # дороги Б), без особи й без фактів.
+            no_person = not ((subject.get("person_alias") or "").strip()
+                             or (subject.get("surname") or "").strip())
+            if meta.get("status") == "unresolved" or person_incomplete or no_person:
                 if queue_type:
                     cur.execute(
                         "INSERT INTO review_queue (document_id, queue_type) VALUES (%s, %s)",
@@ -633,45 +599,30 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                     (document_id,),
                 )
 
-            # ЗІСТАВЛЕННЯ ЗІ ШТАТКОЮ -- УМОВА СТАТУСУ ФАКТУ.
-            #
-            # Прохання Ані (tasks_from_anya/2026-08-26_for-andriy-roster-matching.md)
-            # і наше ж правило продукту: чернетка != факт, запис із хоч одним
-            # непевним полем у підрахунки не входить, доки людина не
-            # підтвердить. Невідома особа -- це і є непевність.
-            #
-            # Було: завдання `new_person` створювалось, а факти все одно писались
-            # `confirmed`. Тобто непевність фіксувалась у черзі, але цифру не
-            # стримувала -- у «12 у відпустці» один із дванадцяти був людиною,
-            # якої система не знає. Заміряно: 3 особи без service_id, 20
-            # підтверджених фактів.
-            #
-            # Перевіряємо саме `service_id`, а НЕ `is_new_person`: ті три особи
-            # в `people` уже існують (створені з попередніх документів), тобто
-            # новими не є, а у штатці їх немає. Ознака «нова» і ознака «немає у
-            # штатці» -- різні речі, і плутати їх означало б пропустити рівно
-            # цей випадок.
-            cur.execute("SELECT service_id FROM people WHERE object_id = %s",
-                        (person_object_id,))
-            row = cur.fetchone()
-            in_roster = bool(row and row[0])
-            if not in_roster:
-                print(f"[штатка] особа {person_object_id} не зіставлена з "
-                      f"реєстром -- факти документа {document_id} пишемо "
-                      f"unconfirmed")
+            # ── Гейт перетину: ДО вставки будь-яких фактів ─────────────────
+            # Якщо absence-період нового документа накладається на наявну
+            # відсутність тієї самої особи -- не вставляємо нічого, а кидаємо
+            # OverlapConflict. `with psycopg.connect` відкотить транзакцію
+            # (документ ще не закомічено -- коміт лише в кінці), тож у базі не
+            # лишиться ні документа, ні фактів. Людина далі або перегляне поля,
+            # або скасує старий документ (supersede_document) і повторить коміт.
+            _conflicts, _seen = [], set()
+            for _f in meta.get("facts") or []:
+                if _f.get("fact_type") in _ABSENCE_DIMS and _f.get("date_start"):
+                    for _c in overlap_conflicts(cur, person_object_id,
+                                                _f.get("date_start"),
+                                                _f.get("date_end"), document_id):
+                        if _c["source_doc_id"] not in _seen:
+                            _seen.add(_c["source_doc_id"])
+                            _conflicts.append(_c)
+            if _conflicts:
+                raise OverlapConflict(_conflicts)
 
             field_provenance = meta.get("field_provenance") or {}
-            # Реквізити цього документа -- ключ дедуплікації для всіх його
-            # фактів (див. find_equivalent_fact).
-            doc_number, doc_date = document_requisites(meta)
 
             rank = subject.get("rank")
             if rank:
-                # Звання приходить із subject, не з facts[], тож validity_model
-                # у нього взятись нізвідки -- ставимо явно за реєстром. Вимір і
-                # так створює міграція 349d428a0094, це запобіжник на випадок
-                # чистої бази без неї.
-                rank_dim_id = get_or_create_dimension(cur, "rank", "current_state")
+                rank_dim_id = get_or_create_dimension(cur, "rank")
                 rank_provenance = field_provenance.get("rank", {})
                 # НЕ дата початку відрядження/відпустки основного факту --
                 # звання не почалось у день відрядження, це просто дата
@@ -684,9 +635,8 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                 fact_id = insert_fact(
                     cur, person_object_id, rank_dim_id, rank.get("code"),
                     meta["uploaded_at"], None, document_id,
-                    rank_provenance.get("resolved", True) and in_roster,
+                    rank_provenance.get("resolved", True),
                     confidence=rank_provenance.get("confidence"),
-                    doc_number=doc_number, doc_date=doc_date,
                 )
                 facts_inserted.append(("rank", fact_id))
 
@@ -694,17 +644,14 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                 fact_type = fact.get("fact_type")
                 if not fact_type:
                     continue
-                # validity_model -- із самого факту; див. get_or_create_dimension
-                dim_id = get_or_create_dimension(cur, fact_type,
-                                                 fact.get("validity_model"))
+                dim_id = get_or_create_dimension(
+                    cur, fact_type, validity_model=fact.get("validity_model"))
                 fact_id = insert_fact(
                     cur, person_object_id, dim_id, fact.get("value_code"),
-                    fact.get("date_start"), fact.get("date_end"), document_id,
-                    fact.get("confirmed") and in_roster,
+                    fact.get("date_start"), fact.get("date_end"), document_id, fact.get("confirmed"),
                     additional_info=fact.get("additional_info"),
                     confidence=fact.get("confidence"),
                     source_field=fact.get("source_field"),
-                    doc_number=doc_number, doc_date=doc_date,
                 )
                 facts_inserted.append((fact_type, fact_id))
 
