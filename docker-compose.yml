@@ -1,0 +1,154 @@
+services:
+  postgres:
+    # pgvector/pgvector, не postgres:16-alpine: розширення `vector` у alpine-
+    # образі відсутнє, а збирати його в контейнері -- зайва морока. Той самий
+    # мажор 16, тож міграції не змінюються.
+    #
+    # УВАГА при переході з alpine: образ debian-базований, тобто інша libc і
+    # інші версії collation. Datadir, створений alpine-складанням, тут
+    # відкривати НЕ можна -- текстові індекси можуть тихо зіпсуватись.
+    # Переносити через логічний дамп (pg_dump), а не копіюванням теки.
+    image: pgvector/pgvector:pg16
+    container_name: milidoc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: postgres
+      APP_DB_NAME: ${APP_DB_NAME}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      READONLY_DB_USER: ${READONLY_DB_USER}
+      READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      # Hunspell-словник української для FTS (Postgres не має її з коробки).
+      # Монтуємо окремі файли, не всю tsearch_data/ -- інакше приховали б
+      # стандартні словники інших мов, які там уже лежать.
+      # Шлях -- Debian-складання (pgvector/pgvector). В alpine-образі тека
+      # інша: /usr/local/share/postgresql/tsearch_data. Після зміни образу
+      # словник не знаходився саме через це, а помилка виглядала як
+      # «text search dictionary does not exist».
+      - ./db/tsearch_data/uk_ua.dict:/usr/share/postgresql/16/tsearch_data/uk_ua.dict:ro
+      - ./db/tsearch_data/uk_ua.affix:/usr/share/postgresql/16/tsearch_data/uk_ua.affix:ro
+      - ./db/tsearch_data/ukrainian.stop:/usr/share/postgresql/16/tsearch_data/ukrainian.stop:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - "postgres"
+      - "-c"
+      - "log_statement=all"
+      - "-c"
+      - "log_min_duration_statement=0"
+      - "-c"
+      - "max_connections=200"
+
+  # MinIO прибрано (20.08.2026). Від сховища оригіналів потрібно лише покласти
+  # файл і видалити через 30 днів -- для цього достатньо теки data/originals,
+  # а адмініструвати S3-сумісний сервіс у підрозділі нікому. 30-денне
+  # видалення тепер робить db/scripts/purge_expired_originals.py за
+  # documents.expires_at (раніше -- ILM-правило бакета).
+
+  airflow-init:
+    image: apache/airflow:2.10.4
+    container_name: milidoc-airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres:5432/${AIRFLOW_DB_NAME}
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY}
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Kyiv
+      # Доступ до нашої (не airflow-service) БД -- для DAG-ів, що вантажать
+      # факти/документи, напр. load_ai_secretary_output.
+      APP_DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
+      ORIGINALS_DIR: /opt/airflow/originals
+      # dev-зручність: doставляє пакети airflow/plugins/ai_secretary_loader.py
+      # потребує (psycopg, pyyaml) без окремого custom-образу. Для
+      # продакшн варто перенести у власний Dockerfile.
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg[binary] pyyaml"
+    user: "${AIRFLOW_UID}:0"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      # Оригінали документів. Той самий шлях, що бачить CLI на хості, тільки
+      # змонтований -- тож raw_uri з контейнера і з хосту вказує на той самий
+      # файл. Не read-only: сюди пишемо.
+      - ./data/originals:/opt/airflow/originals
+      # ТИМЧАСОВО (демо): прямий read-only доступ до виходу пайплайна Ані на
+      # цій машині. У реальному розгортанні -- спільний inbox, не абсолютний
+      # шлях конкретного клону.
+      - D:/AI-secretary-anya/data/output/documents:/opt/airflow/ai_secretary_output:ro
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "${AIRFLOW_ADMIN_USER}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname Admin --lastname User --role Admin \
+          --email admin@example.com || true
+
+  airflow-webserver:
+    image: apache/airflow:2.10.4
+    container_name: milidoc-airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow-common-env
+    user: "${AIRFLOW_UID}:0"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      # Оригінали документів. Той самий шлях, що бачить CLI на хості, тільки
+      # змонтований -- тож raw_uri з контейнера і з хосту вказує на той самий
+      # файл. Не read-only: сюди пишемо.
+      - ./data/originals:/opt/airflow/originals
+      # ТИМЧАСОВО (демо): прямий read-only доступ до виходу пайплайна Ані на
+      # цій машині. У реальному розгортанні -- спільний inbox, не абсолютний
+      # шлях конкретного клону.
+      - D:/AI-secretary-anya/data/output/documents:/opt/airflow/ai_secretary_output:ro
+    ports:
+      - "${AIRFLOW_WEBSERVER_PORT}:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  airflow-scheduler:
+    image: apache/airflow:2.10.4
+    container_name: milidoc-airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow-common-env
+    user: "${AIRFLOW_UID}:0"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      # Оригінали документів. Той самий шлях, що бачить CLI на хості, тільки
+      # змонтований -- тож raw_uri з контейнера і з хосту вказує на той самий
+      # файл. Не read-only: сюди пишемо.
+      - ./data/originals:/opt/airflow/originals
+      # ТИМЧАСОВО (демо): прямий read-only доступ до виходу пайплайна Ані на
+      # цій машині. У реальному розгортанні -- спільний inbox, не абсолютний
+      # шлях конкретного клону.
+      - D:/AI-secretary-anya/data/output/documents:/opt/airflow/ai_secretary_output:ro
+    command: scheduler

@@ -1,0 +1,213 @@
+--- C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_src\demos/upload_app/chat_gradio/tiers.py	2026-08-27 19:08:24.889968800 +0300
++++ C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_dst\demos/upload_app/chat_gradio/tiers.py	2026-08-27 19:08:25.824309300 +0300
+@@ -414,14 +414,42 @@
+     low = question.lower()
+     today = datetime.date.today()
+ 
+-    m = re.search(r"\d{4}-\d{2}-\d{2}", question)
+-    if m:
+-        d = datetime.date.fromisoformat(m.group(0))
+-        return d, None, None
+-    m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", question)
+-    if m:
+-        d = datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+-        return d, None, None
++    # ДВІ дати в питанні -- це період, а не зріз на першій із них.
++    #
++    # Було `re.search` (перший збіг) з поверненням `(d, None, None)`, тому
++    # «з 2026-05-10 по 2026-10-10» ставало одним днем -- сім разів із семи в
++    # перевірці перед демо. Перевернутий період повертається ЯК Є (from > to):
++    # мовчки поміняти межі означало б відповісти на інше питання й не сказати
++    # про це; хай той, хто рендерить, це назве.
++    found = []
++    for mm in re.finditer(r"\d{4}-\d{2}-\d{2}", question):
++        try:
++            found.append((mm.start(), datetime.date.fromisoformat(mm.group(0))))
++        except ValueError:
++            pass
++    for mm in re.finditer(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", question):
++        try:
++            found.append((mm.start(), datetime.date(
++                int(mm.group(3)), int(mm.group(2)), int(mm.group(1)))))
++        except ValueError:
++            pass
++    found.sort()
++    dates = [d for _pos, d in found]
++
++    # «наступного дня після X» -- інакше віддається сам X.
++    # «наступного дня» БЕЗ дати тут навмисно не обробляється: її нема звідки
++    # взяти, і «сьогодні+1» був би вгадуванням.
++    if dates and re.search(r"наступн\w*\s+дн\w*\s+(?:після|за)", low):
++        return dates[0] + datetime.timedelta(days=1), None, None
++    # односторонні межі: «не пізніше X» -- це верхня межа, не точка
++    if len(dates) == 1 and re.search(r"не\s+пізніше", low):
++        return None, None, dates[0]
++    if len(dates) == 1 and re.search(r"не\s+раніше", low):
++        return None, dates[0], None
++    if len(dates) >= 2:
++        return None, dates[0], dates[1]
++    if len(dates) == 1:
++        return dates[0], None, None
+ 
+     month, month_at = _month_span(low)
+     # Рік -- ЧОТИРИ цифри, будь-які, а не лише «20xx».
+@@ -752,9 +780,17 @@
+         "date_to": {"type": ["string", "null"]},
+         "name": {"type": ["string", "null"]},
+         "doc_number": {"type": ["string", "null"]},
++        # subdivision у схемі не було взагалі, тому «а в першій роті?» не
++        # виражалось: підрозділ дістають правила з ПОТОЧНОГО рядка, а в
++        # наступному ході його там немає.
++        "subdivision": {"type": ["string", "null"]},
++        # carried_over -- не для SQL, а для показу людині: «дату взято з
++        # попереднього питання». Заміряно: без нього модель або лишає поле
++        # порожнім, або пише значення в текст.
++        "carried_over": {"type": "array", "items": {"type": "string"}},
+     },
+     "required": ["template", "state", "on_date", "date_from", "date_to",
+-                 "name", "doc_number"],
++                 "name", "doc_number", "subdivision", "carried_over"],
+     "additionalProperties": False,
+ }
+ 
+@@ -787,12 +823,36 @@
+         return None
+ 
+ 
+-def model_route(question):
++def _history_block(history, limit=4):
++    """Останні ходи розмови для маршрутизатора -- КОРОТКО, лише репліки людини.
++
++    Навіщо: `а хто?` після `скільки у відпустці 2026-10-10?` не має ні стану,
++    ні дати, і маршрутизатор без розмови їх нізвідки не візьме. Заміряно на
++    21 ході: без історії 8 правильних, з історією 18.
++
++    Формат навмисно бідний (нумеровані репліки людини, без відповідей чата):
++    відповіді додають токенів і шуму, а перевірялось саме це.
++    """
++    if not history:
++        return ""
++    lines = []
++    for m in (history or [])[-limit * 2:]:
++        if isinstance(m, dict) and m.get("role") == "user":
++            txt = _history_text(m.get("content")).strip()
++            if txt:
++                lines.append(f"[{len(lines) + 1}] {txt}")
++    if not lines:
++        return ""
++    return "Розмова:\n" + "\n".join(lines) + "\n\n"
++
++
++def model_route(question, history=None):
+     """-> (template_id|'вільний_sql'|'відмова', params) або None."""
+     system = _route_system()
+     if system is None:          # немає файла промпта -- ярус не працює
+         return None
+-    data = _model_json(system, question, ROUTE_SCHEMA)
++    user = _history_block(history) + f"Останній хід користувача: {question}"
++    data = _model_json(system, user, ROUTE_SCHEMA)
+     if not data or data.get("template") not in ROUTE_IDS:
+         return None
+     tid = data["template"]
+@@ -824,7 +884,13 @@
+         # відпустку/відрядження/відсутність -- не віримо вибору (маленька
+         # модель тягне незнайомі питання в найближчий шаблон), віддаємо в
+         # ярус 2. Це перевірка кодом, не довіра до моделі.
+-        if extract_state(question) is None:
++        # УВАГА: перевіряється не лише текст питання, а й те, що віддала
++        # модель. Раніше стояло `if extract_state(question) is None`, і на
++        # «а хто?» це викидало правильний вибір моделі у вільний_sql: слова
++        # про відпустку в репліці немає, хоча стан однозначно є в розмові.
++        # Через цей рядок приріст від історії не доходив до користувача --
++        # заміряно окремо.
++        if extract_state(question) is None and state not in STATE_DIMS:
+             return "вільний_sql", {}
+         if state not in STATE_DIMS:
+             state = extract_state(question)
+@@ -833,8 +899,16 @@
+     if tid == "count_by_state_on_date":
+         params["on_date"] = _date("on_date") or r_on or today
+     if tid in ("count_by_state_period", "list_by_state"):
+-        params["date_from"] = _date("date_from") or _date("on_date") or r_from or r_on or today
+-        params["date_to"] = _date("date_to") or _date("on_date") or r_to or r_on or today
++        # ПОРЯДОК тут не косметика. Раніше `_date("on_date")` стояв перед
++        # правилами, і одна дата від моделі підставлялась в ОБИДВІ межі --
++        # тобто період згортався в один день навіть тоді, коли в тексті було
++        # дві дати. Модель одну дату віддає охоче (заміряно), тому явно
++        # знайдений у тексті діапазон має бити її одиничне поле: дві дати в
++        # питанні -- задеклароване, а одне поле -- втратна згортка того самого.
++        params["date_from"] = (_date("date_from") or r_from
++                               or _date("on_date") or r_on or today)
++        params["date_to"] = (_date("date_to") or r_to
++                             or _date("on_date") or r_on or today)
+     if tid == "person_status":
+         name = (data.get("name") or "").strip()
+         if not name:
+--- C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_src\demos/upload_app/chat_gradio/app.py	2026-08-27 19:08:25.074004100 +0300
++++ C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_dst\demos/upload_app/chat_gradio/app.py	2026-08-27 19:08:25.857449000 +0300
+@@ -1305,7 +1305,7 @@
+ _MODEL_REFUSED = object()
+ 
+ 
+-def _model_catalog_tier(question):
++def _model_catalog_tier(question, history=None):
+     """Друга спроба ярусу 1: модель-класифікатор у ЗАКРИТИЙ перелік шаблонів
+     каталогу (tiers.model_route). Модель лише обирає шаблон і параметри --
+     SQL і текст відповіді лишаються кодом. -> текст, _MODEL_REFUSED або None
+@@ -1314,7 +1314,7 @@
+         return None
+     progress.stage("model_catalog")
+     try:
+-        routed = tier_chat.model_route(question)
++        routed = tier_chat.model_route(question, history)
+     except Exception:
+         return None
+     if not routed:
+@@ -1379,7 +1379,7 @@
+         return out
+     if not _DBISH.search(question):
+         return None
+-    out = _model_catalog_tier(question)
++    out = _model_catalog_tier(question, history)
+     if out is _MODEL_REFUSED:
+         return None
+     if out is not None:
+--- C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_src\demos/upload_app/prompts/route.md	2026-08-27 19:08:25.257440300 +0300
++++ C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_dst\demos/upload_app/prompts/route.md	2026-08-27 19:08:25.857449000 +0300
+@@ -18,6 +18,7 @@
+ Плейсхолдери: {templates}, {today}. Інших немає.
+ -->
+ Ти -- маршрутизатор питань до бази обліку документів військової частини. НЕ відповідай на питання. Обери один шаблон зі списку і витягни параметри.
++Тобі можуть показати РОЗМОВУ, а не одне питання. Наступний хід часто спирається на попередній: «а хто?» після «скільки у відпустці на дату» означає той самий стан і ту саму дату, змінюється лише форма відповіді. Якщо параметра немає в останньому ході, але він однозначно випливає з попередніх -- ЗАПОВНИ його поле значенням з попереднього ходу, а в carried_over додай лише НАЗВИ таких параметрів, без значень. Якщо попередній хід був про інше -- не переноси з нього нічого.
+ Шаблони:
+ {templates}
+ - вільний_sql: питання про дані бази, яке не лягає на жоден шаблон
+--- C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_src\demos/upload_app/query_catalog.yaml	2026-08-27 19:08:25.457547900 +0300
++++ C:/Users/Admin/AppData/Local/Temp/claude/C--Users-Admin-Documents-milidoc/915baa1b-a401-4b48-adc0-91f221bdc609/scratchpad/anya_dst\demos/upload_app/query_catalog.yaml	2026-08-27 19:08:25.874130600 +0300
+@@ -120,7 +120,7 @@
+   # період), лишається менший source_doc_id; кількість рядків = числу
+   # count_by_state_*. Чернетки -- окремим списком із sql_unconfirmed.
+   - id: list_by_state
+-    title: Список осіб у стані на дату або за період
++    title: Список осіб у стані на дату або за період; для однієї дати date_from і date_to однакові
+     examples:
+       - Хто зараз у відпустці?
+       - Хто був у відпустці 6 травня 2026?
+@@ -223,7 +223,7 @@
+   # переоформлення) -- дедуплікація по змісту, але різні source_doc_id
+   # згадати у відповіді.
+   - id: doc_by_number
+-    title: Пошук за номером документа (всі факти документа)
++    title: Пошук за номером документа -- зміст документа та особи, згадані в ньому
+     examples:
+       - Покажи документ № 109
+       - Що в документі №204?
+@@ -928,7 +928,7 @@
+   # у підрахунок, і на «хто» людина отримувала цифру. Формально правда, але не
+   # відповідь: секретареві потрібні прізвища, щоб подзвонити.
+   - id: list_by_state_in_subdivision
+-    title: Хто у стані в конкретному підрозділі на дату
++    title: Хто у стані в конкретному підрозділі на дату; лише якщо підрозділ названо в розмові, інакше list_by_state
+     examples:
+       - Хто у 2 роті зараз у відпустці?
+       - Покажи відсутніх у взводі забезпечення

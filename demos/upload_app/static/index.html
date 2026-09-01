@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<!-- interactive-widget=resizes-content: при появі клавіатури
+     браузер зменшує САМ вьюпорт, тому притиснуте до низу поле не
+     ховається під нею й нічого не треба рахувати в JS. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<title>Завантаження документа — AI-секретар</title>
+<!-- Обличчя спільне з чатом і сторінкою статистики (задача B3): токени
+     ../static/theme-tokens.css + шар звичайних сторінок pages.css. Власного
+     набору кольорів у цієї сторінки БІЛЬШЕ НЕМА: раніше тут жила власна
+     палітра (свій насичений синій, свої радіуси), і від чата сторінка
+     відрізнялась усім -- кольором, радіусами, вагою тексту.
+     Жодного CDN і зовнішнього шрифта (перевірка №7 у README апки). -->
+<!-- Обличчя одним посиланням: яку версію віддати, вирішує
+     сервер за APP_THEME (v1 -- як було, v2 -- строга база). -->
+<link rel="icon" href="/static/mark-avatar.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/skin.css">
+<!-- Перемикач теми ставить data-theme ДО першого малювання, тому скрипт стоїть
+     у <head> і БЕЗ defer: інакше сторінка блимнула б світлою й перефарбувалась
+     у темну, а ця мить читається як поломка. -->
+<script src="/static/theme-toggle.js"></script>
+<!-- Рівень доступу: людина мусить бачити свою межу ДО того, як
+     натисне кнопку, а не дізнатися про неї з відмови. -->
+<script src="/static/access.js" defer></script>
+<!-- Телефонна розкладка: висота під клавіатуру й шухляда. -->
+<script src="/static/mobile.js" defer></script>
+</head>
+<body>
+<!-- Шапка -- та сама на всіх трьох екранах (/, /stats, /chat): один продукт
+     означає, зокрема, що «де я і куди можна» не змінюється від сторінки до
+     сторінки. Раніше перехід на чат був плаваючою пігулкою в куті. -->
+<header class="appbar">
+  <a class="brand" href="/">
+    <img src="/static/mark-avatar.svg" alt="">
+    <span>
+      <span class="brand-name">AI-секретар</span><br>
+      <span class="brand-sub">облік особового складу</span>
+    </span>
+  </a>
+  <nav>
+    <a href="/" aria-current="page">Завантажити документ</a>
+    <a href="/stats">Статистика</a>
+    <a href="/chat">Чат</a>
+  </nav>
+  <!-- Перемикач стоїть у брендовій смузі праворуч, а не в підвалі: це
+       налаштування вигляду, і шукають його там, де вигляд і живе. Порожня
+       навмисно -- іконку й підписи ставить theme-toggle.js, щоб три сторінки
+       не тримали три копії трьох SVG. -->
+  <button type="button" class="theme-toggle" data-mode="system"
+          aria-label="Тема"></button>
+</header>
+
+<main>
+  <h1>Завантаження документа</h1>
+  <!-- Коротко: людина мусить зрозуміти головне за пару секунд. Повне
+       пояснення правила «чернетка не факт» -- у документації, не на екрані. -->
+  <p class="lede">Покажемо, що витягли з документа. У базу — лише після
+    вашого підтвердження.</p>
+
+  <!-- Шлях людини трьома кроками. Нумерація тут НЕ оздоба: це справді
+       послідовність, і порядок несе сенс (у базу не можна раніше, ніж
+       побачив, що витяглось). `data-at` ставить JS. -->
+  <ol class="pathbar" id="pathbar" data-at="1">
+    <li data-step="1"><span class="pathbar-n">1</span>Файл</li>
+    <li data-step="2"><span class="pathbar-n">2</span>Що витягли</li>
+    <li data-step="3"><span class="pathbar-n">3</span>У базу</li>
+  </ol>
+
+  <section>
+    <label class="dropzone" id="dropzone">
+      <span class="big">Перетягніть файл документа сюди</span>
+      <span class="dz-hint">або натисніть, щоб обрати (фото, скан, docx, pdf)</span>
+      <input type="file" id="file"
+             accept=".docx,.pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp">
+    </label>
+
+    <!-- Телефонний варіант того самого: перетягувати на телефоні нічого не
+         вийде, тому дві великі кнопки. Обидві -- ті самі поля вибору файла;
+         у камери стоїть capture, тому телефон одразу відкриває камеру, а не
+         галерею. На ноутбуці блок схований медіа-запитом. -->
+    <div class="pick-mobile">
+      <label class="pick pick--camera">
+        <span aria-hidden="true">◉</span> Зняти камерою
+        <input type="file" id="file-camera" accept="image/*" capture="environment">
+      </label>
+      <label class="pick">
+        <span aria-hidden="true">□</span> Вибрати файл
+        <input type="file" id="file-pick"
+               accept=".docx,.pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp">
+      </label>
+      <p class="pick-note">docx, pdf або фото документа</p>
+    </div>
+    <div id="upload-error"></div>
+  </section>
+
+  <section id="progress-sec" class="hidden">
+    <h2>Обробка <span id="filename"></span></h2>
+    <ol class="stepper" id="stepper" aria-live="polite"></ol>
+    <p class="hint hidden" id="ocr-hint">Розпізнавання фото триває до кількох хвилин.</p>
+    <div id="pipeline-error"></div>
+    <details id="log-details" class="hidden"><summary>Технічні деталі обробки</summary>
+      <pre class="log" id="pipeline-log"></pre></details>
+  </section>
+
+  <section id="review-sec" class="hidden">
+    <h2>Витягнуто з документа</h2>
+    <div id="status-line" aria-live="polite"></div>
+    <div id="review-body"></div>
+    <p class="actions">
+      <button class="primary" id="commit-btn">Записати в базу</button>
+    </p>
+  </section>
+
+  <section id="db-sec" class="hidden">
+    <h2>Запис у базу</h2>
+    <div id="db-body" aria-live="polite"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const STEP_ORDER = ["upload", "pipeline", "db"];
+const STEP_LABELS = { upload: "Завантаження", pipeline: "Обробка", db: "Запис у базу" };
+const SUBJECT_LABELS = {
+  rank: "Звання", surname: "Прізвище", given_name: "Ім'я",
+  patronymic: "По батькові", person_alias: "Повне ім'я (як піде в реєстр осіб)",
+};
+/* Короткі стани + один рядок «що далі». Технічні причини — у розгортуваному блоці. */
+const STATUS_VIEW = {
+  confirmed:    { label: "Підтверджено",        next: "Можна записувати в базу." },
+  needs_review: { label: "Потребує перевірки",  next: "Запишеться як непідтверджене й стане в чергу перевірки людиною." },
+  unresolved:   { label: "Не розпізнано",       next: "У базу піде лише сам документ і позначка для ручного розбору." },
+  duplicate:    { label: "Уже оброблявся",      next: "Нижче — наявний запис; повторний запис у базу не створить копію." },
+};
+
+let currentJob = null, pollTimer = null, stepStarted = null;
+const $ = (id) => document.getElementById(id);
+
+/* Зона завантаження: вибір або перетягування = старт обробки */
+const dz = $("dropzone");
+$("file").addEventListener("change", () => {
+  if ($("file").files.length) startUpload($("file").files[0]);
+});
+["dragover", "dragenter"].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.add("drag");
+}));
+["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.remove("drag");
+}));
+dz.addEventListener("drop", e => {
+  if (e.dataTransfer.files.length) startUpload(e.dataTransfer.files[0]);
+});
+
+/* Телефонні кнопки ведуть у ТОЙ САМИЙ startUpload, що й зона
+   перетягування: окремої дороги завантаження для телефона немає, інакше вона
+   розійшлася б із головною при першій же правці. */
+for (const id of ["file-camera", "file-pick"]) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", () => {
+    if (el.files && el.files.length) startUpload(el.files[0]);
+  });
+}
+
+async function startUpload(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  dz.classList.add("disabled");
+  resetView();
+  let resp, data;
+  try {
+    resp = await fetch("/api/upload", { method: "POST", body: fd });
+    data = await resp.json();
+  } catch (err) {
+    showError("upload-error", "Сервер недоступний: " + err);
+    dz.classList.remove("disabled");
+    return;
+  }
+  if (!resp.ok) {
+    showError("upload-error", data.error || resp.statusText);
+    dz.classList.remove("disabled");
+    return;
+  }
+  currentJob = data.job_id;
+  /* id у URL: перезавантаження сторінки посеред довгого розпізнавання не
+     губить прогрес — задача живе на сервері */
+  history.replaceState(null, "", "?job=" + currentJob);
+  $("filename").textContent = "— " + file.name;
+  $("progress-sec").classList.remove("hidden");
+  stepStarted = {};
+  pollTimer = setInterval(poll, 1000);
+  poll();
+}
+
+/* Відновлення після перезавантаження сторінки */
+window.addEventListener("DOMContentLoaded", () => {
+  const jobParam = new URLSearchParams(location.search).get("job");
+  if (!jobParam) return;
+  currentJob = jobParam;
+  stepStarted = {};
+  $("progress-sec").classList.remove("hidden");
+  pollTimer = setInterval(poll, 1000);
+  poll();
+});
+
+function resetView() {
+  ["progress-sec", "review-sec", "db-sec", "log-details", "ocr-hint"]
+    .forEach(id => $(id).classList.add("hidden"));
+  atStep(1);
+  ["stepper", "review-body", "db-body", "status-line", "pipeline-error", "upload-error"]
+    .forEach(id => $(id).innerHTML = "");
+}
+
+/* Поточний крок -- одна функція й один атрибут. Нащо так: підсвічувати
+   класами по три елементи означало б три місця, які треба тримати в
+   узгодженні, і перший же новий розділ їх розсинхронізує. */
+function atStep(n) {
+  const el = $("pathbar");
+  if (el) { el.setAttribute("data-at", String(n)); }
+}
+
+function showError(id, msg) {
+  const el = $(id);
+  el.innerHTML = "";
+  el.appendChild(note("err", msg));
+}
+
+async function poll() {
+  if (!currentJob) return;
+  let resp, job;
+  try {
+    resp = await fetch("/api/jobs/" + currentJob);
+    job = await resp.json();
+  } catch { return; } /* тимчасовий збій мережі — наступний тік догоне */
+  /* 404 -- задачі більше НЕМАЄ: вона живе в пам'яті процесу, і перезапуск
+     апки її втрачає. Доти тут стояло просто `return`, тобто сторінка крутила
+     індикатор ВІЧНО і нічого не казала (знайдено блоком 1 перевірки 26.08,
+     коли я перезапустила апку посеред обробки). Мовчазний нескінченний
+     спінер -- найгірше з можливого: людина не знає ні що сталось, ні що
+     робити. */
+  if (resp.status === 404) {
+    stopPolling();
+    currentJob = null;
+    showError("pipeline-error",
+      "Обробку перервано: апку перезапустили, і ця задача втрачена "
+      + "(задачі живуть у пам'яті процесу). Документ у базу НЕ записано — "
+      + "завантажте файл ще раз.");
+    return;
+  }
+  if (!resp.ok) return;   /* 5xx -- тимчасово, наступний тік догоне */
+  renderSteps(job);
+  renderLog(job);
+  $("ocr-hint").classList.toggle("hidden",
+    !(job.is_image && job.state === "pipeline_running"));
+
+  if (job.state === "ready_for_review") {
+    renderReview(job);
+  } else if (job.state === "committed") {
+    renderReview(job);
+    renderDbResult(job);
+    stopPolling();
+  } else if (job.state === "pipeline_failed") {
+    showError("pipeline-error", "Збій обробки: " + (job.error || "невідома причина"));
+    dz.classList.remove("disabled");
+    stopPolling();
+  } else if (job.state === "commit_failed") {
+    renderReview(job);
+    $("db-sec").classList.remove("hidden");
+  atStep(3);
+    $("db-body").innerHTML = "";
+    $("db-body").appendChild(note("err", job.error || "запис не вдався"));
+    $("commit-btn").disabled = false;  /* можна повторити після підняття бази */
+    stopPolling();
+  } else if (job.state === "conflict") {
+    renderReview(job);
+    renderConflict(job);
+    stopPolling();
+  }
+}
+
+function stopPolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+  dz.classList.remove("disabled");
+}
+
+function renderSteps(job) {
+  const ol = $("stepper");
+  ol.innerHTML = "";
+  const byName = {};
+  for (const s of job.steps) byName[s.name] = s;
+  for (const name of STEP_ORDER) {
+    const step = byName[name];
+    if (!step && name === "db" && !job.db_result && job.state !== "committing") {
+      /* крок запису ще не настав — показуємо тьмяним */
+      ol.appendChild(stepLi("pendingstep", "○", name, "", ""));
+      continue;
+    }
+    if (!step) continue;
+    const time = step.seconds != null ? fmtSec(step.seconds)
+      : step.state === "running"
+        ? (stepStarted[name] || (stepStarted[name] = Date.now()),
+           fmtSec((Date.now() - stepStarted[name]) / 1000))
+        : "";
+    const mark = step.state === "done" ? "✓" : step.state === "failed" ? "✕"
+      : '<span class="spin" role="img" aria-label="виконується"></span>';
+    ol.appendChild(stepLi(step.state, mark, name, time));
+  }
+}
+
+function stepLi(cls, mark, name, time) {
+  const li = document.createElement("li");
+  li.className = cls;
+  const dot = document.createElement("span");
+  dot.className = "dot"; dot.innerHTML = mark;
+  const nm = document.createElement("span");
+  nm.className = "stepname"; nm.textContent = STEP_LABELS[name] || name;
+  const tm = document.createElement("span");
+  tm.className = "steptime"; tm.textContent = time || "";
+  li.append(dot, nm, tm);
+  return li;
+}
+
+function fmtSec(s) {
+  s = Math.round(s);
+  return s >= 60 ? Math.floor(s / 60) + " хв " + (s % 60) + " с" : s + " с";
+}
+
+function renderLog(job) {
+  const text = [(job.pipeline_stdout || ""), (job.pipeline_stderr || "")]
+    .filter(Boolean).join("\n--- stderr ---\n");
+  if (text) {
+    $("pipeline-log").textContent = text;
+    $("log-details").classList.remove("hidden");
+  }
+}
+
+function renderReview(job) {
+  $("review-sec").classList.remove("hidden");
+  atStep(2);
+  const p = job.preview;
+  if (!p) return;
+  const shownStatus = job.duplicate_upload ? "duplicate" : p.status;
+  const view = STATUS_VIEW[shownStatus] || { label: shownStatus, next: "" };
+
+  const line = $("status-line");
+  line.innerHTML = "";
+  const badge = document.createElement("span");
+  badge.className = "badge " + shownStatus;
+  badge.textContent = view.label;
+  line.appendChild(badge);
+  if (view.next) {
+    const nx = document.createElement("p");
+    nx.className = "next"; nx.textContent = view.next;
+    line.appendChild(nx);
+  }
+
+  const body = $("review-body");
+  body.innerHTML = "";
+
+  /* Суб'єкт */
+  const subj = p.subject || {};
+  if (Object.keys(subj).length) {
+    body.appendChild(h3("Про кого документ"));
+    const rows = [];
+    for (const key of ["rank", "surname", "given_name", "patronymic"]) {
+      let v = subj[key];
+      if (v && typeof v === "object") v = v.label || v.code;
+      rows.push([SUBJECT_LABELS[key], v, sourceOf(p, key)]);
+    }
+    body.appendChild(fieldTable(["Поле", "Значення", "Джерело"], rows));
+    if (subj.person_complete === false)
+      body.appendChild(note("warn", "Неповне ім'я — запис особи в базу не пройде."));
+  }
+
+  /* Факти */
+  const labels = p.fact_labels || {};
+  if (p.facts.length) {
+    body.appendChild(h3("Факти"));
+    const rows = p.facts.map(f => [
+      labels[f.fact_type] || f.fact_type,
+      [f.value_code == null ? null : String(f.value_code),
+       [f.date_start, f.date_end].filter(Boolean).join(" — ")]
+        .filter(Boolean).join("  ·  ") || null,
+      f.confirmed ? "підтверджено" : "потребує перевірки",
+    ]);
+    body.appendChild(fieldTable(["Поле", "Значення", "Стан"], rows));
+  } else {
+    body.appendChild(note("pending", "Фактів не витягнуто — у базу піде лише сам документ."));
+  }
+
+  /* Прогалини */
+  const gaps = [];
+  for (const f of p.unknown_critical_fields) gaps.push([f, "не знайдено — обов'язкове поле"]);
+  for (const f of p.unknown_fields)
+    if (!p.unknown_critical_fields.includes(f)) gaps.push([f, "не знайдено"]);
+  for (const f of p.confirmed_empty_fields) gaps.push([f, "порожньо в самому документі"]);
+  if (gaps.length) {
+    body.appendChild(h3("Прогалини"));
+    body.appendChild(fieldTable(["Поле", "Стан"], gaps, true));
+  }
+
+  /* Технічні деталі — згорнуто за замовчуванням */
+  const tech = [];
+  if (p.reason) tech.push("Причина: " + p.reason);
+  if (p.review_reason) tech.push("Причина перевірки: " + p.review_reason);
+  if (p.review_queue) tech.push("Черга перевірки: " + p.review_queue);
+  if (p.template) tech.push("Шаблон: " + p.template + " · домен: " + p.domain);
+  if (p.ocr_blocks != null)
+    tech.push("Розпізнавання: " + p.ocr_blocks + " блоків, " + p.ocr_chars + " символів");
+  if (p.date_range_error) tech.push("Суперечливі дати: " + p.date_range_error);
+  for (const [f, problem] of Object.entries(p.consistency_problems))
+    tech.push(f + ": " + problem);
+  for (const w of p.warnings) tech.push(w);
+  if (tech.length) {
+    const det = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = "Технічні деталі";
+    det.appendChild(sum);
+    const pre = document.createElement("pre");
+    pre.className = "log";
+    pre.textContent = tech.join("\n");
+    det.appendChild(pre);
+    body.appendChild(det);
+  }
+
+  $("commit-btn").disabled = !(job.state === "ready_for_review" || job.state === "commit_failed");
+}
+
+function sourceOf(p, field) {
+  const prov = (p.field_provenance || {})[field];
+  if (!prov) return "";
+  const src = prov.method === "matched" ? "з тексту документа"
+    : prov.method === "llm" ? "модель"
+    : prov.method === "no_value" ? "" : prov.method || "";
+  return src + (prov.resolved === false ? " · не зіставлено з довідником" : "");
+}
+
+function renderConflict(job) {
+  /* Стан «перетин»: новий документ у базу НЕ додано (транзакція відкотилась).
+     Людина або переглядає поля вище, або каже, що старий документ втратив
+     чинність -- тоді сервер його скасовує й повторює коміт нового. */
+  $("db-sec").classList.remove("hidden");
+  atStep(3);
+  const body = $("db-body");
+  body.innerHTML = "";
+  const lines = (job.conflicts || []).map(function (c) {
+    var per = c.valid_from + (c.valid_to && c.valid_to !== c.valid_from
+      ? " – " + c.valid_to : "");
+    return "№" + (c.number || "?") + " — " + c.kind_label + ", " + per;
+  });
+  body.appendChild(note("err",
+    "Перетин періодів у тієї самої особи — новий документ у базу НЕ додано. "
+    + "Накладається на: " + lines.join("; ") + "."));
+  $("commit-btn").disabled = true;   /* повторний коміт дав би той самий перетин */
+  const p = document.createElement("p");
+  p.className = "actions";
+  const review = document.createElement("button");
+  review.textContent = "Переглянути поля";
+  review.addEventListener("click", function () {
+    $("review-sec").scrollIntoView({ behavior: "smooth" });
+  });
+  const sup = document.createElement("button");
+  sup.className = "primary";
+  sup.textContent = "Старий документ втратив чинність";
+  sup.addEventListener("click", async function () {
+    sup.disabled = true; review.disabled = true;
+    body.appendChild(note("info", "Скасовую старий документ і додаю новий…"));
+    let r;
+    try { r = await fetch("/api/jobs/" + currentJob + "/supersede", { method: "POST" }); }
+    catch (e) { r = null; }
+    if (!r || !r.ok) {
+      const e = r ? await r.json().catch(function () { return {}; }) : {};
+      body.appendChild(note("err", (e && e.error) || "скасування не вдалось"));
+      sup.disabled = false; review.disabled = false;
+      return;
+    }
+    if (!pollTimer) pollTimer = setInterval(poll, 1000);  /* догоне стан committed */
+  });
+  p.style.display = "flex";
+  p.style.gap = "1.5rem";
+  p.style.flexWrap = "wrap";
+  p.append(review, sup);
+  body.appendChild(p);
+}
+
+function renderDbResult(job) {
+  $("db-sec").classList.remove("hidden");
+  atStep(3);
+  const body = $("db-body");
+  body.innerHTML = "";
+  const r = job.db_result;
+  if (!r) return;
+  if (r.doc_state === "unchanged") {
+    body.appendChild(note("info", "Цей документ уже в базі під номером " +
+      r.document_id + " — копію не створено."));
+    return;
+  }
+  const labels = (job.preview && job.preview.fact_labels) || {};
+  let msg = "Документ у базі під номером " + r.document_id;
+  msg += r.facts_inserted.length
+    ? ", записано фактів: " + r.facts_inserted.length + "."
+    : ", без фактів.";
+  body.appendChild(note("info", msg));
+  if (r.doc_state === "reprocessed")
+    body.appendChild(note("info", "Повторна обробка: попередня версія фактів позначена застарілою."));
+  const st = job.preview && job.preview.status;
+  if (st === "needs_review")
+    body.appendChild(note("warn", "Факти записані як непідтверджені й документ у черзі перевірки — у підсумки вони не входять, доки людина не підтвердить."));
+  if (st === "unresolved")
+    body.appendChild(note("pending", "Документ позначено для ручного розбору."));
+  if (r.facts_inserted.length) {
+    const det = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = "Що саме записано";
+    det.appendChild(sum);
+    const wrap = fieldTable(["Поле", "№ запису"],
+      r.facts_inserted.map(([t, id]) => [labels[t] || t, String(id)]));
+    det.appendChild(wrap);
+    body.appendChild(det);
+  }
+}
+
+/* дрібні хелпери DOM */
+function note(cls, msg) { const d = document.createElement("div");
+  d.className = "note " + cls; d.textContent = msg; return d; }
+function h3(t) { const h = document.createElement("h3"); h.textContent = t; return h; }
+function fieldTable(headers, rows, gapsTable) {
+  const wrap = document.createElement("div"); wrap.className = "tablewrap";
+  const tbl = document.createElement("table");
+  const trh = document.createElement("tr");
+  for (const h of headers) { const th = document.createElement("th");
+    th.textContent = h; trh.appendChild(th); }
+  tbl.appendChild(trh);
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    row.forEach((cell, i) => {
+      const td = document.createElement("td");
+      if (cell == null || cell === "") {
+        if (i === 1 && !gapsTable) { td.textContent = "не знайдено"; td.className = "gap"; }
+      } else {
+        td.textContent = cell;
+        if (gapsTable && i === 1) td.className = "gap";
+      }
+      if (i >= 2) td.className += " src";
+      tr.appendChild(td);
+    });
+    tbl.appendChild(tr);
+  }
+  wrap.appendChild(tbl);
+  return wrap;
+}
+
+$("commit-btn").addEventListener("click", async () => {
+  if (!currentJob) return;
+  $("commit-btn").disabled = true;
+  await fetch("/api/jobs/" + currentJob + "/commit", { method: "POST" });
+  if (!pollTimer) pollTimer = setInterval(poll, 1000);
+});
+</script>
+</body>
+</html>
