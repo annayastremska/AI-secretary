@@ -423,6 +423,16 @@ def _commit_job(job_id):
                         "DATABASE_URL=..., див. README апки)")
         return
     except Exception as exc:
+        # OverlapConflict із завантажувача: новий документ перетинається періодом
+        # з наявною відсутністю тієї самої особи. Це НЕ збій, а окремий стан для
+        # людини: переглянути поля або скасувати старий документ. Транзакція в
+        # load() уже відкотилась -- у базі нічого не зʼявилось. Ловимо за іменем
+        # класу, щоб не переносити ліниве `import ai_secretary_loader` вгору.
+        if type(exc).__name__ == "OverlapConflict":
+            _set_step(job, "db", "done", _now() - started)
+            job["state"] = "conflict"
+            job["conflicts"] = getattr(exc, "conflicts", [])
+            return
         _set_step(job, "db", "failed", _now() - started)
         job["state"] = "commit_failed"
         # НЕ називаємо кожен збій «БД недоступна» (знайдено блоком 1 перевірки
@@ -875,6 +885,44 @@ def commit(job_id: str, request: Request):
             "error": f"запис у базу можливий лише після перегляду (стан: {job['state']})"})
     threading.Thread(target=_commit_job, args=(job_id,), daemon=True).start()
     return {"ok": True}
+
+
+@app.post("/api/jobs/{job_id}/supersede")
+def supersede(job_id: str, request: Request):
+    """Людина в стані «конфлікт» вирішила, що СТАРИЙ документ втратив чинність.
+    Скасовуємо всі конфліктні старі документи (факти -> rejected, документ ->
+    validity=superseded), після чого перетину вже немає, і повторюємо коміт
+    нового документа. Ті самі гарди доступу, що й commit: пише лише оператор і
+    не в публічному режимі."""
+    if getattr(request.state, "access_level", LEVEL_OPERATOR) != LEVEL_OPERATOR:
+        return JSONResponse(status_code=403, content={
+            "error": "Гостьовий доступ: скасувати документ може лише оператор."})
+    if PUBLIC_MODE:
+        return JSONResponse(status_code=403, content={
+            "error": "Демонстраційний доступ: запис у базу заблокований."})
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "немає такої задачі"})
+    if job["state"] != "conflict":
+        return JSONResponse(status_code=409, content={
+            "error": f"скасування доступне лише зі стану перетину (стан: {job['state']})"})
+    old_ids = sorted({c["source_doc_id"] for c in (job.get("conflicts") or [])})
+    if not old_ids:
+        return JSONResponse(status_code=409, content={
+            "error": "у стані перетину не вказано конфліктного документа"})
+    import ai_secretary_loader
+    try:
+        for old in old_ids:
+            ai_secretary_loader.supersede_document(old)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={
+            "error": f"скасування не вдалось: {type(exc).__name__}: {exc}"})
+    job["conflicts"] = []
+    # Повторний коміт нового документа: старі факти вже rejected, перетину
+    # немає, load() пройде як звичайний коміт.
+    threading.Thread(target=_commit_job, args=(job_id,), daemon=True).start()
+    return {"ok": True, "superseded": old_ids}
 
 
 # Монтування Gradio-чату останнім: він додає власні маршрути під /chat,

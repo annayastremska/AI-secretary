@@ -146,11 +146,15 @@ def test_page_shows_how_for_every_tile():
     assert ".title =" not in block, "how у title -- його не видно"
 
 
-def test_page_names_what_was_folded_and_dropped():
+def test_page_names_what_was_dropped():
+    """Рядки «…не показано окремо» прибрані 29.08 на прохання Ані (правка
+    Андрія): згорнуті величини вже є на сторінці живими, і підпис про них
+    забирав більше, ніж давав. А от ВІДКИНУТІ називаються далі -- це інше
+    твердження: «цифри немає, бо немає чим зміряно»."""
     html = io.open(PAGE, encoding="utf-8").read()
     block = html.split("function renderPartner", 1)[1]
-    assert "не показано окремо" in block
     assert "відкинуто" in block
+    assert "не показано окремо" not in block
 
 
 def test_page_makes_no_external_requests():

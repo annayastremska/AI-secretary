@@ -272,6 +272,10 @@ async function poll() {
     $("db-body").appendChild(note("err", job.error || "запис не вдався"));
     $("commit-btn").disabled = false;  /* можна повторити після підняття бази */
     stopPolling();
+  } else if (job.state === "conflict") {
+    renderReview(job);
+    renderConflict(job);
+    stopPolling();
   }
 }
 
@@ -431,6 +435,54 @@ function sourceOf(p, field) {
     : prov.method === "llm" ? "модель"
     : prov.method === "no_value" ? "" : prov.method || "";
   return src + (prov.resolved === false ? " · не зіставлено з довідником" : "");
+}
+
+function renderConflict(job) {
+  /* Стан «перетин»: новий документ у базу НЕ додано (транзакція відкотилась).
+     Людина або переглядає поля вище, або каже, що старий документ втратив
+     чинність -- тоді сервер його скасовує й повторює коміт нового. */
+  $("db-sec").classList.remove("hidden");
+  atStep(3);
+  const body = $("db-body");
+  body.innerHTML = "";
+  const lines = (job.conflicts || []).map(function (c) {
+    var per = c.valid_from + (c.valid_to && c.valid_to !== c.valid_from
+      ? " – " + c.valid_to : "");
+    return "№" + (c.number || "?") + " — " + c.kind_label + ", " + per;
+  });
+  body.appendChild(note("err",
+    "Перетин періодів у тієї самої особи — новий документ у базу НЕ додано. "
+    + "Накладається на: " + lines.join("; ") + "."));
+  $("commit-btn").disabled = true;   /* повторний коміт дав би той самий перетин */
+  const p = document.createElement("p");
+  p.className = "actions";
+  const review = document.createElement("button");
+  review.textContent = "Переглянути поля";
+  review.addEventListener("click", function () {
+    $("review-sec").scrollIntoView({ behavior: "smooth" });
+  });
+  const sup = document.createElement("button");
+  sup.className = "primary";
+  sup.textContent = "Старий документ втратив чинність";
+  sup.addEventListener("click", async function () {
+    sup.disabled = true; review.disabled = true;
+    body.appendChild(note("info", "Скасовую старий документ і додаю новий…"));
+    let r;
+    try { r = await fetch("/api/jobs/" + currentJob + "/supersede", { method: "POST" }); }
+    catch (e) { r = null; }
+    if (!r || !r.ok) {
+      const e = r ? await r.json().catch(function () { return {}; }) : {};
+      body.appendChild(note("err", (e && e.error) || "скасування не вдалось"));
+      sup.disabled = false; review.disabled = false;
+      return;
+    }
+    if (!pollTimer) pollTimer = setInterval(poll, 1000);  /* догоне стан committed */
+  });
+  p.style.display = "flex";
+  p.style.gap = "1.5rem";
+  p.style.flexWrap = "wrap";
+  p.append(review, sup);
+  body.appendChild(p);
 }
 
 function renderDbResult(job) {

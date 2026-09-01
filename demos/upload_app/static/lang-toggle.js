@@ -217,6 +217,22 @@
     // моя версія з пробілами не збіглася жодним ключем.
     "Замір бази й нормативного пошуку":
       "Database and normative search: measured",
+    // Стан «перетин» при завантаженні (робота Андрія, 29.08). Рядки
+    // додані ТИМ САМИМ рухом, що й розмітка: сторінка двомовна, і
+    // новий стан без перекладу став би українським островом.
+    "Старий документ втратив чинність":
+      "The old document is no longer valid",
+    "Скасовую старий документ і додаю новий…":
+      "Superseding the old document and adding the new one...",
+    "скасування не вдалось":
+      "superseding failed",
+    "Скасувати старий:":
+      "Supersede the old one:",
+    "Переглянути поля":
+      "Review the fields",
+    "Перетин періодів у тієї самої особи — новий документ у базу НЕ додано.":
+      "Overlapping periods for the same person - the new document was NOT added to the database.",
+    "Накладається на:": "Overlaps with:",
     "чим зміряно": "how it was measured",
     "· замір": "· measured",
     "метрик охоплення не показано окремо:":

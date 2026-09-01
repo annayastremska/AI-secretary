@@ -433,6 +433,107 @@ def get_or_create_document(cur, meta: dict, md_path: str, original_file_hint: st
     return document_id, ("reprocessed" if existing is not None else "new")
 
 
+# ── Гейт перетину періодів відсутності (при ЗАВАНТАЖЕННІ) ────────────────────
+# Та сама особа не може бути у двох НАКЛАДЕНИХ періодах відпустки/відрядження.
+# Логіка дзеркалить demos/upload_app/chat_gradio/docgen.py:find_conflicts, але з
+# двома відмінностями (рішення 29.08): рахує й ЧЕРНЕТКИ (status <> 'rejected', не
+# лише confirmed) і ВИКЛЮЧАЄ ІДЕНТИЧНИЙ період -- це .docx/.pdf двійник тієї самої
+# відсутності, а не конфлікт. object_id беремо напряму (load() його вже має),
+# тому service_id не потрібен. docgen у завантажувач НЕ імпортуємо: він тягне
+# tiers -> модель, а завантажувач має лишатись легким.
+_ABSENCE_DIMS = ["leave", "deployment_location"]
+_DIM_LABEL = {"leave": "відпустка", "deployment_location": "відрядження"}
+
+
+class OverlapConflict(Exception):
+    """Новий документ накладається періодом на наявну відсутність тієї самої
+    особи. Несе перелік конфліктів для показу людині; транзакція load()
+    відкочується -- ні документа, ні фактів у базу не потрапляє."""
+
+    def __init__(self, conflicts):
+        self.conflicts = conflicts
+        super().__init__(f"{len(conflicts)} overlap conflict(s)")
+
+
+def overlap_conflicts(cur, object_id, start, end, exclude_doc_id):
+    """Наявні НЕ-відхилені absence-факти цієї особи, що перетинаються з
+    [start, end]; крім фактів того самого документа й крім ІДЕНТИЧНОГО періоду
+    (двійник тієї самої відсутності). -> перелік словників."""
+    end = end or start
+    cur.execute(
+        """
+        SELECT f.valid_from, f.valid_to, f.source_doc_id, d.code,
+               (SELECT btrim(n.value) FROM facts n
+                  JOIN dimensions nd ON nd.id = n.dimension_id
+                 WHERE n.source_doc_id = f.source_doc_id
+                   AND nd.code = 'document_number' LIMIT 1)
+          FROM facts f
+          JOIN dimensions d ON d.id = f.dimension_id
+         WHERE f.object_id = %s
+           AND d.code = ANY(%s)
+           AND f.status <> 'rejected'
+           AND f.valid_from IS NOT NULL
+           AND f.valid_from <= %s
+           AND COALESCE(f.valid_to, f.valid_from) >= %s
+           AND f.source_doc_id <> %s
+           AND NOT (f.valid_from = %s AND COALESCE(f.valid_to, f.valid_from) = %s)
+         ORDER BY f.valid_from
+        """,
+        (object_id, _ABSENCE_DIMS, end, start, exclude_doc_id, start, end),
+    )
+    out = []
+    for vf, vt, sd, dim, number in cur.fetchall():
+        out.append({"valid_from": str(vf),
+                    "valid_to": str(vt) if vt else None,
+                    "source_doc_id": sd, "dim": dim, "number": number,
+                    "kind_label": _DIM_LABEL.get(dim, "відсутність")})
+    return out
+
+
+def supersede_document(old_doc_id):
+    """Скасовує ВЕСЬ старий документ (рішення користувача, коли новий перетинний
+    документ визнано актуальнішим): усі його не-відхилені факти -> rejected, з
+    записом у review_log; відкриті review_queue закриває; документ ->
+    validity='superseded', validity_source='manual'. Дзеркалить handle_reprocess,
+    лише дія інша. Саме відхилення фактів прибирає перетин (overlap_conflicts
+    рахує status<>'rejected'), тому після цього повторний load() нового
+    документа проходить. -> скільки фактів скасовано.
+
+    Значення enum перевірені проти CHECK documents: validity ∈
+    {current,probably_superseded,superseded,cancelled,unknown}; validity_source ∈
+    {declared,inferred,manual}."""
+    with psycopg.connect(get_dsn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, value FROM facts WHERE source_doc_id = %s AND status <> 'rejected'",
+                (old_doc_id,),
+            )
+            rows = cur.fetchall()
+            for fact_id, old_value in rows:
+                cur.execute("UPDATE facts SET status = 'rejected' WHERE id = %s", (fact_id,))
+                cur.execute(
+                    """
+                    INSERT INTO review_log (fact_id, changed_by, old_value, new_value, action)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (fact_id, "ai_secretary_loader:supersede", old_value, None,
+                     "superseded_by_user_on_upload"),
+                )
+            cur.execute(
+                "UPDATE review_queue SET resolved_at = now(), "
+                "resolution = 'superseded_by_user_on_upload' "
+                "WHERE document_id = %s AND resolved_at IS NULL",
+                (old_doc_id,),
+            )
+            cur.execute(
+                "UPDATE documents SET validity = 'superseded', "
+                "validity_source = 'manual' WHERE id = %s",
+                (old_doc_id,),
+            )
+        conn.commit()
+    return len(rows)
+
+
 def load(md_path: str, original_file_hint: str = None) -> dict:
     """Повертає короткий звіт: {"document_id", "doc_state", "already_existed",
     "facts_inserted"}. doc_state -- "new" / "unchanged" / "reprocessed"
@@ -497,6 +598,25 @@ def load(md_path: str, original_file_hint: str = None) -> dict:
                     "INSERT INTO review_queue (document_id, queue_type) VALUES (%s, 'new_person')",
                     (document_id,),
                 )
+
+            # ── Гейт перетину: ДО вставки будь-яких фактів ─────────────────
+            # Якщо absence-період нового документа накладається на наявну
+            # відсутність тієї самої особи -- не вставляємо нічого, а кидаємо
+            # OverlapConflict. `with psycopg.connect` відкотить транзакцію
+            # (документ ще не закомічено -- коміт лише в кінці), тож у базі не
+            # лишиться ні документа, ні фактів. Людина далі або перегляне поля,
+            # або скасує старий документ (supersede_document) і повторить коміт.
+            _conflicts, _seen = [], set()
+            for _f in meta.get("facts") or []:
+                if _f.get("fact_type") in _ABSENCE_DIMS and _f.get("date_start"):
+                    for _c in overlap_conflicts(cur, person_object_id,
+                                                _f.get("date_start"),
+                                                _f.get("date_end"), document_id):
+                        if _c["source_doc_id"] not in _seen:
+                            _seen.add(_c["source_doc_id"])
+                            _conflicts.append(_c)
+            if _conflicts:
+                raise OverlapConflict(_conflicts)
 
             field_provenance = meta.get("field_provenance") or {}
 
