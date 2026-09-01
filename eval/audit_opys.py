@@ -24,7 +24,16 @@ import docx
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-PATH = r"C:\Users\Lenovo\Desktop\Agentic AI\AI-секретар_опис_проєкту.docx"
+#: Майстер-копія лежить У РЕПОЗИТОРІЇ (`docs/`), а не на робочому столі.
+#: Тут був зашитий шлях на стіл, і 01.09 прилад тихо перевірив копію від
+#: 29.08: сказав «застарілих чисел не знайдено» про файл, якого я не
+#: правила. Той самий клас, що `verify_catalog`, який міряв не те.
+#: Перевизначити можна змінною OPYS_DOCX.
+import os
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PATH = os.environ.get("OPYS_DOCX") or os.path.join(
+    _ROOT, "docs", "AI-секретар_опис_проєкту.docx")
 d = docx.Document(PATH)
 
 paras = [(p.style.name, p.text.strip()) for p in d.paragraphs if p.text.strip()]
@@ -229,5 +238,5 @@ say("ПРОВАЛ" if clashes else "ок", "Б7 документ не супер
 
 io.open(sys.argv[1], "w", encoding="utf-8").write(
     "\n".join(out) + "\n\n--- найдовші речення ---\n"
-    + "\n\n".join(s[:300] for s in sorted(long_s, key=len, reverse=True)[:5]))
+    + "\n\n".join(x[:300] for _n, x, _w in sorted(long_s, reverse=True)[:5]))
 print("\n".join(out))
