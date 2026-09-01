@@ -194,7 +194,7 @@ https і що з цього виходить для чужого розгорт�
 | Що | Стан | Чия зона |
 |---|---|---|
 | `pipeline/`, `eval/`, `demos/` | **мертвого нуля** — жоден модуль не лишився без згадки | наша |
-| 11 скриптів у `db/scripts/` (`load_unit_roster`, `apply_identity`, `group_duplicate_docs`, `search_normative`, `set_normative_validity`, `show_nonverbatim`, `compare_md_vs_db`, `compare_rerank_quality`, `diagnose_golden_failures`, `delete_test_documents`) | згадок немає, але це одноразові операційні скрипти, які він запускав руками | **Андрія — не наше рішення** |
+| **13** скриптів у `db/scripts/` (моє число було 11: я рахувала згадку в будь-якому файлі, зокрема `.yaml` і `.html`; Андрій рахував строгіше — лише `.md` або імпорт із `.py`) (`load_unit_roster`, `apply_identity`, `group_duplicate_docs`, `search_normative`, `set_normative_validity`, `show_nonverbatim`, `compare_md_vs_db`, `compare_rerank_quality`, `diagnose_golden_failures`, `delete_test_documents`) | згадок немає, але це одноразові операційні скрипти, які він запускав руками | **Андрія — не наше рішення** |
 | `data/eval/samples/holdout/generate_holdout.py` | прилад каже «можна видаляти» (унікального 0, посилань 0) — і **тут його слухати не треба**: це єдиний спосіб перезібрати набір holdout, на який спираються `eval/evaluate.py` і три тести. Прилад бачить текст, а не спроможність | наша, **лишається** |
 | `answer/` | **порожня оболонка: один README** | Коля + Денис |
 | `knowledge-base/` | **у git нуль файлів**, а згадується в 6 документах | — |
