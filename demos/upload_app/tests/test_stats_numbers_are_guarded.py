@@ -123,19 +123,33 @@ def test_queue_three_numbers_are_three_different_numbers(out):
                 q["documents_pending_substantive"], q["people_unmatched"]}) == 4
 
 
-def test_page_shows_documents_pending_not_the_filtered_one():
-    """Сторінка мусить показувати 31, а не 28.
+def test_api_keeps_both_pending_numbers_and_the_page_shows_neither():
+    """Рядок черги прибраний 29.08 на прохання Ані -- перевірка переїхала в API.
 
-    Фільтр «крім нової особи» писався 26.08 під 133 застарілі завдання; після
-    того, як їх закрили, він почав ПРИХОВУВАТИ три живі документи. Тест на
-    розмітку, бо саме розмітка вибирає, яке з двох чисел показати.
+    Історія цієї перевірки. 26.08 з'ясувалось, що фільтр «крім нової особи»
+    приховує три ЖИВІ документи, і тест зафіксував: на екран іде
+    `documents_pending` (31), а не `documents_pending_substantive` (28). Потім
+    рядок черги зі сторінки прибрали цілком, і тест упав -- він міряв розмітку.
+
+    Тому тепер перевіряється те, що лишилось істинним:
+      1. в API є ОБИДВА числа. Одне без другого вводить в оману в обидві
+         сторони, тому жодне не викидається;
+      2. на сторінці немає НІ ОДНОГО з них -- рядок прибраний свідомо, і якщо
+         він колись вернеться, тест мусить упасти й змусити обрати число
+         явно, а не взяти те, що під рукою.
     """
-    html = io.open("demos/upload_app/static/stats.html", encoding="utf-8").read()
-    assert "q.documents_pending ??" in html, \
-        "сторінка мусить показувати documents_pending"
-    assert "q.documents_pending_substantive ??" not in html, \
-        "відфільтроване число приховує живі документи -- на екран воно не йде"
+    # Перевіряємо КОД, а не живу збірку: без Postgres `collect()` віддає
+    # `db_available: false` і жодних лічильників, тобто тест міряв би наявність
+    # бази замість наявності охорони. Сервер вимкнений 01.09 -- саме так це й
+    # виявилось.
+    src = io.open("demos/upload_app/stats.py", encoding="utf-8").read()
+    assert '"documents_pending": docs_pending' in src
+    assert '"documents_pending_substantive": docs_pending_sub' in src
 
+    html = io.open("demos/upload_app/static/stats.html", encoding="utf-8").read()
+    assert "q.documents_pending" not in html, (
+        "рядок черги повернувся -- обери число ЯВНО і поправ цей тест: "
+        "на екран іде documents_pending (31), не відфільтроване (28)")
 
 # ── Сталі числа заміру ──────────────────────────────────────────────────────
 

@@ -108,3 +108,27 @@ def test_v3_is_what_we_actually_show(monkeypatch):
     assert "fonts.googleapis.com" not in css and "fonts.gstatic.com" not in css, \
         "зовнішній запит до Google Fonts -- правило №7 зламане"
     assert "--r-md: 0" in css, "нуль радіуса напряму B зник"
+
+
+def test_default_face_is_v3_without_any_variable(monkeypatch):
+    """БЕЗ `APP_THEME` віддається v3 -- те саме обличчя, що ми показували.
+
+    Тесту на дефолт не було, і саме через це він розійшовся з реальністю:
+    демо весь час ішло у v3, але вибір робила змінна в `.env` НА СЕРВЕРІ. Коли
+    сервер вимкнули (01.09), у репозиторії лишався дефолт v1 -- тобто хто
+    завгодно, хто підняв би апку, побачив би обличчя, якого ми місяць не
+    правили, і вважав би його поточним.
+
+    Старі версії ЛИШАЮТЬСЯ (рішення Ані 27.08: дати порівняти) -- перевіряється
+    лише те, що віддається без жодної змінної.
+    """
+    monkeypatch.delenv("APP_THEME", raising=False)
+    from demos.upload_app import app as upapp
+    importlib.reload(upapp)
+    assert upapp.APP_THEME == "v3"
+    client = TestClient(upapp.app)
+    resp = client.get("/static/skin.css", auth=(TEST_USER, TEST_PASS))
+    assert resp.status_code == 200
+    # У v3 три файли токенів і свій шар сторінок -- беремо ознаку, якої в v1
+    # немає взагалі.
+    assert "--c-accent" in resp.text or "theme-tokens-v3" in resp.text

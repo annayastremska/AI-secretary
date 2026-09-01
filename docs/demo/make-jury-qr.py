@@ -24,6 +24,8 @@ import qrcode
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "data", "qr-jury.png")
+#: УВАГА: ця адреса більше не існує -- віртуалку вимкнули 01.09.2026.
+#: Лишена як приклад формату; для нової машини передавати --base.
 DEFAULT_BASE = "http://185.9.41.1:7302"
 LANDING = "/jury"
 

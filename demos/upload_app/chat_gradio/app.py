@@ -2847,7 +2847,9 @@ MARK = os.path.join(ASSETS, "mark.svg")
 MARK_IMG = os.path.join(ASSETS, "mark-avatar.svg")
 #: Версія обличчя -- та сама змінна, що на сторінках (див. app.APP_THEME).
 #: Стара тема лишається на місці: перемикання й відкат -- одна змінна.
-_THEME_VERSION = os.environ.get("APP_THEME", "v1").strip().lower()
+#: Дефолт v3 із 01.09 -- із тієї самої причини, що в app.py сторінок:
+#: вибір жив у `.env` на сервері, а сервера більше немає.
+_THEME_VERSION = os.environ.get("APP_THEME", "v3").strip().lower()
 THEME_CSS = os.path.join(HERE, {"v3": "theme-v3.css",
                                  "v2": "theme-v2.css"}.get(_THEME_VERSION,
                                                            "theme.css"))
