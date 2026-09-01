@@ -48,6 +48,11 @@ data-real/
 !docs/**/*.png
 !docs/**/*.svg
 
+# Виняток другий: порожні бланки генератора. Це публічні форми (Додаток 28 і
+# Додаток 30 до Інструкції з діловодства у ЗСУ) без жодного заповненого поля --
+# з них генератор робить синтетичні документи. Реальних документів тут не буває.
+!data/generator/templates/*.docx
+
 # Дампи бази — можуть містити витягнуті реальні дані.
 # Схема (DDL) у git потрібна, тому *.sql цілком не блокуємо
 dumps/
@@ -158,3 +163,8 @@ docs/deck/canvas/ai-secretary-demo-day.html
 # на сервер -- як і data/qr-guest.png.
 data/qr-jury.png
 data/jury-guide.html
+
+# Завантажений нормативний корпус -- похідне, 16 МБ. Відтворюється
+# db/scripts/load_normative_corpus.py за переліком у
+# docs/tasks/2026-08-21_normative-corpus.md. Те саме правило, що для дампів.
+data/eval/samples/normative/downloaded/

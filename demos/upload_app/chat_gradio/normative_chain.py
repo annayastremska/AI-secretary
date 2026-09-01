@@ -68,6 +68,14 @@ UNITS_SCHEMA = os.environ.get("CHAT_UNITS_SCHEMA", "public").strip()
 #: Таблиця груп дублікатів у постійній схемі зветься інакше, ніж в
 #: експериментальній (`document_groups` проти `doc_groups`).
 GROUPS_TABLE = os.environ.get("CHAT_UNITS_GROUPS", "document_groups").strip()
+#: ПОВНЕ ім'я таблиці одиниць -- одне на весь модуль. Модуль пошуку Андрія
+#: після 01.09 бере таблиці повними іменами, без схеми, тому й ми тримаємо
+#: тут готове ім'я, а не схему окремо від назви: доки їх було двоє, три місця
+#: в цьому файлі складали їх по-різному.
+_PREFIX = "" if UNITS_SCHEMA in ("", "public") else UNITS_SCHEMA + "."
+UNITS_TABLE = _PREFIX + "document_units"
+#: Таблиця груп дублікатів -- так само повним іменем.
+GROUPS_FULL = _PREFIX + GROUPS_TABLE
 
 ENABLED = os.environ.get("CHAT_NORMATIVE_CHAIN", "1").strip().lower() not in (
     "0", "false", "no", "off")
@@ -147,13 +155,24 @@ def _prepare():
                              f"{type(exc).__name__}: {exc}")
         return False, _STATE["reason"]
 
-    # Схема одиниць -- ПОСТІЙНА (`public`), а не експериментальна.
+    # ДЕ ЛЕЖАТЬ ОДИНИЦІ -- задаємо з НАШОГО боку (його теку не правимо: папка
+    # це одна зона відповідальності). Але контракт у його модуля змінився, і
+    # підтримуємо обидва:
     #
-    # Модуль пошуку лежить у теці Андрія, і ми його не правимо: папка -- одна
-    # зона відповідальності. Тому перевизначаємо з НАШОГО боку. Схема в його
-    # модулі -- глобальна змінна, а SQL збирається на кожен виклик (f-рядки
-    # всередині функцій), тому перевизначення діє.
-    su.SCHEMA = UNITS_SCHEMA
+    #   нова версія (main, 01.09): таблиці беруться ПОВНИМИ іменами --
+    #       `UNITS` = document_units, `GROUPS` = document_groups;
+    #   стара версія: схема в глобальній `SCHEMA`, а таблиці -- `SCHEMA.х`.
+    #
+    # Чому це важливо: після мерджу 01.09 присвоєння `su.SCHEMA` стало
+    # НІ НА ЩО не впливати -- його функції читали б таблиці за замовчуванням,
+    # а наша перевірка доступу дивилась би в іншу схему. Тобто «тихо не те»
+    # замість падіння, і на демо це виглядало б як «нормативка нічого не
+    # знаходить».
+    if hasattr(su, "UNITS"):
+        su.UNITS = UNITS_TABLE
+        su.GROUPS = GROUPS_FULL
+    else:
+        su.SCHEMA = UNITS_SCHEMA
     # Таблиця груп дублікатів у постійній схемі зветься інакше. Його
     # `canon_map` на невідомій таблиці глушить виняток і повертає порожній
     # словник -- тобто зведення дублікатів ТИХО не працювало б, а «тихо не
@@ -166,11 +185,13 @@ def _prepare():
     except ImportError:
         import tiers as _t
     try:
+        # Перевірка доступу мусить дивитись у ТУ САМУ таблицю, з якої читають
+        # його функції, -- інакше вона підтверджує доступ не туди.
         _t._run_template_sql(
-            f"SELECT 1 FROM {su.SCHEMA}.document_units LIMIT 1", {})
+            f"SELECT 1 FROM {UNITS_TABLE} LIMIT 1", {})
     except Exception as exc:
         _STATE.update(ready=False,
-                      reason=f"немає доступу до {su.SCHEMA}.document_units: "
+                      reason=f"немає доступу до {UNITS_TABLE}: "
                              f"{type(exc).__name__}")
         return False, _STATE["reason"]
 
@@ -304,7 +325,7 @@ def _canon_map(cur):
     Колонки ті самі (перевірено живою базою 27.08).
     """
     cur.execute(f"SELECT document_id, canonical_id "
-                f"FROM {UNITS_SCHEMA}.{GROUPS_TABLE}")
+                f"FROM {GROUPS_FULL}")
     return {a: b for a, b in cur.fetchall()}
 
 
@@ -325,7 +346,7 @@ def _lexemes(cur, text):
     return {r[0] for r in cur.fetchall()}
 
 
-def _overlap(cur, schema, question, quote):
+def _overlap(cur, question, quote):
     """Частка лем питання, присутніх у цитаті. -> (частка, чого бракує).
 
     Друга перевірка поверх підрядкової: та ловить ВИГАДКУ, ця -- НЕДОРЕЧНІСТЬ
@@ -336,7 +357,7 @@ def _overlap(cur, schema, question, quote):
     if q:
         cur.execute(f"""
             SELECT l FROM unnest(%s::text[]) AS l
-             WHERE EXISTS (SELECT 1 FROM {schema}.document_units u
+             WHERE EXISTS (SELECT 1 FROM {UNITS_TABLE} u
                             WHERE u.tsv @@ plainto_tsquery('simple', l))
         """, (sorted(q),))
         q = {r[0] for r in cur.fetchall()}
@@ -404,14 +425,12 @@ def _unit_by_label(ident, label):
         from . import tiers as _t
     except ImportError:
         import tiers as _t
-    su = _STATE.get("su")
-    schema = getattr(su, "SCHEMA", "public") if su else "public"
     try:
         with _t._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""SELECT u.label, u.text
-                          FROM {schema}.document_units u
+                          FROM {UNITS_TABLE} u
                           JOIN documents d ON d.id = u.document_id
                          WHERE d.doc_identifier = %s
                            AND (u.label = %s OR u.base_label = %s)
@@ -579,7 +598,7 @@ def answer(question):
                                 f"відкинуто")
                 continue
             # Перевірка 2: чи цитата про те саме, що питання.
-            share, missing = _overlap(cur, su.SCHEMA, question, quote)
+            share, missing = _overlap(cur, question, quote)
             mark = ("" if share >= MIN_OVERLAP
                     else " ⚠️ цитата слабко перетинається з питанням — "
                          "перечитайте документ")

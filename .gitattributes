@@ -1,0 +1,6 @@
+# Скрипти, які виконує Linux-контейнер, МУСЯТЬ мати LF. З CRLF ядро шукає
+# інтерпретатор «/bin/bash\r» і init тихо не виконується: база підіймається
+# без застосункових користувачів, а помилка видна лише в docker logs
+# («cannot execute: required file not found»). Саме так і сталося 22.08.2026.
+*.sh text eol=lf
+db/init/* text eol=lf

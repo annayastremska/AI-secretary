@@ -1,0 +1,81 @@
+# Траси наступних ходів: чи розв'язує модель посилання на попередній хід.
+#
+# Одиниця тут -- ТРАСА, не питання. Рядок = один хід. Перший хід траси
+# ніколи не оцінюється (він самодостатній) -- він потрібен лише як історія
+# для наступних. Оцінюються ходи 2+.
+#
+# ЩО В КОЛОНКАХ
+#   trace      -- ідентифікатор траси
+#   turn       -- номер ходу в трасі
+#   kind       -- клас переходу; за ним групується звіт
+#   utterance  -- що каже людина. {today} підставляє скрипт (--today)
+#   template   -- очікуваний id шаблону з query_catalog.yaml.
+#                 `!X` = будь-який, КРІМ X (для випадків, де правильна
+#                 поведінка -- не відповісти мовчки не на те)
+#   params     -- очікувані параметри через `;`. Три форми:
+#                 k=v   значення мусить дорівнювати v
+#                 k=+   значення мусить бути непорожнім (канонічну форму
+#                       дає код по штатці, не модель -- напр. підрозділ)
+#                 !k    значення НЕ мусить прийти (перевірка на хибне
+#                       успадкування)
+#
+# ЯК ЦЕЙ НАБІР ЗРОБЛЕНО, і чому це ще не оцінка. Траси написав я, дивлячись
+# у каталог шаблонів, тобто автор питань і автор очікувань -- одна людина.
+# Для смоук-тесту «чи взагалі розв'язує» цього досить: правильна відповідь
+# на «а хто?» очевидна й не залежить від того, хто її записав. Для будь-якого
+# числа, яке піде в рішення, набір мусить писати той, хто не налаштовує
+# промпт (правило з context-for-harness-research.md, розділ 9).
+#
+# ДВІ ТРАСИ НАВМИСНО СПІРНІ (kind=disputed). Вони не входять у підсумок, а
+# друкуються окремо: їхня «правильна» поведінка -- предмет рішення продукту,
+# а не факт. Не приймайте їх мітку на віру.
+#
+# ОДНА МІТКА ЗАЛЕЖИТЬ ВІД РОКУ (T07, «а у травні?»). Я поставив 2026-05, бо
+# травень 2026 у минулому щодо {today}. Якщо модель віддасть 2027 -- це не
+# обов'язково її помилка, це неоднозначність питання. Дивіться на цю трасу
+# очима, не лише на підсумок.
+#
+trace	turn	kind	utterance	template	params
+T01	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T01	2	проєкція	а хто?	list_by_state	state=leave;date_from={today};date_to={today}
+T02	1	-	Хто зараз у відрядженні?	list_by_state	state=deployment;date_from={today};date_to={today}
+T02	2	проєкція	а скільки їх?	count_by_state_on_date	state=deployment;date_from={today};date_to={today}
+T03	1	-	Скільки людей у відпустці на 6 травня 2026?	count_by_state_on_date	state=leave;date_from=2026-05-06;date_to=2026-05-06
+T03	2	проєкція	покажи поіменно	list_by_state	state=leave;date_from=2026-05-06;date_to=2026-05-06
+T04	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T04	2	фільтр	а в першій роті?	count_by_state_in_subdivision	state=leave;date_from={today};date_to={today};subdivision=+
+T05	1	-	Покажи відсутніх по підрозділах на 2026-10-10	subdivision_breakdown	state=absent;date_from=2026-10-10;date_to=2026-10-10
+T05	2	відносна дата	а на наступного дня?	subdivision_breakdown	state=absent;date_from=2026-10-11;date_to=2026-10-11
+T06	1	-	Скільки людей у відпустці на 2026-10-10?	count_by_state_on_date	state=leave;date_from=2026-10-10;date_to=2026-10-10
+T06	2	відносна дата	а наступного дня?	count_by_state_on_date	state=leave;date_from=2026-10-11;date_to=2026-10-11
+T06	3	дві осі	а хто саме?	list_by_state	state=leave;date_from=2026-10-11;date_to=2026-10-11
+T07	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T07	2	період	а у травні?	count_by_state_period	state=leave;date_from=2026-05-01;date_to=2026-05-31
+T08	1	-	Хто зараз у відпустці?	list_by_state	state=leave;date_from={today};date_to={today}
+T08	2	зміна сутності	а Петренко?	person_status	name=+
+T09	1	-	Що в наказі 123?	doc_by_number	doc_number=123
+T09	2	той самий об'єкт	а хто в ньому згаданий?	doc_by_number	doc_number=123
+T10	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T10	2	-	дякую	smalltalk	
+T10	3	через розмовний хід	а хто?	list_by_state	state=leave;date_from={today};date_to={today}
+T11	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T11	2	зміна теми	За скільки днів подавати рапорт на відпустку?	normative_search	!date_from;!date_to;!state
+T12	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T12	2	зміна теми	За скільки днів подавати рапорт?	normative_search	!date_from;!date_to;!state
+T12	3	disputed	а хто?	!list_by_state	
+T13	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T13	2	виправлення	ні, у відрядженні	count_by_state_on_date	state=deployment;date_from={today};date_to={today}
+T14	1	-	Скільки у відпустці на 2026-10-10?	count_by_state_on_date	state=leave;date_from=2026-10-10;date_to=2026-10-10
+T14	2	явне перекриття	а хто у відпустці 6 травня 2026?	list_by_state	state=leave;date_from=2026-05-06;date_to=2026-05-06
+T15	1	-	Хто відсутній сьогодні?	list_by_state	state=absent;date_from={today};date_to={today}
+T15	2	проєкція	а скільки?	count_by_state_on_date	state=absent;date_from={today};date_to={today}
+T16	1	-	Скільки людей відсутні сьогодні?	count_by_state_on_date	state=absent;date_from={today};date_to={today}
+T16	2	розбивка	а по підрозділах?	subdivision_breakdown	state=absent;date_from={today};date_to={today}
+T17	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T17	2	інший шаблон	а хто повертається 24 травня?	returning_on_date	state=leave;date_from=2026-05-24;date_to=2026-05-24
+T18	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T18	2	не по темі	яка погода завтра?	відмова	!date_from;!date_to;!state
+T19	1	-	Скільки людей у відпустці сьогодні?	count_by_state_on_date	state=leave;date_from={today};date_to={today}
+T19	2	disputed	а чернетки?	drafts_list	state=leave
+T20	1	-	Скільки у відпустці в першій роті сьогодні?	count_by_state_in_subdivision	state=leave;date_from={today};date_to={today};subdivision=+
+T20	2	дві осі	а хто?	list_by_state_in_subdivision	state=leave;date_from={today};date_to={today};subdivision=+

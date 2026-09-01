@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Система відповіді над документами — результати дослідження</title>
+<style>
+  :root {
+    --bg: #fafaf8;
+    --surface: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #555;
+    --line: #e2e0da;
+    --accent: #1d4ed8;
+    --accent-soft: #eff4ff;
+    --ok: #15803d;
+    --ok-soft: #f0faf2;
+    --warn: #b45309;
+    --warn-soft: #fdf6ec;
+    --risk: #b91c1c;
+    --risk-soft: #fdf0f0;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --surface: #1e2128;
+      --ink: #e8e6e1;
+      --ink-soft: #a0a0a0;
+      --line: #33363e;
+      --accent: #7aa2ff;
+      --accent-soft: #232a3d;
+      --ok: #6fce8f;
+      --ok-soft: #1d2b22;
+      --warn: #e0a95e;
+      --warn-soft: #2e2618;
+      --risk: #e57373;
+      --risk-soft: #301c1c;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 0 20px 80px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+
+  header { padding: 48px 0 28px; border-bottom: 2px solid var(--ink); margin-bottom: 36px; }
+  .kicker { font: 600 12px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+  h1 { font-size: 30px; line-height: 1.25; letter-spacing: -.01em; margin-bottom: 12px; }
+  .subtitle { color: var(--ink-soft); max-width: 640px; }
+
+  h2 {
+    font-size: 21px; margin: 52px 0 6px;
+    padding-top: 24px; border-top: 1px solid var(--line);
+  }
+  .h2-note { color: var(--ink-soft); font-size: 14px; margin-bottom: 18px; }
+  h3 { font-size: 16px; margin: 22px 0 8px; }
+  p { margin-bottom: 12px; }
+  section > p, section > ul { max-width: 760px; }
+  ul, ol { padding-left: 22px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  strong { font-weight: 650; }
+
+  /* verdict cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 20px 0; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .card .tag { font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 10px; display: inline-block; padding: 4px 8px; border-radius: 4px; }
+  .tag-ok   { color: var(--ok);   background: var(--ok-soft); }
+  .tag-warn { color: var(--warn); background: var(--warn-soft); }
+  .tag-risk { color: var(--risk); background: var(--risk-soft); }
+  .tag-info { color: var(--accent); background: var(--accent-soft); }
+  .card b { display: block; margin-bottom: 4px; font-size: 15px; }
+  .card span { color: var(--ink-soft); font-size: 14px; line-height: 1.5; display: block; }
+
+  /* pipeline diagram */
+  .pipeline { margin: 24px 0; }
+  .flow-row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .node {
+    background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; flex: 1; min-width: 130px;
+  }
+  .node b { display: block; font-size: 14px; }
+  .node span { font-size: 12.5px; color: var(--ink-soft); line-height: 1.4; display: block; margin-top: 2px; }
+  .node.hl { border-color: var(--accent); background: var(--accent-soft); }
+  .node.store { border-style: dashed; }
+  .arrow { align-self: center; color: var(--ink-soft); font-size: 18px; flex: 0; }
+  .branch-label { font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); margin: 18px 0 8px; }
+  .routes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .route {
+    border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px;
+    background: var(--surface); padding: 12px 14px;
+  }
+  .route b { font-size: 14px; display: block; margin-bottom: 4px; }
+  .route span { font-size: 12.5px; color: var(--ink-soft); line-height: 1.45; display: block; }
+  .route .src { margin-top: 8px; font: 500 11.5px/1.4 var(--mono); color: var(--accent); }
+
+  /* tables */
+  .table-wrap { overflow-x: auto; margin: 16px 0 8px; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; background: var(--surface); font-size: 14px; }
+  th {
+    text-align: left; font: 600 11.5px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink-soft); padding: 12px 14px; border-bottom: 2px solid var(--line);
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; line-height: 1.5; }
+  tr:last-child td { border-bottom: none; }
+  td.em { font-weight: 650; white-space: nowrap; }
+
+  .pill { display: inline-block; font: 600 11px/1 var(--mono); padding: 4px 8px; border-radius: 99px; white-space: nowrap; }
+  .pill-ok   { color: var(--ok); background: var(--ok-soft); }
+  .pill-warn { color: var(--warn); background: var(--warn-soft); }
+  .pill-risk { color: var(--risk); background: var(--risk-soft); }
+
+  /* Q&A accordion */
+  details {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    margin-bottom: 10px; overflow: hidden;
+  }
+  summary {
+    cursor: pointer; padding: 14px 18px; font-weight: 650; font-size: 15px;
+    list-style: none; display: flex; gap: 12px; align-items: baseline;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary .qn { font: 700 13px/1.6 var(--mono); color: var(--accent); flex: 0 0 auto; }
+  summary .verdict { font-weight: 400; color: var(--ink-soft); font-size: 13.5px; }
+  details[open] summary { border-bottom: 1px solid var(--line); }
+  .qa-body { padding: 14px 18px 16px; font-size: 14.5px; }
+  .qa-body p { margin-bottom: 10px; }
+  .qa-body p:last-child { margin-bottom: 0; }
+
+  /* risks */
+  .risk-block {
+    border: 1px solid var(--line); border-left: 4px solid var(--risk);
+    border-radius: 8px; background: var(--surface); padding: 14px 18px; margin-bottom: 12px;
+  }
+  .risk-block b { display: block; margin-bottom: 6px; }
+  .risk-block .fix { font-size: 14px; color: var(--ink-soft); }
+  .risk-block .fix strong { color: var(--ok); font-weight: 650; }
+
+  .footnote { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-soft); }
+  a { color: var(--accent); }
+  code { font: 13px var(--mono); background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="kicker">Сліпий прогін · 2026-08-11 · дослідження, не план робіт</div>
+  <h1>Система відповіді над документами військової частини</h1>
+  <p class="subtitle">Людина питає своїми словами — система відповідає і показує, звідки взяла.
+  Повністю офлайн, синтетичні дані, демо 15.08 збирає одна людина за два дні.
+  Повний текст — у <code>research-blind-run.md</code>, тут — головне.</p>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section>
+  <h2>Головні висновки</h2>
+  <div class="cards">
+    <div class="card">
+      <span class="tag tag-info">Структура</span>
+      <b>Два сховища, не одне</b>
+      <span>Текстовий індекс дає цитати. Таблиця фактів (SQLite) дає підрахунки. «Хто на місці 14.08» пошуком по тексту не вирішується — тільки запитом до бази.</span>
+    </div>
+    <div class="card">
+      <span class="tag tag-ok">Пошук</span>
+      <b>BM25 достатньо для демо</b>
+      <span>Десятки документів — не масштаб для векторної бази. Розрив словників («вайфай» ↔ «бездротова мережа») закриває переформулювання запиту моделлю.</span>
+    </div>
+    <div class="card">
+      <span class="tag tag-warn">Головна ставка</span>
+      <b>12 із 16 питань — міркування моделі</b>
+      <span>Це стеля здатностей локальної 12B-моделі, не архітектури. Огорожі: розділення «факт / висновок моделі», діагностика як діалог по процедурах.</span>
+    </div>
+    <div class="card">
+      <span class="tag tag-risk">Ліцензії</span>
+      <b>Два «сюрпризи» знайдено</b>
+      <span>jina-reranker-v3 — non-commercial, блокер. MamayLM успадковує кастомну Gemma Terms of Use — ризик для держзамовника, запасний варіант Qwen3-14B (Apache 2.0).</span>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCHEMA ===================== -->
+<section>
+  <h2>Схема системи</h2>
+  <p class="h2-note">Дві незалежні половини: вхід документа і відповідь на питання. Між ними — два сховища.</p>
+
+  <div class="pipeline">
+    <div class="branch-label">Половина 1 · вхід документа</div>
+    <div class="flow-row">
+      <div class="node"><b>OCR</b><span>скан / рукопис → текст (модель обрана бенчмарком)</span></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>Розбір у чернетку</b><span>модель витягує поля: тип, дати, прізвища, числа</span></div>
+      <div class="arrow">→</div>
+      <div class="node hl"><b>Підтвердження людиною</b><span>чернетка ≠ факт: без підтвердження запис не рахується</span></div>
+    </div>
+
+    <div class="branch-label">Сховища</div>
+    <div class="flow-row">
+      <div class="node store"><b>Текстовий індекс</b><span>повні тексти, порізані на розділи · BM25 з лематизацією → цитати</span></div>
+      <div class="node store"><b>Таблиця фактів · SQLite</b><span>хто/де/коли + довідники · кожен запис: джерело + статус чернетка/підтверджено</span></div>
+    </div>
+
+    <div class="branch-label">Половина 2 · від питання до відповіді</div>
+    <div class="flow-row">
+      <div class="node"><b>Питання людини</b><span>розмовна українська, без термінології</span></div>
+      <div class="arrow">→</div>
+      <div class="node hl"><b>Маршрутизатор</b><span>один виклик моделі: який із 4 механізмів</span></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>Відповідь + джерела</b><span>цитата/записи · позначка чернеток · «факт» окремо від «висновку моделі»</span></div>
+    </div>
+
+    <div class="branch-label">Чотири механізми відповіді</div>
+    <div class="routes">
+      <div class="route">
+        <b>(а) Цитата</b>
+        <span>«Скільки днів відпустки?» — відповідь є в наказі дослівно.</span>
+        <div class="src">текстовий індекс → цитата + пункт</div>
+      </div>
+      <div class="route">
+        <b>(б) Підрахунок</b>
+        <span>«Хто на місці 14.08?» — рахує база, не модель. Модель лише формує запит.</span>
+        <div class="src">таблиця фактів → результат + записи</div>
+      </div>
+      <div class="route">
+        <b>(в) Довідка</b>
+        <span>«Яка ЕПР у Шахеда?» — властивість обʼєкта з довідникової таблиці.</span>
+        <div class="src">довідник → значення + джерело</div>
+      </div>
+      <div class="route">
+        <b>(г) Діагностика</b>
+        <span>«Радар не працює» — міркування поверх знайдених процедур, діалогом: симптом → перевірка → причина.</span>
+        <div class="src">індекс (процедури) + міркування моделі</div>
+      </div>
+    </div>
+  </div>
+
+  <p><strong>Відмова — не дешевий вихід:</strong> перш ніж сказати «не знайшла», маршрутизатор зобовʼязаний
+  спробувати не один механізм із чотирьох. Питання, що не знайшлось у тексті, перевіряється як підрахунок.</p>
+</section>
+
+<!-- ===================== KEY NODES ===================== -->
+<section>
+  <h2>Варіанти по ключових вузлах</h2>
+  <p class="h2-note">По кожному вузлу — реалістичні варіанти і пряма рекомендація.</p>
+
+  <h3>Пошук по тексту</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Варіант</th><th>Оцінка</th><th>Суть</th></tr>
+      <tr>
+        <td class="em">BM25 + переформулювання запиту</td>
+        <td><span class="pill pill-ok">на демо</span></td>
+        <td>Модель переписує «вайфай не пускає» в термінологію документів, далі BM25 по лематизованому тексту. Нуль нових компонентів, працює на найслабшій машині.</td>
+      </tr>
+      <tr>
+        <td class="em">Гібрид: BM25 + embedding 0.6B</td>
+        <td><span class="pill pill-warn">після демо</span></td>
+        <td>Закриває розрив словників без вгадування. bge-m3 (Apache 2.0) або pplx-embed-0.6b (MIT), CPU достатньо. Векторна база не потрібна — перебір у памʼяті.</td>
+      </tr>
+      <tr>
+        <td class="em">Лише векторний</td>
+        <td><span class="pill pill-risk">ні</span></td>
+        <td>Програє на точних збігах: номери наказів, дати, прізвища.</td>
+      </tr>
+    </table>
+  </div>
+
+  <h3>Генеративна модель</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Варіант</th><th>Ліцензія</th><th>Оцінка</th></tr>
+      <tr>
+        <td class="em">MamayLM-Gemma-3-12B <span style="font-weight:400">(стоїть зараз)</span></td>
+        <td><span class="pill pill-warn">Gemma Terms · ризик</span></td>
+        <td>Найкраща українська з перевірених; її ж взяла команда 2-го місця UNLP 2026. Кастомна ліцензія з use restrictions — за критерієм брифу кандидат на блокер. На демо лишити, далі — юрперевірка.</td>
+      </tr>
+      <tr>
+        <td class="em">Lapa LLM</td>
+        <td><span class="pill pill-warn">успадковує Gemma</span></td>
+        <td>Український токенізатор: у ~1.5 раза менше обчислень на українському тексті — швидша на слабкому залізі. База та сама Gemma-3-12B, ліцензійне питання те саме.</td>
+      </tr>
+      <tr>
+        <td class="em">Qwen3-14B</td>
+        <td><span class="pill pill-ok">Apache 2.0</span></td>
+        <td>Ліцензійно чистий запасний варіант. Українська очікувано слабша; є вбудований режим міркування — плюс для 12/16 питань. Прогнати на 16 еталонних питаннях до перемикання.</td>
+      </tr>
+    </table>
+  </div>
+
+  <h3>Одиниця індексу</h3>
+  <p><strong>Індексувати пункт — повертати розділ цілком</strong> (parent-document retrieval).
+  Пошук влучає точно, а процедура ніколи не ріжеться посередині: «крок 3» без «кроку 1» —
+  технічно правильна, але шкідлива відповідь. Фрагмент типу «процедура» — атомарний, не ділиться.
+  Різка по 500 символів зі статті UNLP оптимальна під їхню метрику, під нашу задачу — ні.</p>
+</section>
+
+<!-- ===================== HARDWARE ===================== -->
+<section>
+  <h2>Сходинка по залізу</h2>
+  <p class="h2-note">Конфігурації чотирьох машин невідомі, тому пороги — по памʼяті.</p>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Сходинка</th><th>Що працює</th><th>Швидкість</th><th>Чим платить</th></tr>
+      <tr>
+        <td class="em">1 · без GPU, ~8 ГБ</td>
+        <td>BM25 повністю; генерація — лише 4B у 4-бітному кванті (~3 ГБ); без ембеддингів</td>
+        <td>одиниці ток/с, відповідь — десятки секунд</td>
+        <td>міркування 4B помітно слабше — страждає тип (г); коротший контекст</td>
+      </tr>
+      <tr>
+        <td class="em">2 · ноутбук 16–32 ГБ<br><span class="pill pill-ok">демо-ціль</span></td>
+        <td>повний контур: 12B q4 (~7–8 ГБ) через Ollama, embedding 0.6B на CPU, обидва сховища</td>
+        <td>~10–25 ток/с на Apple Silicon, відповідь — секунди</td>
+        <td>невеликі втрати якості від кванту; великі контексти сповільнюють</td>
+      </tr>
+      <tr>
+        <td class="em">3 · GPU 24 ГБ+</td>
+        <td>12B без агресивного кванту або 30B-клас; реранкер; паралельні користувачі</td>
+        <td>десятки ток/с</td>
+        <td>на демо не покажеш — такого заліза серед чотирьох машин, найімовірніше, немає</td>
+      </tr>
+    </table>
+  </div>
+  <p>Калібрування, що це реально: команда UNLP ганяла повний гібридний пошук + 12B у 4-бітному GGUF
+  на одній P100 (16 ГБ, 2016 рік) у жорсткому ліміті часу.</p>
+</section>
+
+<!-- ===================== 8 QUESTIONS ===================== -->
+<section>
+  <h2>Вісім питань — вісім відповідей</h2>
+  <p class="h2-note">Розгортаються. Повні версії — у research-blind-run.md.</p>
+
+  <details>
+    <summary><span class="qn">1</span>Чим шукати <span class="verdict">— BM25 з лематизацією; ембеддинги другим кроком</span></summary>
+    <div class="qa-body">
+      <p>Проблема на десятках документів — не масштаб, а розрив словників між розмовним питанням
+      і канцелярським текстом. Його закриває переформулювання запиту моделлю (без нових компонентів)
+      або гібрид з embedding-моделлю. Порядок: BM25 + переформулювання → якщо 16 еталонних питань
+      показують промахи пошуку — додати ембеддинги.</p>
+      <p>Деталь: у SQLite FTS5 немає українського стемера — лематизувати треба на індексації
+      (pymorphy3 / Stanza), не покладатись на вбудований токенізатор.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">2</span>Чи потрібен реранкер <span class="verdict">— ні на цьому масштабі</span></summary>
+    <div class="qa-body">
+      <p>Окупається, коли кандидатів більше, ніж влазить у контекст генератора, і серед них шум —
+      на практиці сотні-тисячі документів. У нас топ-5 після BM25 цілком їде в контекст.
+      Публічного порога «з N документів +X%» не існує. Якщо знадобиться: bge-reranker-v2-m3 (Apache 2.0).
+      <strong>jina-reranker-v3 — CC-BY-NC, для замовника блокер.</strong></p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">3</span>Embedding-модель <span class="verdict">— необовʼязкова; якщо брати, то малу</span></summary>
+    <div class="qa-body">
+      <p>Її функцію — зіставити питання і текст за змістом — на нашому масштабі дешевше виконує
+      переформулювання запиту. Якщо додавати: bge-m3 (Apache 2.0) або pplx-embed-context-0.6b (MIT),
+      обидві на CPU. Векторна база не потрібна — на тисячах векторів вистачає перебору в памʼяті.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">4</span>Одиниця індексу <span class="verdict">— індексувати пункт, повертати розділ</span></summary>
+    <div class="qa-body">
+      <p>Документ цілком — губиться точне місце цитати. Голий абзац — рветься процедура.
+      Parent-document retrieval бере краще з обох: точне влучання пошуку, цілісний розділ у контексті.
+      Правило: фрагмент типу «процедура» атомарний. Платимо звʼязком пункт→розділ на індексації
+      і більшим контекстом на запит.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">5</span>Питання без відповіді в документах (12/16) <span class="verdict">— міркування моделі + три огорожі</span></summary>
+    <div class="qa-body">
+      <p>Чесно: замінити міркування моделі нічим не можна, але можна обгородити.
+      <strong>(1)</strong> Кожне твердження або має джерело, або позначене «висновок моделі».
+      <strong>(2)</strong> Міркувати поверх знайдених процедур і регламентів, не з повітря.
+      <strong>(3)</strong> Діагностика — діалог («перевірте X; якщо працює — Y»), а не вердикт з першої спроби.</p>
+      <p>Наслідок для вибору моделі: якість на цих 12 питаннях визначає сила міркування — прогін
+      16 еталонних питань на кандидатах моделей — найінформативніший безкоштовний тест.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">6</span>Коли перепитати <span class="verdict">— лише якщо уточнення змінює результат; ліміт 1</span></summary>
+    <div class="qa-body">
+      <p>«Хто на місці 14.08?» без підрозділу — результат різний для різних рот → одне уточнення
+      виправдане. Якщо розумне припущення одне — відповідати одразу, назвавши його першим рядком:
+      «Припускаю, що йдеться про щорічну відпустку». Після одного уточнення — відповідь із
+      припущенням або чесна відмова. Виняток — діагностика: там покрокові питання є самим
+      механізмом, допустимо 2–3.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">7</span>Чотири машини <span class="verdict">— не розносити систему, розносити роботу</span></summary>
+    <div class="qa-body">
+      <p>Система вміщається на одній машині сходинки 2. Клієнт-сервер по мережі на офлайн-демо —
+      ризик без виграшу. Кожна машина несе повний стек, а люди діляться шарами через файли-контракти:
+      вхід документа / сховища + запити / маршрутизатор + чат / збірка + прогін 16 питань.
+      Зліпок сховищ (SQLite + розібрані тексти) лежить фікстурою в репозиторії — кожен показує
+      свій шматок незалежно. macOS/Windows не заважає: весь стек працює на обох.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">8</span>Що ламається першим на тисячах документів <span class="verdict">— людське підтвердження, не код</span></summary>
+    <div class="qa-body">
+      <p>У порядку настання: <strong>(1)</strong> черга підтвердження чернеток людиною — ламається процес,
+      не техніка; знімається пріоритезацією і порогом упевненості OCR. <strong>(2)</strong> повне
+      переіндексування — потрібна інкрементальність. <strong>(3)</strong> точність пошуку — саме тут
+      зʼявляється сенс у реранкері й ембеддингах. <strong>(4)</strong> схема таблиці фактів — нові типи
+      документів вимагають міграцій. Контекст і швидкість генерації від росту корпусу прямо не страждають.</p>
+    </div>
+  </details>
+</section>
+
+<!-- ===================== 2 DAYS ===================== -->
+<section>
+  <h2>Що збирається за два дні однією людиною</h2>
+  <div class="cards">
+    <div class="card">
+      <span class="tag tag-ok">Влазить</span>
+      <b>Рівно обсяг демо</b>
+      <span>Синтетичний корпус (генератор є) → BM25-індекс → таблиця фактів у SQLite зі статусом чернетка/підтверджено → маршрутизатор промптом на MamayLM (стоїть) → цитата з джерелом для нормативного документа → підрахунок через 2–3 шаблонні запити → чат на Gradio.</span>
+    </div>
+    <div class="card">
+      <span class="tag tag-warn">Не влазить — і не треба</span>
+      <b>Все, що після демо</b>
+      <span>Ембеддинги і гібрид, реранкер, повноцінний text-to-SQL, інтерфейс підтвердження чернеток (на демо — руками в базі), діалогова діагностика повним циклом (на демо — одна показова гілка).</span>
+    </div>
+  </div>
+  <p><strong>Умова, без якої два дні не спрацюють:</strong> усе викачане заздалегідь, і повний прогін
+  зроблено з фізично вимкненою мережею щонайменше за день до заходу.</p>
+</section>
+
+<!-- ===================== RISKS ===================== -->
+<section>
+  <h2>Три найбільші ризики</h2>
+  <div class="risk-block">
+    <b>1 · Стеля міркування локальної 12B-моделі на 12/16 питань</b>
+    <div class="fix">Головна ставка проєкту: більшість оцінюваних питань вирішує модель, не архітектура.
+    <strong>Знімає:</strong> ранній прогін 16 еталонних питань на кандидатах; діалогова діагностика по процедурах;
+    розділення «факт / висновок моделі», яке робить неідеальне міркування безпечним.</div>
+  </div>
+  <div class="risk-block">
+    <b>2 · Ліцензія генеративної моделі</b>
+    <div class="fix">MamayLM і Lapa стоять на Gemma 3 — кастомна ліцензія з політикою заборонених
+    використань, яку Google може оновлювати. <strong>Знімає:</strong> юрперевірка до передачі замовнику;
+    запасний Qwen3-14B (Apache 2.0), прогнаний на тих самих 16 питаннях заздалегідь.</div>
+  </div>
+  <div class="risk-block">
+    <b>3 · Офлайн-демо падає на прихованій мережевій залежності</b>
+    <div class="fix">Типовий збій — бібліотека, що на першому запуску тягне токенізатор чи шрифт.
+    <strong>Знімає:</strong> генеральний прогін з вимкненим Wi-Fi на самій демо-машині напередодні;
+    запасна машина сходинки 1 із заготовленою 4B-моделлю.</div>
+  </div>
+</section>
+
+<!-- ===================== PAPER ===================== -->
+<section>
+  <h2>Стаття UNLP: що взято, що відкинуто</h2>
+  <p class="h2-note">«An End-to-End Ukrainian RAG for Local Deployment» (arXiv:2604.22095), 2-ге місце UNLP 2026. Прочитана повністю. Код відкритий; публікація ваг файнтюну явно не заявлена.</p>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Взято</th><th>Відкинуто — і чому</th></tr>
+      <tr>
+        <td>Стек «гібридний пошук + 12B у 4-бітному GGUF» живе на GPU 16 ГБ — калібрує сходинку заліза</td>
+        <td>Різка по 500 символів — під їхню метрику «вгадай сторінку», у нас рве процедури</td>
+      </tr>
+      <tr>
+        <td>Лематизація + українські стоп-слова перед BM25 — дешева критична деталь</td>
+        <td>Реранкер над топ-8 — на наших десятках документів зайвий вузол</td>
+      </tr>
+      <tr>
+        <td>На малому корпусі лексичний і векторний пошук здебільшого збігаються в топ-1 — аргумент «BM25 спершу»</td>
+        <td>jina-reranker-v3 — CC-BY-NC, блокер незалежно від якості</td>
+      </tr>
+      <tr>
+        <td>Незалежний вибір MamayLM — зовнішнє підтвердження якості моделі українською</td>
+        <td>LoRA-файнтюн на 7000 питань — за чотири дні не окупається; їхня задача не містить наших типів (б) і (г) і теми відмови</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<div class="footnote">
+  Сліпий прогін за брифом <code>brief-blind.md</code> · повний текст із джерелами під кожне число —
+  <code>research-blind-run.md</code> у цій же папці · docs/research/2026-08-11_blind-architecture-design/
+</div>
+
+</main>
+</body>
+</html>

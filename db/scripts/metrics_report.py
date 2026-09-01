@@ -1,0 +1,434 @@
+"""Метрики нормативного шляху й бази -- ті, що я можу ДОВЕСТИ, і в тому вигляді,
+у якому їх можна поставити на сторінку.
+
+Запуск:
+    python db/scripts/metrics_report.py                    # без моделі: 5 і 6
+    python db/scripts/metrics_report.py --with-llm         # усі, ~6 хв
+    python db/scripts/metrics_report.py --out data/eval/normative-metrics.json
+
+## Навіщо саме ці числа
+
+Домовлено з Андрієм 27.08: сторінка мусить показувати ЦІННІСТЬ, а не інвентар.
+«1879 фактів витягнуто» каже, скільки чогось лежить у базі, і нічого не каже
+про те, чи бот комусь допоміг.
+
+Метрика №1 («питань закрито з першого разу») тут НЕ рахується навмисно: для неї
+потрібен список питань, написаний людиною, яка не крутила ні промптів, ні
+каталогу, ні пошуку. Чекаємо на Колю. Усе, що я порахую сам собі, буде
+підгонкою -- я на цьому вже двічі спіймався за один день.
+
+## Правило підписів, яке тут витримується
+
+Кожне число віддається разом із полем `means` -- рівно тим реченням, яке має
+стояти на екрані, -- і полем `does_not_prove`. Причина: аудит сторінки 27.08
+показав, що три з п'яти відсотків були перебільшені НЕ через помилку в запиті,
+а через підпис, який обіцяв більше, ніж число означає.
+
+## Що кожна метрика означає й чого не означає
+
+**2. Відмова на питання поза корпусом.** Скільком питанням, відповіді на які в
+корпусі немає, ланцюг сказав «не знайдено» замість вигадати. НЕ доводить, що на
+решту питань відповідь правильна.
+
+**3. Джерело, що сходиться.** Частка питань, де знайдено ДОСЛІВНУ цитату з тієї
+одиниці, яку призначила істина. Дослівність перевіряється підрядком, одиниця --
+відпечатком, згенерованим машиною з тексту бази. НЕ доводить, що цитата
+відповідає на питання по суті: це б вимагало людського судження.
+
+**5. Документів, яким не потрібна людина.** Визначення «чистого» -- Ані (28.08):
+немає непідтверджених полів І немає відкритого завдання, крім вибіркової
+перевірки. Знаменник -- мій: лише документи, з яких факти справді взялись.
+
+Ця метрика вже двічі була неправильна, і обидва рази помилку знайшов не я:
+
+* перша редакція рахувала «204 мінус документи з відкритим завданням» = 173.
+  Андрій спитав «а як ти це рахував», і виявилось, що 111 із тих 173 чисті
+  ЛИШЕ тому, що завдання закрив мій власний скрипт правилом зі штатки. Тобто
+  число на 87% складалося з моєї роботи над чергою, а подавалось як якість
+  пайплайна. Плюс у знаменник входили 44 нормативні документи, у яких
+  підтверджувати нема чого;
+* друга редакція не дивилась на СТАТУС фактів, тому документ із чернетками
+  вважався чистим. Умову взято в Ані.
+
+НЕ означає «перевірено людиною»: у `review_log` немає ЖОДНОГО людського запису.
+Означає «наш пайплайн не позначив тут нічого підозрілого» -- та сама межа, що в
+звірці каталогу («база проти нашого ж витягу», не проти правди).
+
+Два числа, які треба тримати поруч: 130 завдань `new_person` закрив МІЙ СКРИПТ
+(резолюція `matched_by_roster`), а не людина. І документів із фактами 153 по
+`fact_sources` проти 147 по `facts.source_doc_id`: другий файл пари .docx/.pdf
+прикріплюється зведенням дублікатів як ДОДАТКОВЕ джерело -- він оброблений, але
+не первинний.
+
+**6. Прилади зелені.** Не цінність, а страховка: скільки моїх самотестів
+проходить. Кожен -- на точне значення, не на діапазон (мутаційний аудит Ані
+довів, що тест на діапазон не рейка).
+"""
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import psycopg  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+EVAL = os.path.join(ROOT, "eval", "retrieval")
+
+
+def m5_documents_without_human(cur):
+    """Три групи, а НЕ одне число. Перша редакція цієї метрики була неправильна
+    двічі, і помилку знайшов Андрій питанням «а як ти це рахував».
+
+    Було: 204 мінус документи з відкритим завданням = 173. Дві діри:
+
+    1. **знаменник.** У 204 входять 44 нормативні документи, які фактів про
+       людей не дають і не мусять. Метрика має сенс лише там, де факти
+       ОЧІКУЮТЬСЯ: leave + deployment = 158;
+    2. **числитель.** Із 173 «чистих» 111 були чисті тільки тому, що завдання
+       закрив МІЙ СКРИПТ правилом зі штатки. Тобто число на 87% складалося з
+       моєї власної роботи над чергою, а подавалось як якість пайплайна.
+
+    Тому тут три групи, і кожна означає різне:
+
+      A -- нічого ніколи не позначалось: пайплайн не знайшов, до чого чіплятись;
+      B -- завдання було й закрите ПРАВИЛОМ (особа зійшлася зі штаткою). Це
+           справжня перевірка, але автоматична: людина не дивилась;
+      C -- відкрите завдання: чекає людини.
+
+    Плюс окремо -- документи без ЖОДНОГО факту. Такий документ у першій
+    редакції потрапляв у «чисті», хоч він найгірший випадок: пайплайн не витяг
+    нічого, і це виглядає точно як добре оброблений документ.
+    """
+    # Визначення «чистого» взяте в Ані (28.08) -- воно строгіше за моє першу
+    # редакцію: я не дивився на СТАТУС фактів узагалі, тому документ із
+    # чернетками вважався чистим. Її умова: немає непідтверджених полів І
+    # немає відкритого завдання, крім вибіркової перевірки (`qa_sample` --
+    # це завдання, яке ми створюємо самі, а не ознака проблеми документа).
+    #
+    # Знаменник -- мій: лише документи, з яких факти справді взялись. Її
+    # 179/204 відтворюється точно, але серед 204 є 51 документ, у якому нема
+    # чого підтверджувати (нормативка), і вони йдуть у числитель безкоштовно.
+    #
+    # «Документи з фактами» рахуються по fact_sources, а не по
+    # facts.source_doc_id. Різниця -- 6 документів: другий файл пари
+    # .docx/.pdf прикріплюється зведенням дублікатів як ДОДАТКОВЕ джерело
+    # того самого факту. Він оброблений успішно, просто не первинний. За
+    # source_doc_id виходить 147 (число Ані), по fact_sources -- 153.
+    cur.execute("""
+        WITH з_фактами AS (
+            SELECT DISTINCT document_id AS id FROM fact_sources),
+        блокує AS (
+            SELECT DISTINCT document_id FROM review_queue
+             WHERE resolved_at IS NULL AND queue_type <> 'qa_sample'),
+        має_чернетку AS (
+            SELECT DISTINCT fs.document_id FROM fact_sources fs
+              JOIN facts f ON f.id = fs.fact_id WHERE f.status = 'unconfirmed'),
+        за_правилом AS (
+            SELECT DISTINCT document_id FROM review_queue
+             WHERE resolved_at IS NOT NULL AND resolution = 'matched_by_roster')
+        SELECT
+         (SELECT count(*) FROM з_фактами),
+         (SELECT count(*) FROM з_фактами z
+           WHERE z.id NOT IN (SELECT document_id FROM блокує)
+             AND z.id NOT IN (SELECT document_id FROM має_чернетку)
+             AND z.id NOT IN (SELECT document_id FROM за_правилом)),
+         (SELECT count(*) FROM з_фактами z
+           WHERE z.id NOT IN (SELECT document_id FROM блокує)
+             AND z.id NOT IN (SELECT document_id FROM має_чернетку)
+             AND z.id IN (SELECT document_id FROM за_правилом)),
+         (SELECT count(*) FROM з_фактами z
+           WHERE z.id IN (SELECT document_id FROM блокує)
+              OR z.id IN (SELECT document_id FROM має_чернетку)),
+         (SELECT count(*) FROM documents d WHERE NOT EXISTS
+           (SELECT 1 FROM fact_sources fs WHERE fs.document_id = d.id)),
+         (SELECT count(DISTINCT source_doc_id) FROM facts),
+         (SELECT count(*) FROM documents),
+         (SELECT count(*) FROM documents d
+           WHERE d.id NOT IN (SELECT document_id FROM блокує)
+             AND d.id NOT IN (SELECT document_id FROM має_чернетку))
+    """)
+    (total, a_clean, b_rule, c_pending, no_facts,
+     by_source_doc_id, all_docs, clean_over_all) = cur.fetchone()
+    cur.execute("""
+        SELECT count(*) FROM review_log
+         WHERE changed_by NOT IN ('ai_secretary_loader', 'dedupe_existing_facts',
+                                  'reconcile_roster_status')
+    """)
+    human_edits = cur.fetchone()[0]
+    clean = a_clean + b_rule
+    return {
+        "value": clean,
+        "of": total,
+        "means": f"{clean} із {total} документів, з яких ми взяли факти, "
+                 f"внесено без питань до людини: {a_clean} не викликали жодного "
+                 f"зауваження, ще {b_rule} мали зауваження, зняте автоматичною "
+                 f"звіркою зі штаткою. {c_pending} мають чернетку або відкрите "
+                 "завдання",
+        "does_not_prove": "НЕ означає «перевірено людиною»: у журналі змін "
+                          f"немає жодного людського запису ({human_edits}), і "
+                          f"більшість числа ({b_rule} з {clean}) -- завдання, "
+                          "закриті правилом зі штатки, тобто автоматично. "
+                          f"Знаменник -- {total} документів із фактами, а не "
+                          f"всі {all_docs}: у решти ({no_facts}, з них "
+                          "нормативка) підтверджувати нема чого, і вони йшли б "
+                          "у числитель безкоштовно.",
+        "detail": {"A_never_flagged": a_clean,
+                   "B_closed_by_roster_rule": b_rule,
+                   "C_draft_or_open_task": c_pending,
+                   "documents_with_no_facts_at_all": no_facts,
+                   "human_edits_in_review_log": human_edits,
+                   "denominator": "документи з фактами (fact_sources), "
+                                  f"{total} із {all_docs}",
+                   "same_definition_over_all_documents":
+                       f"{clean_over_all} із {all_docs} -- те саме визначення по ВСІХ документах (число Ані). Відсоток майже той самий, але твердження інше: сюди входять документи, у яких нема чого підтверджувати",
+                   "documents_with_facts_by_source_doc_id": by_source_doc_id,
+                   "why_two_counts": (
+                       f"{by_source_doc_id} за facts.source_doc_id проти "
+                       f"{total} за fact_sources: другий файл пари .docx/.pdf "
+                       "прикріплюється зведенням дублікатів як ДОДАТКОВЕ "
+                       "джерело того самого факту -- він оброблений, але не "
+                       "первинний"),
+                   "definition": "немає непідтверджених полів І немає "
+                                 "відкритого завдання, крім qa_sample "
+                                 "(визначення Ані, 28.08)"},
+    }
+
+
+def m6_instruments(dsn):
+    """Самотести, кожен на точне значення. Модель не потрібна."""
+    checks = [
+        ("резолвер номерів документів",
+         [sys.executable, os.path.join("db", "scripts", "resolve_identifier.py"),
+          "--self-test"]),
+        ("хронологія витіснення фактів",
+         [sys.executable, os.path.join("db", "scripts",
+                                       "test_insert_fact_chronology.py")]),
+    ]
+    results = []
+    for name, cmd in checks:
+        try:
+            r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                               timeout=600, encoding="utf-8", errors="replace")
+            ok = r.returncode == 0
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            ok, r = False, None
+            print(f"   {name}: не запустився ({exc})")
+        results.append({"name": name, "ok": bool(ok)})
+        print(f"   {'OK    ' if ok else 'ПРОВАЛ'} {name}")
+    green = sum(1 for x in results if x["ok"])
+    return {
+        "value": green,
+        "of": len(results),
+        "means": f"{green} із {len(results)} приладів бази проходить",
+        "does_not_prove": "не про якість відповідей: це страховка, що вчорашнє "
+                          "не зламалось. Кожен тест -- на точне значення, не на "
+                          "діапазон.",
+        "detail": {"checks": results},
+    }
+
+
+def m7_chat_dates():
+    """Чи ще живий дефект дат у чаті -- окремим індикатором, не «приладом».
+
+    Це не мій код і не моя якість: це стан ЇЇ файла. Але число тут доречне, бо
+    воно єдине на сторінці показує, чи застосовано патч: до застосування
+    «з 2026-05-10 по 2026-10-10» дає зріз на першій даті (сім разів із семи в
+    перевірці перед демо), після -- період.
+
+    Перевіряється проти ЖИВОГО файла, не проти гілки: на сторінці має стояти
+    стан того, що зараз відповідає людям.
+    """
+    tiers = os.path.expanduser(
+        "~/anya/ai-secretary/demos/upload_app/chat_gradio/tiers.py")
+    if not os.path.exists(tiers):
+        return {"value": None, "of": 8,
+                "means": "живий файл чата недоступний -- не перевірено",
+                "does_not_prove": "", "detail": {"tiers_path": tiers}}
+    r = subprocess.run(
+        [sys.executable, os.path.join("db", "scripts", "test_extract_dates.py"),
+         "--tiers", tiers],
+        cwd=ROOT, capture_output=True, text=True, timeout=600,
+        encoding="utf-8", errors="replace")
+    ok_count = r.stdout.count("OK  ")
+    fixed = r.returncode == 0
+    print(f"   {'ВИПРАВЛЕНО' if fixed else 'ЩЕ ЖИВИЙ'}: {ok_count} із 8 "
+          "випадків розбирається правильно")
+    return {
+        "value": ok_count, "of": 8,
+        "means": (f"{ok_count} із 8 способів написати дату чат розбирає "
+                  "правильно" + ("" if fixed else " -- патч ще не застосований")),
+        "does_not_prove": "перевіряються рівно ті вісім випадків, що були у "
+                          "звіті перед демо, а не всі можливі формати дат.",
+        "detail": {"patch_applied": fixed},
+    }
+
+
+def _read_set(path):
+    rows = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            p = line.rstrip("\n").split("\t")
+            rows.append(p)
+    return rows
+
+
+def m2_and_m3(args):
+    """Обидві метрики через один ланцюг: видача -> реранкер -> ворота."""
+    import quote_with_llm_test as G
+    import resolve_identifier as R
+    import search_units_test as SU
+    from build_units_test import dsn, load_encoder
+    from measure_rerank_lift import RERANK_CHARS, load_reranker
+
+    encode, rescore = load_encoder(), load_reranker()
+
+    off_topic = [p[1] for p in _read_set(os.path.join(EVAL, "abstain_v2.tsv"))
+                 if p[0] == "off_topic"]
+    truth = []
+    for name in ("truth_units_v2.tsv", "truth_units_terms.tsv"):
+        path = os.path.join(EVAL, name)
+        if os.path.exists(path):
+            truth += [(p[0], int(p[1]), p[2]) for p in _read_set(path)
+                      if len(p) >= 3]
+
+    import ab_embedding_models as AB
+
+    def chain(cur, q, top=2):
+        """-> (список (одиниця, цитата_дослівна, модель_каже_є))."""
+        res = R.resolve(cur, q)
+        if res["status"] == "absent":
+            return []
+        docs = ([d["id"] for d in res["documents"]]
+                if res["status"] == "resolved" else None)
+        sq = res.get("rest") or q
+        vec = str(encode(["query: " + sq])[0])
+        fused = SU.dedupe_by_text(
+            cur, SU.rrf_merge(SU.lexical(cur, sq, docs=docs),
+                              SU.semantic(cur, vec, docs=docs)),
+            SU.canon_map(cur))
+        if fused:
+            pool = fused[:50]
+            texts = [SU.quote_of(cur, d, b)[0][:RERANK_CHARS]
+                     for (d, b), _m in pool]
+            sc = rescore(q, texts)
+            order = sorted(range(len(sc)), key=lambda j: -sc[j])
+            fused = [pool[j] for j in order] + fused[50:]
+        out = []
+        cache = {}
+        for (doc_id, base), _meta in fused[:top]:
+            title, ident = SU.identity(cur, doc_id, cache)
+            body, _w, _t = SU.quote_of(cur, doc_id, base)
+            data, _u, _dt, _raw, truncated = G.ask(
+                q, title[:70], ident, base[:60], body)
+            if truncated:
+                continue
+            quote = (data.get("quote") or "").strip()
+            exact = bool(quote) and G.norm(" ".join(quote.split())) in G.norm(body)
+            out.append(((doc_id, base), exact, bool(data.get("answers"))))
+        return out
+
+    with psycopg.connect(dsn()) as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL hnsw.ef_search = 200")
+        print("\n2. відмова на питання поза корпусом")
+        refused = 0
+        for q in off_topic:
+            got = chain(cur, q)
+            said_yes = any(a for _u, _e, a in got)
+            refused += not said_yes
+            print(f"   {'відмовився' if not said_yes else 'ВІДПОВІВ (погано)'}"
+                  f"  {q[:62]}")
+
+        # ДОСЛІВНІ ЦИТАТИ: чи показане джерело справжнє (цитата воріт --
+        # підрядок процитованої одиниці). НЕ вимагаємо, щоб адреса збіглася з
+        # істиною: цитата з сусіднього пункту чи додатка теж дослівна, а
+        # каране «інша адреса» -- це строгість набору, не порушення правила.
+        # Провал тут = модель відредагувала цитату (пунктуація, пропуск,
+        # зшивання), і продукт її відкидає. Розклад причин -- у
+        # diagnose_source_failures.py.
+        print("\n3. дослівні цитати з документів")
+        ok3 = 0
+        for q, doc_id, needle in truth:
+            got = chain(cur, q)
+            verbatim = any(exact and answers for _u, exact, answers in got)
+            ok3 += verbatim
+            print(f"   {'дослівно' if verbatim else 'НЕ ДОСЛІВНО'} {q[:62]}")
+
+    m2 = {
+        "value": refused, "of": len(off_topic),
+        "means": f"на {refused} із {len(off_topic)} питань поза корпусом "
+                 "система сказала «не знайдено» замість вигадати",
+        "does_not_prove": "не доводить, що на решту питань відповідь правильна.",
+    }
+    m3 = {
+        "value": ok3, "of": len(truth),
+        "means": f"для {ok3} із {len(truth)} відповідей цитата воріт -- "
+                 "ДОСЛІВНИЙ підрядок процитованого документа",
+        "does_not_prove": "не доводить, що цитата відповідає на питання по "
+                          "суті: це вимагало б людського судження. Доведено "
+                          "лише дослівність. Не-дослівні продукт відкидає й "
+                          "відмовляє -- користувачу вони не показуються.",
+    }
+    return m2, m3
+
+
+def _unit_ids(cur, key):
+    """id одиниць логічного уривка (документ, мітка)."""
+    doc_id, base = key
+    cur.execute("SELECT id FROM document_units WHERE document_id = %s "
+                "AND base_label = %s", (doc_id, base))
+    return {r[0] for r in cur.fetchall()}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--with-llm", action="store_true",
+                    help="рахувати метрики 2 і 3 (потрібна піднята модель)")
+    ap.add_argument("--out", default="")
+    ap.add_argument("--today", default=datetime.date.today().isoformat())
+    args = ap.parse_args()
+
+    from build_units_test import dsn
+    report = {"measured_at": args.today, "metrics": {}}
+
+    with psycopg.connect(dsn()) as conn, conn.cursor() as cur:
+        print("5. документів, яким не потрібна людина")
+        m5 = m5_documents_without_human(cur)
+        print(f"   {m5['value']} із {m5['of']}")
+        report["metrics"]["documents_without_human"] = m5
+
+    print("\n6. прилади бази")
+    report["metrics"]["instruments_green"] = m6_instruments(dsn())
+
+    print("\n7. дефект дат у чаті")
+    report["metrics"]["chat_date_defect"] = m7_chat_dates()
+
+    if args.with_llm:
+        m2, m3 = m2_and_m3(args)
+        report["metrics"]["refused_outside_corpus"] = m2
+        report["metrics"]["verbatim_quotes"] = m3
+    else:
+        print("\n2 і 3 пропущено (нема --with-llm)")
+
+    print(f"\n{'=' * 70}")
+    for key, m in report["metrics"].items():
+        print(f"{key}: {m['value']}/{m['of']}")
+        print(f"   на екран: {m['means']}")
+        print(f"   не доводить: {m['does_not_prove']}")
+
+    if args.out:
+        path = args.out if os.path.isabs(args.out) else os.path.join(ROOT, args.out)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(report, fh, ensure_ascii=False, indent=2)
+        print(f"\nзаписано {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
