@@ -229,7 +229,7 @@
 ## 8. Нюанси інтеграції з нашою (milidoc) БД — виявлено під час пробного прогону
 
 Це не баги пайплайна per se, а розбіжності на межі "AI-secretary output" ↔
-"наша Postgres-схема", з якими зіткнувся [scripts/load_ai_secretary_output.py](scripts/load_ai_secretary_output.py:1):
+"наша Postgres-схема", з якими зіткнувся [`db/scripts/load_ai_secretary_output.py`](../../db/scripts/load_ai_secretary_output.py):
 
 - `documents.status` у нашій БД — стадія КОНВЕЄРА (`uploaded → ... →
   extracted/failed`), а `meta.status` пайплайна — статус ПІДТВЕРДЖЕННЯ
