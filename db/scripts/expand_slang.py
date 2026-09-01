@@ -68,6 +68,15 @@ LLM = os.environ.get("LLM_URL", "http://127.0.0.1:8081/v1/chat/completions")
 # рідкісному слові: «бездротова мережа» має 1 збіг і вказує точно.
 MAX_HITS = 25
 
+# Чому тут таблиця лишається в замовчуванні, а в `search_units_test.SYNONYMS`
+# -- ні. Там таблиця вмикала ФІЧУ, зміряно шкідливу, тому замовчування зняли.
+# Тут таблиця -- це КЕШ відповідей моделі, який цей самий скрипт і створює
+# (`CACHE_DDL` нижче). Порожнє замовчування означало б «питай модель заново
+# щоразу», тобто плату за кожен прогін замість вимкненої фічи. Це різні речі.
+#
+# Спільне в них інше -- ТИХА деградація, і саме її прибрано: `cached()`
+# викликається в циклі по кожному невідомому слову, тому зламаний кеш раніше
+# не давав ЖОДНОГО повідомлення й тихо перепитував модель кожен прогін.
 CACHE_TABLE = os.environ.get("SLANG_TABLE", "andriy_test.slang_terms")
 
 CACHE_DDL = f"""
@@ -162,6 +171,33 @@ def ask_model(query, words, max_tokens=400):
     return data.get("варіанти") or data, r.get("usage", {}), time.time() - t0
 
 
+def check_cache(cur):
+    """Перевірка готовності кешу -> текст стану. Кидає на помилці КОНФІГУРАЦІЇ.
+
+    Розрізняє два випадки, які раніше зливались в одне тихе `return None`:
+
+    * таблиці ще НЕМА -- нормально, це перший прогін, `remember()` її створить;
+    * таблиця є, але не читається (немає прав, не та схема) -- помилка
+      конфігурації. Вона мусить бути видна ОДИН РАЗ на старті, а не глушитись
+      на кожному слові в циклі.
+    """
+    try:
+        cur.execute(f"SELECT count(*) FROM {CACHE_TABLE}")
+        (n,) = cur.fetchone()
+    except psycopg.errors.UndefinedTable:
+        cur.connection.rollback()
+        return f"кеш {CACHE_TABLE}: таблиці ще немає, буде створена"
+    except psycopg.Error as e:
+        cur.connection.rollback()
+        raise RuntimeError(
+            f"кеш {CACHE_TABLE} існує, але не читається: "
+            f"{str(e).splitlines()[0][:120]}. Це помилка конфігурації: або "
+            f"вкажіть іншу таблицю через SLANG_TABLE, або дайте доступ. Без "
+            f"кешу скрипт перепитував би модель на кожному прогоні."
+        ) from e
+    return f"кеш {CACHE_TABLE}: {n} рядків"
+
+
 def cached(cur, word):
     """Уже питали про це слово? -> список (термін, збіги, залишено) або None.
 
@@ -175,9 +211,17 @@ def cached(cur, word):
         cur.execute(f"SELECT term, hits, kept FROM {CACHE_TABLE} WHERE word = %s",
                     (word,))
         rows = cur.fetchall()
-    except psycopg.Error:
+    except psycopg.errors.UndefinedTable:
+        # Перший прогін: таблиці ще немає, її створить `remember()`. Це єдиний
+        # випадок, у якому «немає кешу» -- нормальна відповідь, а не поломка.
         cur.connection.rollback()
         return None
+    except psycopg.Error:
+        # Решту не глушимо: доступ перевірено `check_cache()` на старті, тому
+        # помилка ТУТ означає щось неочікуване. Тихе `return None` тут коштувало
+        # виклику моделі на кожне слово кожного прогону -- і не залишало слідів.
+        cur.connection.rollback()
+        raise
     return rows or None
 
 
@@ -191,8 +235,16 @@ def remember(cur, word, rows):
                         (word, term, hits, kept))
         cur.connection.commit()
     except psycopg.Error as e:
+        # Раніше тут була скарга в лог і рух далі. Наслідок тихий і дорогий:
+        # кеш НЕ наповнюється, і наступний прогін питає модель про ті самі
+        # слова знову. Скрипт існує саме щоб цей кеш побудувати, тому невдалий
+        # запис -- це відмова, а не дрібниця.
         cur.connection.rollback()
-        print(f"  [кеш недоступний: {str(e).splitlines()[0][:70]}]")
+        raise RuntimeError(
+            f"не вдалось записати кеш у {CACHE_TABLE}: "
+            f"{str(e).splitlines()[0][:120]}. Потрібні права на CREATE/INSERT "
+            f"або інша таблиця через SLANG_TABLE."
+        ) from e
 
 
 def expand(cur, query, verbose=False):
@@ -272,6 +324,9 @@ def main(argv=None):
     dsn = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://")
     total = {"calls": 0, "s": 0.0}
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        # Стан кешу -- один рядок на старті. Без нього «модель викликалась 40
+        # разів» не відрізнити від «кеш не працює, і це ті самі 12 слів».
+        print(f"[{check_cache(cur)}]")
         for q in questions:
             terms, d = expand(cur, q)
             print(f"\n{'='*78}\n{q}")
