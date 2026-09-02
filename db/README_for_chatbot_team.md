@@ -127,8 +127,8 @@ user: milidoc_readonly   (read-only, саме для таких споживач
 ## 7. Якщо потрібне глибше занурення
 
 - [`../milidoc-project-context.md`](../milidoc-project-context.md) — повний контекст проєкту, технічний стек, рішення й чому.
-- [`../ai-secretary-pipeline-review.md`](../ai-secretary-pipeline-review.md) — рев'ю пайплайна Ані (35 знахідок).
-- [`response_to_example_output.md`](response_to_example_output.md), [`response_to_db_handoff_notes.md`](response_to_db_handoff_notes.md) — історія узгодження контракту БД↔пайплайн, якщо цікаво, чому схема виглядає саме так.
+- `../ai-secretary-pipeline-review.md` (у git не потрапляло) — рев'ю пайплайна Ані (35 знахідок).
+- `response_to_example_output.md`, `response_to_db_handoff_notes.md` (у git не потрапляли) — історія узгодження контракту БД↔пайплайн, якщо цікаво, чому схема виглядає саме так.
 
 ## 8. Що ще НЕ вирішено (щоб не витрачали час на очевидне)
 
