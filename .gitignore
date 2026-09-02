@@ -168,3 +168,8 @@ data/jury-guide.html
 # db/scripts/load_normative_corpus.py за переліком у
 # docs/tasks/2026-08-21_normative-corpus.md. Те саме правило, що для дампів.
 data/eval/samples/normative/downloaded/
+
+# Службові файли MinIO. Сховище прибране 20.08.2026, а його внутрішній стан
+# (.minio.sys/*.meta) ніколи не мав бути в git: це не наші дані, а кеш
+# сервера, який змінюється кожного запуску контейнера.
+data/minio/
