@@ -699,7 +699,7 @@ Python (`extract_dates` уже вміє «наступного дня після
 ## 11. Метрики Андрія на сторінці + його фікс маршрутизації (28.08)
 
 Пакет: `data/eval/andriy-metrics.json` (30 записів) і
-`docs/contracts/2026-08-28_for-anya-metrics-and-routing.md` у гілці
+`docs/DECISIONS.md` (лист прибраний при передачі) у гілці
 `origin/andriy-db`. Формат саме той, що просила: `name`, `value`, `of`,
 `unit`, `as_of`, **`how`** — чим зміряно.
 

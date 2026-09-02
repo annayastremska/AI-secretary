@@ -49,23 +49,15 @@ MIN_LEN = 40
 
 #: Кандидати на видалення -- за групами з docs/tasks/2026-09-01_handover-*.md.
 GROUPS = {
-    "листування": [
-        "docs/contracts/2026-08-11_database-handoff.md",
-        "docs/contracts/2026-08-23_instruction-for-andriy.md",
-        "docs/contracts/2026-08-25_for-anton-vgpu-driver.md",
-        "docs/contracts/2026-08-25_loader-no-person-for-andriy.md",
-        "docs/contracts/2026-08-26_for-andriy-delete-test-documents.md",
-        "docs/contracts/2026-08-26_for-andriy-roster-matching.md",
-        "docs/contracts/2026-08-27_answer-reload-four-documents.md",
-        "docs/contracts/2026-08-27_answer-to-anya-three-tasks.md",
-        "docs/contracts/2026-08-27_for-andriy-grant-normative-schema.md",
-        "docs/contracts/2026-08-27_for-andriy-reload-five-documents.md",
-        "docs/contracts/2026-08-27_for-andriy-stale-queue-task.md",
-        "docs/contracts/2026-08-27_for-anya-chat-followups.md",
-        "docs/contracts/2026-08-27_stats-page-metrics-handover.md",
-        "docs/contracts/2026-08-28_for-andriy-normative-corpus.md",
-        "docs/contracts/2026-08-28_for-anya-metrics-and-routing.md",
-    ],
+    # ГРУПА «ЛИСТУВАННЯ» ЗАКРИТА 01.09.2026: зміст перенесено в
+    # docs/DECISIONS.md, 14 листів видалено, посилання перенаправлені.
+    # Один файл із групи лишився й кандидатом більше не є:
+    # 2026-08-11_database-handoff.md -- це КОНТРАКТ ПОЛІВ, а не лист. Код
+    # цитує його по розділах (pipeline/subject_kind.py: «розд. 4 п.16»,
+    # pipeline/README.md: «розд. 9», fact_type_registry.yaml), тобто видалення
+    # позбавило б ці коментарі змісту. Рівно та помилка, від якої цей прилад
+    # і застерігає: класифікація за шаблоном назви («handoff») проти
+    # класифікації за тим, як файлом користуються.
     "питання до людини": [
         "docs/questions-for-anya.md",
         "docs/tasks/2026-08-27_questions-for-anya-harness.md",
