@@ -152,7 +152,7 @@ middleware покриває). `@app.middleware("http")` не покривав б
 - Тести апки: `python -m pytest demos/upload_app/tests` → **26 passed**.
 - Діфи чотирьох комітів переліком файлів: **лише** `demos/upload_app/**`
   (app.py, chat_gradio/*, tests/*, README.md) і дозволений
-  `docs/tasks/2026-08-24_stage1-progress.md`. Заборонені зони
+  `docs/DECISIONS.md` (робочий файл прибраний при передачі). Заборонені зони
   (`data/eval/**`, `db/migrations/**`, `airflow/**`, зона виконавця-Б) не
   зачеплені.
 

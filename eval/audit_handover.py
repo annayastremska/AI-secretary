@@ -58,50 +58,25 @@ GROUPS = {
     # позбавило б ці коментарі змісту. Рівно та помилка, від якої цей прилад
     # і застерігає: класифікація за шаблоном назви («handoff») проти
     # класифікації за тим, як файлом користуються.
-    "питання до людини": [
-        "docs/questions-for-anya.md",
-        "docs/tasks/2026-08-27_questions-for-anya-harness.md",
-    ],
-    "прогрес і координація": [
-        "docs/tasks/2026-08-24_execution-structure.md",
-        "docs/tasks/2026-08-24_app-chat-worklist.md",
-        "docs/tasks/2026-08-24_stage1-progress.md",
-        "docs/tasks/2026-08-24_stage2-progress.md",
-        "docs/tasks/2026-08-25_stage3-progress.md",
-        "docs/tasks/2026-08-25_stage4-progress.md",
-        "docs/tasks/2026-08-25_waveA-progress.md",
-        "docs/tasks/2026-08-25_waveB-progress.md",
-        "docs/tasks/2026-08-28_plan-vechir.md",
-    ],
-    "сире рев'ю й аудит": [
-        "docs/review-2026-08-22/arch.md",
-        "docs/review-2026-08-22/code.md",
-        "docs/review-2026-08-22/verdicts.md",
-        "docs/audit-2026-08-23/complexity.md",
-        "docs/audit-2026-08-23/hardcoding.md",
-    ],
-    "демо-день": [
-        "docs/demo/access.md",
-        "docs/demo/domain-research.md",
-        "docs/demo-day-questions.md",
-        "docs/demo-day-runbook.md",
-        "docs/presentation-plan.md",
-        "docs/tasks/2026-08-28_demo-day-deck-blocks.md",
-        "docs/tasks/2026-08-29_demo-dialogs.md",
-        "docs/tasks/2026-08-29_pitch-research.md",
-    ],
-    "промпти дослідницьких прогонів": [
-        "docs/research/2026-07-27_document-types-corpus/prompt-v1.md",
-        "docs/research/2026-07-27_document-types-corpus/prompt-v2.md",
-        "docs/research/2026-07-27_document-types-corpus/prompt-changelog.md",
-        "docs/research/2026-07-28_ocr-handwriting-benchmark/prompt.md",
-        "docs/research/2026-07-28_ocr-handwriting-benchmark/prompt-as-sent.md",
-        "docs/research/2026-08-08_embedding-model-selection/prompt-round-1.md",
-        "docs/research/2026-08-08_embedding-model-selection/prompt-round-2-blind.md",
-        "docs/research/2026-08-11_blind-architecture-design/brief-blind.md",
-        "docs/research/2026-08-27_prompt-for-harness-research.md",
-        "docs/research/2026-08-27_context-for-harness-research.md",
-    ],
+    # ЧОТИРИ ГРУПИ ЗАКРИТІ 01.09.2026. Зміст перенесено в docs/DECISIONS.md
+    # (розділи 4, 8-12), 18 файлів видалено, посилання перенаправлені.
+    #
+    # НЕ видалено 16 файлів із цих груп -- і причина та сама, що з
+    # database-handoff: вони не координація, а ВХОДИ й ДОКАЗОВА БАЗА, на яку
+    # спираються ті, що лишаються:
+    #
+    #   review-2026-08-22/{arch,code,verdicts}.md -- доказова база рев'ю. На
+    #       verdicts.md посилається ТЕСТ (eval/tests/test_review_2026_08_22.py),
+    #       а також fixes-*.md, known-weak-spots.md і metrics-and-quality;
+    #   audit-2026-08-23/{complexity,hardcoding}.md -- те, на що спирається
+    #       decisions.md того ж аудиту;
+    #   10 промптів дослідницьких прогонів -- це ВХОДИ раундів, а не
+    #       листування. prompt.md читає run_benchmark.py, решту цитують README
+    #       своїх раундів. Без них раунд не відтворити;
+    #   tasks/2026-08-29_demo-dialogs.md -- вхід eval/probes/run_demo_dialogs.py.
+    #
+    # Класифікація за шаблоном назви («prompt-*», «review/*») дала б протилежну
+    # відповідь. Класифікація за тим, ЯК файлом користуються, -- цю.
 }
 
 
